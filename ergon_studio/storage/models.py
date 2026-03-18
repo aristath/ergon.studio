@@ -116,8 +116,11 @@ class ApprovalRecord:
     created_at: int
     thread_id: str | None = None
     task_id: str | None = None
+    payload_path: Path | None = None
 
     def __post_init__(self) -> None:
+        if self.payload_path is not None and not isinstance(self.payload_path, Path):
+            raise TypeError("payload_path must be a Path or None")
         validate_unix_time(self.created_at, "created_at")
 
 

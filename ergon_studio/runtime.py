@@ -314,6 +314,12 @@ class RuntimeContext:
             if approval.status == "pending"
         ]
 
+    def read_approval_payload(self, approval_id: str) -> dict[str, object] | None:
+        approval = self.approval_store.get_approval(approval_id)
+        if approval is None:
+            raise ValueError(f"unknown approval: {approval_id}")
+        return self.approval_store.read_payload(approval)
+
     def list_agent_ids(self) -> list[str]:
         return sorted(self.registry.agent_definitions.keys())
 
@@ -633,6 +639,7 @@ class RuntimeContext:
         thread_id: str | None = None,
         task_id: str | None = None,
         agent_id: str | None = None,
+        require_approval: bool = True,
     ) -> dict[str, int | str]:
         if created_at is None:
             created_at = int(time.time())
@@ -643,6 +650,35 @@ class RuntimeContext:
         resolved_task_id = task_id if task_id is not None else (context.task_id if context is not None else None)
         resolved_agent_id = agent_id if agent_id is not None else (context.agent_id if context is not None else None)
         workspace_root = self.paths.project_root.resolve()
+
+        if require_approval and self._approval_mode_for_action("run_command") in {"ask", "block"}:
+            approval = self.request_approval(
+                approval_id=f"approval-{uuid4().hex[:8]}",
+                requester=resolved_agent_id or "user",
+                action="run_command",
+                risk_class="high",
+                reason=f"Run command in workspace: {command}",
+                created_at=created_at,
+                thread_id=resolved_thread_id,
+                task_id=resolved_task_id,
+                payload={
+                    "command": command,
+                    "timeout": timeout,
+                    "cwd": str(workspace_root),
+                    "thread_id": resolved_thread_id,
+                    "task_id": resolved_task_id,
+                    "agent_id": resolved_agent_id or "user",
+                },
+            )
+            return {
+                "command": command,
+                "cwd": str(workspace_root),
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "status": "awaiting_approval",
+                "approval_id": approval.id,
+            }
 
         try:
             completed = subprocess.run(
@@ -1124,6 +1160,7 @@ class RuntimeContext:
         created_at: int,
         thread_id: str | None = None,
         task_id: str | None = None,
+        payload: dict[str, object] | None = None,
     ) -> ApprovalRecord:
         approval = self.approval_store.request_approval(
             session_id=self.main_session_id,
@@ -1135,6 +1172,7 @@ class RuntimeContext:
             created_at=created_at,
             thread_id=thread_id,
             task_id=task_id,
+            payload=payload,
         )
         self.append_event(
             kind="approval_requested",
@@ -1161,6 +1199,8 @@ class RuntimeContext:
             summary=f"{status.capitalize()} approval {approval_id} for {approval.action}",
             created_at=created_at,
         )
+        if status == "approved":
+            self._execute_approved_action(approval=approval, created_at=created_at + 1)
         return approval
 
     def add_memory_fact(
@@ -1224,6 +1264,40 @@ class RuntimeContext:
             kind="main",
             created_at=0,
             assigned_agent_id=None,
+        )
+
+    def _approval_mode_for_action(self, action: str) -> str:
+        approvals = self.registry.config.get("approvals", {})
+        if not isinstance(approvals, dict):
+            return "auto"
+        value = approvals.get(action, approvals.get("default", "auto"))
+        if value not in {"auto", "notify", "ask", "block"}:
+            return "auto"
+        return str(value)
+
+    def _execute_approved_action(self, *, approval: ApprovalRecord, created_at: int) -> None:
+        if approval.action != "run_command":
+            return
+        payload = self.approval_store.read_payload(approval)
+        if payload is None:
+            return
+        command = payload.get("command")
+        if not isinstance(command, str) or not command:
+            return
+        timeout = payload.get("timeout", 60)
+        if type(timeout) is not int:
+            timeout = 60
+        thread_id = payload.get("thread_id") if isinstance(payload.get("thread_id"), str) else None
+        task_id = payload.get("task_id") if isinstance(payload.get("task_id"), str) else None
+        agent_id = payload.get("agent_id") if isinstance(payload.get("agent_id"), str) else None
+        self.run_workspace_command(
+            command,
+            timeout=timeout,
+            created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            require_approval=False,
         )
 
 

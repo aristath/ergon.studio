@@ -309,6 +309,47 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("approval_approved", activity.body)
                 self.assertEqual(runtime.list_approvals()[0].status, "approved")
 
+    async def test_app_approving_command_approval_executes_command(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.request_approval(
+                approval_id="approval-1",
+                requester="user",
+                action="run_command",
+                risk_class="high",
+                reason="Run pwd",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                payload={
+                    "command": "pwd",
+                    "timeout": 60,
+                    "cwd": str(project_root.resolve()),
+                    "thread_id": runtime.main_thread_id,
+                    "task_id": None,
+                    "agent_id": "user",
+                },
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                approvals = app.query_one("#approvals", Panel)
+                self.assertIn("Command: pwd", approvals.body)
+
+                app.action_approve_selected_approval()
+
+                approvals = app.query_one("#approvals", Panel)
+                commands = app.query_one("#commands", Panel)
+                self.assertIn("No approvals pending.", approvals.body)
+                self.assertIn("pwd", commands.body)
+
     async def test_selected_workflow_run_scopes_approvals_panel(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel

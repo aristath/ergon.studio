@@ -92,6 +92,7 @@ SCHEMA_STATEMENTS = (
       created_at INTEGER NOT NULL,
       thread_id TEXT,
       task_id TEXT,
+      payload_path TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -147,6 +148,7 @@ def initialize_database(db_path: Path) -> None:
         _ensure_column(connection, table_name="workflow_runs", column_name="last_thread_id", definition="TEXT")
         _ensure_column(connection, table_name="approvals", column_name="thread_id", definition="TEXT")
         _ensure_column(connection, table_name="approvals", column_name="task_id", definition="TEXT")
+        _ensure_column(connection, table_name="approvals", column_name="payload_path", definition="TEXT")
         connection.commit()
 
 
@@ -552,9 +554,9 @@ class MetadataStore:
             connection.execute(
                 """
                 INSERT INTO approvals (
-                  id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
+                  id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id, payload_path
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -567,6 +569,7 @@ class MetadataStore:
                     record.created_at,
                     record.thread_id,
                     record.task_id,
+                    str(record.payload_path) if record.payload_path is not None else None,
                 ),
             )
             connection.commit()
@@ -575,7 +578,7 @@ class MetadataStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id, payload_path
                 FROM approvals
                 WHERE id = ?
                 """,
@@ -594,6 +597,7 @@ class MetadataStore:
             created_at=row[7],
             thread_id=row[8],
             task_id=row[9],
+            payload_path=Path(row[10]) if row[10] is not None else None,
         )
 
     def update_approval(self, record: ApprovalRecord) -> None:
@@ -601,7 +605,7 @@ class MetadataStore:
             connection.execute(
                 """
                 UPDATE approvals
-                SET requester = ?, action = ?, risk_class = ?, reason = ?, status = ?, created_at = ?, thread_id = ?, task_id = ?
+                SET requester = ?, action = ?, risk_class = ?, reason = ?, status = ?, created_at = ?, thread_id = ?, task_id = ?, payload_path = ?
                 WHERE id = ?
                 """,
                 (
@@ -613,6 +617,7 @@ class MetadataStore:
                     record.created_at,
                     record.thread_id,
                     record.task_id,
+                    str(record.payload_path) if record.payload_path is not None else None,
                     record.id,
                 ),
             )
@@ -622,7 +627,7 @@ class MetadataStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id, payload_path
                 FROM approvals
                 WHERE session_id = ?
                 ORDER BY created_at ASC, id ASC
@@ -641,6 +646,7 @@ class MetadataStore:
                 created_at=row[7],
                 thread_id=row[8],
                 task_id=row[9],
+                payload_path=Path(row[10]) if row[10] is not None else None,
             )
             for row in rows
         ]

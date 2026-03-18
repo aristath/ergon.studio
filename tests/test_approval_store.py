@@ -39,11 +39,17 @@ class ApprovalStoreTests(unittest.TestCase):
                 reason="Install dependencies",
                 created_at=20,
                 task_id="task-2",
+                payload={"command": "pip install -r requirements.txt", "timeout": 60},
             )
 
             self.assertEqual(first.status, "pending")
             self.assertEqual(second.action, "run_command")
             self.assertEqual(second.task_id, "task-2")
+            self.assertIsNotNone(second.payload_path)
+            self.assertEqual(
+                store.read_payload(second),
+                {"command": "pip install -r requirements.txt", "timeout": 60},
+            )
             self.assertEqual(
                 [approval.id for approval in store.list_approvals("session-main")],
                 ["approval-1", "approval-2"],

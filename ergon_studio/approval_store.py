@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 from ergon_studio.paths import StudioPaths
 from ergon_studio.storage.models import ApprovalRecord, SessionRecord
 from ergon_studio.storage.sqlite import MetadataStore
@@ -22,6 +26,7 @@ class ApprovalStore:
         created_at: int,
         thread_id: str | None = None,
         task_id: str | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> ApprovalRecord:
         if self.metadata.get_session(session_id) is None:
             self.metadata.insert_session(
@@ -31,6 +36,9 @@ class ApprovalStore:
                     created_at=created_at,
                 )
             )
+        payload_path = None
+        if payload is not None:
+            payload_path = self._write_payload(approval_id=approval_id, payload=payload)
         record = ApprovalRecord(
             id=approval_id,
             session_id=session_id,
@@ -42,12 +50,21 @@ class ApprovalStore:
             created_at=created_at,
             thread_id=thread_id,
             task_id=task_id,
+            payload_path=payload_path,
         )
         self.metadata.insert_approval(record)
         return record
 
+    def get_approval(self, approval_id: str) -> ApprovalRecord | None:
+        return self.metadata.get_approval(approval_id)
+
     def list_approvals(self, session_id: str) -> list[ApprovalRecord]:
         return self.metadata.list_approvals(session_id)
+
+    def read_payload(self, approval: ApprovalRecord) -> dict[str, Any] | None:
+        if approval.payload_path is None:
+            return None
+        return json.loads(Path(approval.payload_path).read_text(encoding="utf-8"))
 
     def update_approval_status(self, *, approval_id: str, status: str) -> ApprovalRecord:
         if status not in {"approved", "rejected"}:
@@ -66,6 +83,13 @@ class ApprovalStore:
             created_at=approval.created_at,
             thread_id=approval.thread_id,
             task_id=approval.task_id,
+            payload_path=approval.payload_path,
         )
         self.metadata.update_approval(updated)
         return updated
+
+    def _write_payload(self, *, approval_id: str, payload: dict[str, Any]) -> Path:
+        payload_path = self.paths.logs_dir / "approvals" / f"{approval_id}.json"
+        payload_path.parent.mkdir(parents=True, exist_ok=True)
+        payload_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return payload_path

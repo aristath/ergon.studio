@@ -555,6 +555,7 @@ Return reviewed and repaired work.
                 [event.kind for event in runtime.list_events()],
                 ["approval_requested"],
             )
+            self.assertIsNone(runtime.read_approval_payload("approval-1"))
 
     def test_runtime_can_approve_and_reject_approvals(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -605,6 +606,61 @@ Return reviewed and repaired work.
                 [event.kind for event in runtime.list_events()],
                 ["approval_requested", "approval_requested", "approval_approved", "approval_rejected"],
             )
+
+    def test_runtime_can_defer_and_execute_command_after_approval(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            save_global_config(
+                runtime.paths.config_path,
+                {
+                    "providers": {},
+                    "role_assignments": {},
+                    "approvals": {"run_command": "ask"},
+                    "ui": {},
+                },
+            )
+            runtime.reload_registry()
+
+            result = runtime.run_workspace_command(
+                "pwd",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+
+            self.assertEqual(result["status"], "awaiting_approval")
+            self.assertEqual(runtime.list_command_runs(), [])
+            approvals = runtime.list_approvals()
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(
+                runtime.read_approval_payload(approvals[0].id),
+                {
+                    "agent_id": "user",
+                    "command": "pwd",
+                    "cwd": str(runtime.paths.project_root.resolve()),
+                    "task_id": None,
+                    "thread_id": runtime.main_thread_id,
+                    "timeout": 60,
+                },
+            )
+
+            runtime.resolve_approval(
+                approval_id=approvals[0].id,
+                status="approved",
+                created_at=1_710_755_201,
+            )
+
+            self.assertEqual(len(runtime.list_command_runs()), 1)
+            self.assertEqual(runtime.list_approvals()[0].status, "approved")
+            self.assertIn("command_run", [event.kind for event in runtime.list_events()])
 
     def test_runtime_can_list_approvals_for_workflow_run(self) -> None:
         from ergon_studio.runtime import load_runtime

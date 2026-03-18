@@ -1021,6 +1021,9 @@ class ErgonStudioApp(App[None]):
         command_run_id = result.get("command_run_id")
         if isinstance(command_run_id, str):
             self.selected_command_run_id = command_run_id
+        approval_id = result.get("approval_id")
+        if isinstance(approval_id, str):
+            self.selected_approval_id = approval_id
         self._refresh_panels()
 
     def _refresh_panels(self) -> None:
@@ -1165,6 +1168,9 @@ class ErgonStudioApp(App[None]):
             f"Requester: {selected.requester}",
             f"Reason: {selected.reason}",
         ]
+        payload = self.runtime.read_approval_payload(selected.id)
+        if payload is not None and isinstance(payload.get("command"), str):
+            lines.append(f"Command: {payload['command']}")
         if selected.task_id is not None:
             lines.append(f"Task: {selected.task_id}")
         if selected.thread_id is not None:

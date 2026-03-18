@@ -23,6 +23,7 @@ class BootstrapWorkspaceTests(unittest.TestCase):
             self.assertTrue(paths.agents_dir.exists())
             self.assertTrue(paths.workflows_dir.exists())
             self.assertTrue(paths.project_data_dir.exists())
+            self.assertTrue(paths.state_db_path.exists())
             self.assertTrue(paths.sessions_dir.exists())
             self.assertTrue(paths.threads_dir.exists())
             self.assertTrue(paths.tasks_dir.exists())

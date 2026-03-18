@@ -219,6 +219,13 @@ class RuntimeContext:
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
 
+    def latest_main_user_message_body(self) -> str | None:
+        for message in reversed(self.list_main_messages()):
+            if message.sender != "user":
+                continue
+            return self.conversation_store.read_message_body(message).rstrip("\n")
+        return None
+
     def list_thread_messages(self, thread_id: str) -> list[MessageRecord]:
         return self.conversation_store.list_messages(thread_id)
 

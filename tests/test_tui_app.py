@@ -284,7 +284,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
             app = ErgonStudioApp(runtime)
 
             async with app.run_test():
-                app.action_start_selected_workflow()
+                await app.action_start_selected_workflow()
 
                 runs = app.query_one("#workflow-runs", Panel)
                 tasks = app.query_one("#tasks", Panel)
@@ -294,6 +294,42 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Workflow: standard-build", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
                 self.assertIn("workflow_started", activity.body)
+
+    async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text="Architecture kickoff received.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Build the next feature.",
+                created_at=1_710_755_200,
+            )
+            app = ErgonStudioApp(runtime)
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                async with app.run_test():
+                    await app.action_start_selected_workflow()
+
+                    selected_thread = app.query_one("#selected-thread", Panel)
+                    self.assertIn("Workflow kickoff: standard-build", selected_thread.body)
+                    self.assertIn("Build the next feature.", selected_thread.body)
+                    self.assertIn("Architecture kickoff received.", selected_thread.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

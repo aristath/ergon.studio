@@ -382,13 +382,20 @@ class ErgonStudioApp(App[None]):
     def action_edit_selected_workflow_definition(self) -> None:
         self._open_workflow_definition_editor(self.selected_workflow_id)
 
-    def action_start_selected_workflow(self) -> None:
+    async def action_start_selected_workflow(self) -> None:
         _, threads = self.runtime.start_workflow_run(
             workflow_id=self.selected_workflow_id,
             created_at=int(time.time()),
         )
         if threads:
             self.selected_thread_id = threads[0].id
+            goal = self.runtime.latest_main_user_message_body()
+            if goal:
+                await self.runtime.send_message_to_agent_thread(
+                    thread_id=threads[0].id,
+                    body=f"Workflow kickoff: {self.selected_workflow_id}\n\nGoal:\n{goal}",
+                    created_at=int(time.time()),
+                )
         self._refresh_panels()
 
     def action_edit_orchestrator_definition(self) -> None:

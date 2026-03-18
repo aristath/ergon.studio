@@ -359,6 +359,41 @@ Return reviewed code and a clear summary.
             )
             self.assertIn("workflow_started", [event.kind for event in runtime.list_events()])
 
+    def test_runtime_can_read_latest_main_user_message_body(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="First goal.",
+                created_at=1_710_755_200,
+            )
+            runtime.append_message_to_main_thread(
+                message_id="message-2",
+                sender="orchestrator",
+                kind="chat",
+                body="Acknowledged.",
+                created_at=1_710_755_201,
+            )
+            runtime.append_message_to_main_thread(
+                message_id="message-3",
+                sender="user",
+                kind="chat",
+                body="Latest goal.",
+                created_at=1_710_755_202,
+            )
+
+            self.assertEqual(runtime.latest_main_user_message_body(), "Latest goal.")
+
     def test_runtime_can_append_messages_to_additional_threads(self) -> None:
         from ergon_studio.runtime import load_runtime
 

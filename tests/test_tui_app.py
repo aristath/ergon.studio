@@ -365,8 +365,47 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test():
                 artifacts = app.query_one("#artifacts", Panel)
-                self.assertIn("artifact-1", artifacts.body)
+                self.assertIn("> artifact-1", artifacts.body)
                 self.assertIn("Architecture Notes", artifacts.body)
+                self.assertIn("Use Textual with a runtime-first architecture.", artifacts.body)
+
+    async def test_app_can_switch_selected_artifact(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_artifact(
+                artifact_id="artifact-1",
+                kind="design-note",
+                title="Architecture Notes",
+                content="First artifact body.",
+                created_at=1_710_755_200,
+            )
+            runtime.create_artifact(
+                artifact_id="artifact-2",
+                kind="review-note",
+                title="Review Notes",
+                content="Second artifact body.",
+                created_at=1_710_755_201,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                artifacts = app.query_one("#artifacts", Panel)
+                self.assertIn("> artifact-1", artifacts.body)
+                self.assertIn("First artifact body.", artifacts.body)
+
+                app.action_next_artifact()
+
+                artifacts = app.query_one("#artifacts", Panel)
+                self.assertIn("> artifact-2", artifacts.body)
+                self.assertIn("Second artifact body.", artifacts.body)
 
     async def test_app_can_switch_selected_agent(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

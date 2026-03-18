@@ -40,3 +40,28 @@ class ArtifactStoreTests(unittest.TestCase):
                 [item.id for item in store.list_artifacts("session-main")],
                 ["artifact-1"],
             )
+
+    def test_store_can_read_artifact_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            initialize_database(paths.state_db_path)
+            store = ArtifactStore(paths)
+
+            artifact = store.create_artifact(
+                session_id="session-main",
+                artifact_id="artifact-1",
+                kind="design-note",
+                title="Architecture Notes",
+                content="Use Textual with a runtime-first architecture.",
+                created_at=10,
+            )
+
+            self.assertEqual(
+                store.read_artifact_body(artifact),
+                "Use Textual with a runtime-first architecture.\n",
+            )

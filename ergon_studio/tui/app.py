@@ -99,6 +99,8 @@ class ErgonStudioApp(App[None]):
         ("f7", "previous_workflow", "Previous Workflow"),
         ("f8", "next_workflow", "Next Workflow"),
         ("f9", "edit_selected_workflow_definition", "Edit Workflow"),
+        ("f11", "previous_artifact", "Previous Artifact"),
+        ("f12", "next_artifact", "Next Artifact"),
         ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
@@ -156,8 +158,10 @@ class ErgonStudioApp(App[None]):
         self.selected_workflow_id = "standard-build"
         self.selected_workflow_run_id: str | None = None
         self.selected_approval_id: str | None = None
+        self.selected_artifact_id: str | None = None
         self._time_cursor = int(time.time())
         self._normalize_selected_approval()
+        self._normalize_selected_artifact()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -357,10 +361,10 @@ class ErgonStudioApp(App[None]):
         )
 
     def _render_artifacts_body(self) -> str:
+        artifacts = self._visible_artifacts()
         if self.selected_workflow_run_id is not None:
             run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
             if run_view is not None:
-                artifacts = self.runtime.list_artifacts_for_workflow_run(self.selected_workflow_run_id)
                 lines = [
                     (
                         f"Run: {run_view.workflow_run.id} "
@@ -370,19 +374,13 @@ class ErgonStudioApp(App[None]):
                 if not artifacts:
                     lines.append("No artifacts for selected run.")
                     return "\n".join(lines)
-                lines.extend(
-                    f"{artifact.id} [{artifact.kind}] {artifact.title}"
-                    for artifact in artifacts[-8:]
-                )
+                lines.extend(self._artifact_lines(artifacts))
+                lines.extend(self._artifact_preview_lines())
                 return "\n".join(lines)
 
-        artifacts = self.runtime.list_artifacts()
         if not artifacts:
             return "No artifacts yet."
-        return "\n".join(
-            f"{artifact.id} [{artifact.kind}] {artifact.title}"
-            for artifact in artifacts[-8:]
-        )
+        return "\n".join(self._artifact_lines(artifacts) + self._artifact_preview_lines())
 
     def _render_settings_body(self) -> str:
         providers = self.runtime.list_provider_ids()
@@ -401,6 +399,7 @@ class ErgonStudioApp(App[None]):
             f"Orchestrator: {orchestrator_status}\n"
             "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
+            "Artifacts: F11/F12 select\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -551,6 +550,12 @@ class ErgonStudioApp(App[None]):
     def action_previous_approval(self) -> None:
         self._cycle_approval(-1)
 
+    def action_next_artifact(self) -> None:
+        self._cycle_artifact(1)
+
+    def action_previous_artifact(self) -> None:
+        self._cycle_artifact(-1)
+
     def action_approve_selected_approval(self) -> None:
         if self.selected_approval_id is None:
             return
@@ -652,12 +657,16 @@ class ErgonStudioApp(App[None]):
         preferred_thread_id = self.runtime.preferred_thread_id_for_workflow_run(self.selected_workflow_run_id)
         if preferred_thread_id is not None:
             self.selected_thread_id = preferred_thread_id
+        self._normalize_selected_approval()
+        self._normalize_selected_artifact()
+        self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
+        self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
 
     def _cycle_approval(self, direction: int) -> None:
         approvals = self._visible_approvals()
@@ -677,6 +686,25 @@ class ErgonStudioApp(App[None]):
 
         self.selected_approval_id = approval_ids[(current_index + direction) % len(approval_ids)]
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+
+    def _cycle_artifact(self, direction: int) -> None:
+        artifacts = self._visible_artifacts()
+        if not artifacts:
+            self.selected_artifact_id = None
+            self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
+            return
+
+        artifact_ids = [artifact.id for artifact in artifacts]
+        if self.selected_artifact_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = artifact_ids.index(self.selected_artifact_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_artifact_id = artifact_ids[(current_index + direction) % len(artifact_ids)]
+        self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
@@ -728,6 +756,7 @@ class ErgonStudioApp(App[None]):
 
     def _refresh_panels(self) -> None:
         self._normalize_selected_approval()
+        self._normalize_selected_artifact()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
@@ -754,6 +783,14 @@ class ErgonStudioApp(App[None]):
         if self.selected_approval_id not in approval_ids:
             self.selected_approval_id = approval_ids[0]
 
+    def _normalize_selected_artifact(self) -> None:
+        artifact_ids = [artifact.id for artifact in self._visible_artifacts()]
+        if not artifact_ids:
+            self.selected_artifact_id = None
+            return
+        if self.selected_artifact_id not in artifact_ids:
+            self.selected_artifact_id = artifact_ids[0]
+
     def _normalize_selected_thread(self) -> None:
         thread_ids = [thread.id for thread in self._visible_threads()]
         if not thread_ids:
@@ -775,3 +812,24 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_pending_approvals_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_pending_approvals()
+
+    def _visible_artifacts(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_artifacts_for_workflow_run(self.selected_workflow_run_id)
+        return self.runtime.list_artifacts()
+
+    def _artifact_lines(self, artifacts) -> list[str]:
+        return [
+            f"{'> ' if artifact.id == self.selected_artifact_id else '  '}{artifact.id} [{artifact.kind}] {artifact.title}"
+            for artifact in artifacts[-8:]
+        ]
+
+    def _artifact_preview_lines(self) -> list[str]:
+        if self.selected_artifact_id is None:
+            return []
+        body = self.runtime.read_artifact_body(self.selected_artifact_id).rstrip("\n")
+        if not body:
+            return ["", "Preview:", "(empty)"]
+        return ["", "Preview:", body]

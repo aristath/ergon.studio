@@ -53,6 +53,9 @@ class ArtifactStore:
     def list_artifacts(self, session_id: str) -> list[ArtifactRecord]:
         return self.metadata.list_artifacts(session_id)
 
+    def read_artifact_body(self, artifact: ArtifactRecord) -> str:
+        return Path(artifact.file_path).read_text(encoding="utf-8")
+
 
 def _ensure_trailing_newline(content: str) -> str:
     return content if content.endswith("\n") else f"{content}\n"

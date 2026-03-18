@@ -325,6 +325,12 @@ class RuntimeContext:
     def list_artifacts(self) -> list[ArtifactRecord]:
         return self.artifact_store.list_artifacts(self.main_session_id)
 
+    def read_artifact_body(self, artifact_id: str) -> str:
+        for artifact in self.list_artifacts():
+            if artifact.id == artifact_id:
+                return self.artifact_store.read_artifact_body(artifact)
+        raise ValueError(f"unknown artifact: {artifact_id}")
+
     def create_thread(
         self,
         *,

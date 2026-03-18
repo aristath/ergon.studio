@@ -624,6 +624,10 @@ Return reviewed code and a clear summary.
 
             self.assertEqual([artifact.id for artifact in artifacts], ["artifact-1"])
             self.assertEqual(artifacts[0].title, "Architecture Notes")
+            self.assertEqual(
+                runtime.read_artifact_body("artifact-1"),
+                "Use Textual with a runtime-first architecture.\n",
+            )
 
 
 class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):

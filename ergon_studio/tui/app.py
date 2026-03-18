@@ -27,6 +27,10 @@ class Panel(Static):
 
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
+    BINDINGS = [
+        ("ctrl+j", "next_thread", "Next Thread"),
+        ("ctrl+k", "previous_thread", "Previous Thread"),
+    ]
     CSS = """
     Screen {
       layout: vertical;
@@ -76,6 +80,7 @@ class ErgonStudioApp(App[None]):
     def __init__(self, runtime: RuntimeContext) -> None:
         super().__init__()
         self.runtime = runtime
+        self.selected_thread_id = runtime.main_thread_id
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -89,6 +94,12 @@ class ErgonStudioApp(App[None]):
                     "Main Chat",
                     self._render_main_chat_body(),
                     panel_id="main-chat",
+                    classes="panel",
+                )
+                yield Panel(
+                    "Selected Thread",
+                    self._render_selected_thread_body(),
+                    panel_id="selected-thread",
                     classes="panel",
                 )
                 yield Panel("Artifacts", "Diffs and generated artifacts will appear here.", panel_id="artifacts", classes="panel")
@@ -117,7 +128,7 @@ class ErgonStudioApp(App[None]):
         if not threads:
             return "No threads yet."
         return "\n".join(
-            f"{thread.id} ({thread.kind})"
+            f"{'> ' if thread.id == self.selected_thread_id else '  '}{thread.id} ({thread.kind})"
             for thread in threads
         )
 
@@ -140,6 +151,17 @@ class ErgonStudioApp(App[None]):
             )
 
         rendered_messages = []
+        for message in messages:
+            body = self.runtime.conversation_store.read_message_body(message).rstrip("\n")
+            rendered_messages.append(f"[{message.sender}] {body}")
+        return "\n\n".join(rendered_messages)
+
+    def _render_selected_thread_body(self) -> str:
+        messages = self.runtime.list_thread_messages(self.selected_thread_id)
+        if not messages:
+            return f"{self.selected_thread_id}\nNo messages yet."
+
+        rendered_messages = [self.selected_thread_id]
         for message in messages:
             body = self.runtime.conversation_store.read_message_body(message).rstrip("\n")
             rendered_messages.append(f"[{message.sender}] {body}")
@@ -170,5 +192,27 @@ class ErgonStudioApp(App[None]):
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
         event.input.value = ""
+
+    def action_next_thread(self) -> None:
+        self._cycle_thread(1)
+
+    def action_previous_thread(self) -> None:
+        self._cycle_thread(-1)
+
+    def _cycle_thread(self, direction: int) -> None:
+        threads = self.runtime.list_threads()
+        if not threads:
+            return
+
+        thread_ids = [thread.id for thread in threads]
+        try:
+            current_index = thread_ids.index(self.selected_thread_id)
+        except ValueError:
+            current_index = 0
+
+        self.selected_thread_id = thread_ids[(current_index + direction) % len(thread_ids)]
+        self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())

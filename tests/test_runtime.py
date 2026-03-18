@@ -150,3 +150,36 @@ class RuntimeTests(unittest.TestCase):
                 [event.kind for event in runtime.list_events()],
                 ["thread_created"],
             )
+
+    def test_runtime_can_append_messages_to_additional_threads(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_thread(
+                thread_id="thread-review-1",
+                kind="review",
+                created_at=1_710_755_200,
+            )
+            runtime.append_message_to_thread(
+                thread_id="thread-review-1",
+                message_id="message-1",
+                sender="reviewer",
+                kind="review",
+                body="Looks good overall.",
+                created_at=1_710_755_201,
+            )
+
+            messages = runtime.list_thread_messages("thread-review-1")
+
+            self.assertEqual([message.id for message in messages], ["message-1"])
+            self.assertEqual(
+                runtime.conversation_store.read_message_body(messages[0]),
+                "Looks good overall.\n",
+            )

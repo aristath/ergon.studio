@@ -74,6 +74,9 @@ class RuntimeContext:
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
 
+    def list_thread_messages(self, thread_id: str) -> list[MessageRecord]:
+        return self.conversation_store.list_messages(thread_id)
+
     def append_message_to_main_thread(
         self,
         *,
@@ -84,8 +87,28 @@ class RuntimeContext:
         created_at: int,
     ) -> MessageRecord:
         self.ensure_main_conversation()
-        message = self.conversation_store.append_message(
+        return self.append_message_to_thread(
             thread_id=self.main_thread_id,
+            message_id=message_id,
+            sender=sender,
+            kind=kind,
+            body=body,
+            created_at=created_at,
+        )
+
+    def append_message_to_thread(
+        self,
+        *,
+        thread_id: str,
+        message_id: str,
+        sender: str,
+        kind: str,
+        body: str,
+        created_at: int,
+    ) -> MessageRecord:
+        self.ensure_main_conversation()
+        message = self.conversation_store.append_message(
+            thread_id=thread_id,
             message_id=message_id,
             sender=sender,
             kind=kind,
@@ -94,9 +117,9 @@ class RuntimeContext:
         )
         self.append_event(
             kind="message_created",
-            summary=f"{sender} posted to {self.main_thread_id}",
+            summary=f"{sender} posted to {thread_id}",
             created_at=created_at,
-            thread_id=self.main_thread_id,
+            thread_id=thread_id,
         )
         return message
 

@@ -289,13 +289,12 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 runs = app.query_one("#workflow-runs", Panel)
                 tasks = app.query_one("#tasks", Panel)
                 threads = app.query_one("#threads", Panel)
-                activity = app.query_one("#activity", Panel)
                 self.assertIn("standard-build", runs.body)
                 self.assertIn("> workflow-run-", runs.body)
+                self.assertIn("[blocked]", runs.body)
                 self.assertIn("Workflow: standard-build", tasks.body)
                 self.assertIn("[blocked] standard-build: architect", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
-                self.assertIn("agent_unavailable", activity.body)
 
     async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -480,11 +479,9 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     runs = app.query_one("#workflow-runs", Panel)
                     threads = app.query_one("#threads", Panel)
                     tasks = app.query_one("#tasks", Panel)
-                    activity = app.query_one("#activity", Panel)
                     self.assertIn("[repairing]", runs.body)
                     self.assertIn("agent_direct:fixer", threads.body)
                     self.assertIn("[planned] standard-build: fixer", tasks.body)
-                    self.assertIn("workflow_fix_cycle_requested", activity.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

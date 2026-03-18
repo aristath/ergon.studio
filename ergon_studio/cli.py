@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.tui.app import ErgonStudioApp
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,6 +18,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path.cwd(),
     )
     bootstrap_parser.add_argument(
+        "--home-dir",
+        type=Path,
+        default=Path.home(),
+    )
+
+    tui_parser = subparsers.add_parser("tui")
+    tui_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+    )
+    tui_parser.add_argument(
         "--home-dir",
         type=Path,
         default=Path.home(),
@@ -35,6 +48,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"project_uuid={paths.project_uuid}")
         print(f"project_data_dir={paths.project_data_dir}")
+        return 0
+
+    if args.command == "tui":
+        paths = bootstrap_workspace(
+            project_root=args.project_root,
+            home_dir=args.home_dir,
+        )
+        app = ErgonStudioApp(paths)
+        app.run()
         return 0
 
     parser.error(f"unknown command: {args.command}")

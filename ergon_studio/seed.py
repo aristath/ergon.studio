@@ -291,6 +291,7 @@ id: direct-response
 name: Direct Response
 kind: workflow
 orchestration: direct
+steps: []
 ---
 ## Purpose
 Handle simple requests directly through the orchestrator.
@@ -312,6 +313,8 @@ id: single-agent-execution
 name: Single-Agent Execution
 kind: workflow
 orchestration: direct
+steps:
+  - coder
 ---
 ## Purpose
 Delegate straightforward work to one specialist.
@@ -333,6 +336,8 @@ id: architecture-first
 name: Architecture First
 kind: workflow
 orchestration: sequential
+steps:
+  - architect
 ---
 ## Purpose
 Design before implementation.
@@ -354,6 +359,10 @@ id: standard-build
 name: Standard Build
 kind: workflow
 orchestration: sequential
+steps:
+  - architect
+  - coder
+  - reviewer
 ---
 ## Purpose
 Run the normal plan-build-review-fix loop.
@@ -375,6 +384,9 @@ id: best-of-n
 name: Best of N
 kind: workflow
 orchestration: concurrent
+steps:
+  - coder
+  - reviewer
 ---
 ## Purpose
 Improve quality through parallel candidate generation.
@@ -391,11 +403,62 @@ Use sparingly and intentionally because it increases cost and complexity.
 ## Exit Conditions
 The best candidate is selected, refined if needed, and accepted.
 """,
+    "debate.md": """---
+id: debate
+name: Debate
+kind: workflow
+orchestration: sequential
+steps:
+  - architect
+  - brainstormer
+  - reviewer
+---
+## Purpose
+Compare competing approaches in a structured discussion.
+
+## When To Use
+Use when there are meaningful tradeoffs and no clear obvious path.
+
+## Flow
+Present competing ideas, evaluate them, then return a decision-ready recommendation.
+
+## Decision Rules
+Prefer explicit tradeoffs over vague compromise.
+
+## Exit Conditions
+The orchestrator has enough evidence to choose a direction.
+""",
+    "research-then-decide.md": """---
+id: research-then-decide
+name: Research Then Decide
+kind: workflow
+orchestration: sequential
+steps:
+  - researcher
+---
+## Purpose
+Collect relevant evidence before choosing a direction.
+
+## When To Use
+Use when framework, API, or dependency decisions need research first.
+
+## Flow
+Research the question, summarize findings, then hand a decision-ready brief back to the orchestrator.
+
+## Decision Rules
+Prefer primary documentation and concrete tradeoffs.
+
+## Exit Conditions
+The orchestrator has enough evidence to choose the next step.
+""",
     "review-repair-loop.md": """---
 id: review-repair-loop
 name: Review Repair Loop
 kind: workflow
 orchestration: sequential
+steps:
+  - reviewer
+  - fixer
 ---
 ## Purpose
 Drive quality upward through review and correction.
@@ -412,11 +475,39 @@ Stop when issues are resolved or the task should be rejected.
 ## Exit Conditions
 The work passes review or is explicitly rejected.
 """,
+    "review-driven-repair.md": """---
+id: review-driven-repair
+name: Review Driven Repair
+kind: workflow
+orchestration: sequential
+steps:
+  - reviewer
+  - fixer
+---
+## Purpose
+Drive quality upward through review findings and targeted fixes.
+
+## When To Use
+Use when implementation exists but review should drive the next iteration.
+
+## Flow
+Review, fix, re-review, then decide whether to accept or continue.
+
+## Decision Rules
+Keep the loop evidence-based and stop when issues are resolved or acceptance is not justified.
+
+## Exit Conditions
+The work passes review or is explicitly rejected.
+""",
     "test-driven-repair.md": """---
 id: test-driven-repair
 name: Test Driven Repair
 kind: workflow
 orchestration: sequential
+steps:
+  - tester
+  - fixer
+  - reviewer
 ---
 ## Purpose
 Fix behavior based on failing tests or clear reproductions.
@@ -438,6 +529,7 @@ id: approval-gated
 name: Approval Gated
 kind: workflow
 orchestration: sequential
+steps: []
 ---
 ## Purpose
 Pause risky work until the user approves it.
@@ -459,6 +551,8 @@ id: replanning
 name: Replanning
 kind: workflow
 orchestration: sequential
+steps:
+  - architect
 ---
 ## Purpose
 Adjust course when goals or facts change.

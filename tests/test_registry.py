@@ -40,6 +40,8 @@ class RegistryTests(unittest.TestCase):
 
             self.assertIn("orchestrator", registry.agent_definitions)
             self.assertIn("standard-build", registry.workflow_definitions)
+            self.assertIn("research-then-decide", registry.workflow_definitions)
+            self.assertIn("debate", registry.workflow_definitions)
             self.assertEqual(
                 registry.config["role_assignments"]["orchestrator"],
                 "default",

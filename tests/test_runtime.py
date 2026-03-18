@@ -388,6 +388,49 @@ Return reviewed code and a clear summary.
             )
             self.assertIn("workflow_started", [event.kind for event in runtime.list_events()])
 
+    def test_runtime_uses_workflow_definition_steps(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.save_workflow_definition_text(
+                workflow_id="standard-build",
+                text="""---
+id: standard-build
+name: Standard Build
+kind: workflow
+orchestration: sequential
+steps:
+  - reviewer
+  - fixer
+---
+## Purpose
+Use a review-first loop.
+
+## Exit Conditions
+Return reviewed and repaired work.
+""",
+                created_at=1_710_755_200,
+            )
+
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_201,
+            )
+
+            self.assertEqual(workflow_run.workflow_id, "standard-build")
+            self.assertEqual([thread.assigned_agent_id for thread in threads], ["reviewer", "fixer"])
+            self.assertEqual(
+                [task.title for task in runtime.list_tasks() if task.parent_task_id == workflow_run.root_task_id],
+                ["standard-build: reviewer", "standard-build: fixer"],
+            )
+
     def test_runtime_can_update_task_state(self) -> None:
         from ergon_studio.runtime import load_runtime
 

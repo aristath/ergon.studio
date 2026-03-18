@@ -518,10 +518,14 @@ class ErgonStudioApp(App[None]):
             return "\n".join(lines)
 
         orchestration = str(definition.metadata.get("orchestration", "unknown"))
+        workflow_steps = definition.metadata.get("steps", [])
+        step_text = "none"
+        if isinstance(workflow_steps, list) and workflow_steps:
+            step_text = " -> ".join(str(step) for step in workflow_steps)
         purpose = definition.sections.get("Purpose", "")
         exit_conditions = definition.sections.get("Exit Conditions", "")
 
-        lines.extend(["", f"Orchestration: {orchestration}"])
+        lines.extend(["", f"Orchestration: {orchestration}", f"Steps: {step_text}"])
         if purpose:
             lines.extend(["", purpose])
         if exit_conditions:

@@ -591,6 +591,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 workflows = app.query_one("#workflows", Panel)
                 self.assertIn("> standard-build", workflows.body)
                 self.assertIn("Orchestration: sequential", workflows.body)
+                self.assertIn("Steps: architect -> coder -> reviewer", workflows.body)
                 self.assertIn("Run the normal plan-build-review-fix loop.", workflows.body)
 
                 app.action_next_workflow()

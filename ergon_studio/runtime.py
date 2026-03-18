@@ -320,6 +320,24 @@ class RuntimeContext:
     def list_workflow_ids(self) -> list[str]:
         return sorted(self.registry.workflow_definitions.keys())
 
+    def workflow_steps(self, workflow_id: str) -> tuple[str, ...]:
+        definition = self.registry.workflow_definitions.get(workflow_id)
+        if definition is None:
+            raise ValueError(f"unknown workflow: {workflow_id}")
+
+        configured_steps = definition.metadata.get("steps")
+        if configured_steps is None:
+            return _legacy_workflow_steps(workflow_id)
+        if not isinstance(configured_steps, list):
+            raise ValueError(f"workflow '{workflow_id}' steps must be a list")
+
+        steps: list[str] = []
+        for step in configured_steps:
+            if not isinstance(step, str) or not step:
+                raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
+            steps.append(step)
+        return tuple(steps)
+
     def list_provider_ids(self) -> list[str]:
         return sorted(self.registry.config.get("providers", {}).keys())
 
@@ -847,7 +865,7 @@ class RuntimeContext:
         return task
 
     def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
-        participants = _workflow_participants(workflow_id)
+        participants = self.workflow_steps(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
             title=f"Workflow: {workflow_id}",
@@ -1247,7 +1265,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     return runtime
 
 
-def _workflow_participants(workflow_id: str) -> tuple[str, ...]:
+def _legacy_workflow_steps(workflow_id: str) -> tuple[str, ...]:
     workflow_map = {
         "direct-response": (),
         "single-agent-execution": ("coder",),

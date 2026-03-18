@@ -92,11 +92,13 @@ class ErgonStudioApp(App[None]):
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
         ("alt+h", "previous_activity_event", "Previous Activity"),
+        ("alt+i", "next_command_run", "Next Command"),
         ("alt+j", "next_task", "Next Task"),
         ("alt+k", "previous_task", "Previous Task"),
         ("alt+l", "next_activity_event", "Next Activity"),
         ("alt+n", "next_memory_fact", "Next Memory"),
         ("alt+p", "previous_memory_fact", "Previous Memory"),
+        ("alt+u", "previous_command_run", "Previous Command"),
         ("ctrl+n", "next_agent", "Next Agent"),
         ("ctrl+p", "previous_agent", "Previous Agent"),
         ("ctrl+a", "open_selected_agent_thread", "Open Agent Thread"),
@@ -108,6 +110,7 @@ class ErgonStudioApp(App[None]):
         ("f9", "edit_selected_workflow_definition", "Edit Workflow"),
         ("f11", "previous_artifact", "Previous Artifact"),
         ("f12", "next_artifact", "Next Artifact"),
+        ("ctrl+x", "run_workspace_command", "Run Command"),
         ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
@@ -169,12 +172,14 @@ class ErgonStudioApp(App[None]):
         self.selected_memory_fact_id: str | None = None
         self.selected_task_id: str | None = None
         self.selected_event_id: str | None = None
+        self.selected_command_run_id: str | None = None
         self._time_cursor = int(time.time())
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_memory_fact()
         self._normalize_selected_task()
         self._normalize_selected_event()
+        self._normalize_selected_command_run()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -198,6 +203,7 @@ class ErgonStudioApp(App[None]):
                     panel_id="selected-thread",
                     classes="panel",
                 )
+                yield Panel("Commands", self._render_commands_body(), panel_id="commands", classes="panel")
                 yield Panel("Artifacts", self._render_artifacts_body(), panel_id="artifacts", classes="panel")
             with Vertical(id="right-sidebar"):
                 yield Panel("Team", self._render_team_body(), panel_id="team", classes="panel")
@@ -401,6 +407,28 @@ class ErgonStudioApp(App[None]):
             return "No artifacts yet."
         return "\n".join(self._artifact_lines(artifacts) + self._artifact_preview_lines())
 
+    def _render_commands_body(self) -> str:
+        command_runs = self._visible_command_runs()
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not command_runs:
+                    lines.append("No commands for selected run.")
+                    return "\n".join(lines)
+                lines.extend(self._command_lines(command_runs))
+                lines.extend(self._command_preview_lines())
+                return "\n".join(lines)
+
+        if not command_runs:
+            return "No commands yet."
+        return "\n".join(self._command_lines(command_runs) + self._command_preview_lines())
+
     def _render_settings_body(self) -> str:
         providers = self.runtime.list_provider_ids()
         agents = self.runtime.list_agent_ids()
@@ -433,7 +461,9 @@ class ErgonStudioApp(App[None]):
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
             "Shortcuts: Esc clear run focus, F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Run Command: Ctrl+X\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
+            "Commands: Alt+U / Alt+I select\n"
             "Artifacts: F11/F12 select\n"
             "Activity: Alt+H / Alt+L select\n"
             "Tasks: Alt+J / Alt+K select\n"
@@ -573,6 +603,12 @@ class ErgonStudioApp(App[None]):
     def action_previous_task(self) -> None:
         self._cycle_task(-1)
 
+    def action_next_command_run(self) -> None:
+        self._cycle_command_run(1)
+
+    def action_previous_command_run(self) -> None:
+        self._cycle_command_run(-1)
+
     def action_next_agent(self) -> None:
         self._cycle_agent(1)
 
@@ -702,6 +738,16 @@ class ErgonStudioApp(App[None]):
     def action_edit_orchestrator_definition(self) -> None:
         self._open_agent_definition_editor("orchestrator")
 
+    def action_run_workspace_command(self) -> None:
+        self.push_screen(
+            DefinitionEditorScreen(
+                title="Run Workspace Command",
+                initial_text="",
+                on_save=self._run_workspace_command_from_editor,
+                language="bash",
+            )
+        )
+
     def action_edit_global_config(self) -> None:
         initial_text = self.runtime.read_global_config_text()
         self.push_screen(
@@ -820,11 +866,13 @@ class ErgonStudioApp(App[None]):
         self._normalize_selected_event()
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
+        self._normalize_selected_command_run()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+        self.query_one("#commands", Panel).set_body(self._render_commands_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
@@ -886,6 +934,25 @@ class ErgonStudioApp(App[None]):
         self.selected_memory_fact_id = fact_ids[(current_index + direction) % len(fact_ids)]
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
 
+    def _cycle_command_run(self, direction: int) -> None:
+        command_runs = self._visible_command_runs()
+        if not command_runs:
+            self.selected_command_run_id = None
+            self.query_one("#commands", Panel).set_body(self._render_commands_body())
+            return
+
+        command_run_ids = [command_run.id for command_run in command_runs]
+        if self.selected_command_run_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = command_run_ids.index(self.selected_command_run_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_command_run_id = command_run_ids[(current_index + direction) % len(command_run_ids)]
+        self.query_one("#commands", Panel).set_body(self._render_commands_body())
+
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
         self.push_screen(
@@ -934,12 +1001,31 @@ class ErgonStudioApp(App[None]):
         )
         self._refresh_panels()
 
+    def _run_workspace_command_from_editor(self, text: str) -> None:
+        command = text.strip()
+        if not command:
+            raise ValueError("Command cannot be empty.")
+
+        thread = self.runtime.get_thread(self.selected_thread_id)
+        result = self.runtime.run_workspace_command(
+            command,
+            created_at=self._next_timestamp(),
+            thread_id=self.selected_thread_id,
+            task_id=thread.parent_task_id if thread is not None else self.selected_task_id,
+            agent_id="user",
+        )
+        command_run_id = result.get("command_run_id")
+        if isinstance(command_run_id, str):
+            self.selected_command_run_id = command_run_id
+        self._refresh_panels()
+
     def _refresh_panels(self) -> None:
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_memory_fact()
         self._normalize_selected_task()
         self._normalize_selected_event()
+        self._normalize_selected_command_run()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
@@ -949,6 +1035,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
         self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+        self.query_one("#commands", Panel).set_body(self._render_commands_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
@@ -998,6 +1085,14 @@ class ErgonStudioApp(App[None]):
         if self.selected_event_id not in event_ids:
             self.selected_event_id = event_ids[-1]
 
+    def _normalize_selected_command_run(self) -> None:
+        command_run_ids = [command_run.id for command_run in self._visible_command_runs()]
+        if not command_run_ids:
+            self.selected_command_run_id = None
+            return
+        if self.selected_command_run_id not in command_run_ids:
+            self.selected_command_run_id = command_run_ids[-1]
+
     def _normalize_selected_thread(self) -> None:
         thread_ids = [thread.id for thread in self._visible_threads()]
         if not thread_ids:
@@ -1038,6 +1133,13 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_pending_approvals_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_pending_approvals()
+
+    def _visible_command_runs(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_command_runs_for_workflow_run(self.selected_workflow_run_id)
+        return self.runtime.list_command_runs()
 
     def _approval_lines(self, approvals) -> list[str]:
         return [
@@ -1085,6 +1187,43 @@ class ErgonStudioApp(App[None]):
         if not body:
             return ["", "Preview:", "(empty)"]
         return ["", "Preview:", body]
+
+    def _command_lines(self, command_runs) -> list[str]:
+        return [
+            (
+                f"{'> ' if command_run.id == self.selected_command_run_id else '  '}"
+                f"{command_run.id} [{command_run.status}/{command_run.exit_code}] {command_run.command}"
+            )
+            for command_run in command_runs[-8:]
+        ]
+
+    def _command_preview_lines(self) -> list[str]:
+        if self.selected_command_run_id is None:
+            return []
+
+        selected = None
+        for command_run in self._visible_command_runs():
+            if command_run.id == self.selected_command_run_id:
+                selected = command_run
+                break
+        if selected is None:
+            return []
+
+        lines = [
+            "",
+            "Preview:",
+            f"Cwd: {selected.cwd}",
+            f"Exit: {selected.exit_code}",
+        ]
+        if selected.agent_id is not None:
+            lines.append(f"Agent: {selected.agent_id}")
+        if selected.thread_id is not None:
+            lines.append(f"Thread: {selected.thread_id}")
+        if selected.task_id is not None:
+            lines.append(f"Task: {selected.task_id}")
+        body = self.runtime.read_command_output(selected.id).rstrip("\n")
+        lines.extend(["", body if body else "(empty)"])
+        return lines
 
     def _memory_lines(self, facts) -> list[str]:
         return [

@@ -33,6 +33,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#workflow-runs"))
                 self.assertIsNotNone(app.query_one("#threads"))
                 self.assertIsNotNone(app.query_one("#activity"))
+                self.assertIsNotNone(app.query_one("#commands"))
                 self.assertIsNotNone(app.query_one("#artifacts"))
                 self.assertIsNotNone(app.query_one("#approvals"))
                 self.assertIsNotNone(app.query_one("#memory"))
@@ -44,6 +45,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No workflow runs yet.", app.query_one("#workflow-runs", Panel).body)
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
+                self.assertIn("No commands yet.", app.query_one("#commands", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
                 self.assertIn("No memory facts yet.", app.query_one("#memory", Panel).body)
                 self.assertIn("No artifacts yet.", app.query_one("#artifacts", Panel).body)
@@ -161,6 +163,67 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 activity = app.query_one("#activity", Panel)
                 self.assertIn("thread-review-1", threads.body)
                 self.assertIn("thread_created", activity.body)
+
+    async def test_app_renders_persisted_command_runs(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.run_workspace_command(
+                "pwd",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                commands = app.query_one("#commands", Panel)
+                self.assertIn("> command-run-", commands.body)
+                self.assertIn("[completed/0] pwd", commands.body)
+                self.assertIn("Cwd:", commands.body)
+                self.assertIn("# Command Run", commands.body)
+
+    async def test_app_can_switch_selected_command_run(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.run_workspace_command(
+                "printf first",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+            runtime.run_workspace_command(
+                "printf second",
+                created_at=1_710_755_201,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                commands = app.query_one("#commands", Panel)
+                self.assertIn("printf second", commands.body)
+
+                app.action_previous_command_run()
+
+                commands = app.query_one("#commands", Panel)
+                self.assertIn("printf first", commands.body)
+                self.assertIn("Command: `printf first`", commands.body)
 
     async def test_app_can_open_selected_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -1030,6 +1093,37 @@ Be concise and structural.
                 self.assertIn("Assignments: orchestrator->local", settings.body)
                 self.assertIn("config_saved", activity.body)
 
+    async def test_app_can_run_workspace_command_from_editor(self) -> None:
+        from textual.widgets import TextArea
+
+        from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test() as pilot:
+                app.action_run_workspace_command()
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, DefinitionEditorScreen)
+                editor = app.screen.query_one("#definition-editor", TextArea)
+                editor.load_text("pwd")
+                app.screen.action_save()
+                await pilot.pause()
+
+                commands = app.query_one("#commands", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("> command-run-", commands.body)
+                self.assertIn("[completed/0] pwd", commands.body)
+                self.assertIn("command_run", activity.body)
+
     async def test_app_can_edit_selected_workflow_definition(self) -> None:
         from textual.widgets import TextArea
 
@@ -1339,6 +1433,81 @@ Return reviewed code and a clear summary.
                     activity = app.query_one("#activity", Panel)
                     self.assertIn(first_run.id, activity.body)
                     self.assertNotIn("unrelated_event", activity.body)
+
+    async def test_selected_workflow_run_scopes_commands_panel(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        responses = iter(["First run done.", "Second run done."])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Ship the feature.",
+                created_at=1_710_755_200,
+            )
+            app = ErgonStudioApp(runtime)
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: FakeAgent(next(responses)),
+            ):
+                async with app.run_test():
+                    app.selected_workflow_id = "single-agent-execution"
+                    await app.action_start_selected_workflow()
+                    first_run = runtime.list_workflow_runs()[0]
+                    first_thread = runtime.list_threads_for_workflow_run(first_run.id)[0]
+                    runtime.run_workspace_command(
+                        "printf first_only",
+                        created_at=1_710_755_300,
+                        thread_id=first_thread.id,
+                        task_id=first_thread.parent_task_id,
+                        agent_id="tester",
+                    )
+
+                    await app.action_start_selected_workflow()
+                    second_run = runtime.list_workflow_runs()[1]
+                    second_thread = runtime.list_threads_for_workflow_run(second_run.id)[0]
+                    runtime.run_workspace_command(
+                        "printf second_only",
+                        created_at=1_710_755_301,
+                        thread_id=second_thread.id,
+                        task_id=second_thread.parent_task_id,
+                        agent_id="tester",
+                    )
+                    app._refresh_panels()
+
+                    commands = app.query_one("#commands", Panel)
+                    self.assertIn(second_run.id, commands.body)
+                    self.assertIn("second_only", commands.body)
+                    self.assertNotIn("first_only", commands.body)
+
+                    app.action_previous_workflow_run()
+
+                    commands = app.query_one("#commands", Panel)
+                    self.assertIn(first_run.id, commands.body)
+                    self.assertIn("first_only", commands.body)
+                    self.assertNotIn("second_only", commands.body)
 
     async def test_app_can_clear_workflow_run_focus(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

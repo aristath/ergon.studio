@@ -99,9 +99,43 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test():
                 tasks = app.query_one("#tasks", Panel)
                 activity = app.query_one("#activity", Panel)
-                self.assertIn("task-1", tasks.body)
+                self.assertIn("> task-1", tasks.body)
+                self.assertIn("State: in_progress", tasks.body)
                 self.assertIn("Build task sidebar", tasks.body)
                 self.assertIn("task_created", activity.body)
+
+    async def test_app_can_switch_selected_activity_event(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_event(
+                kind="event_one",
+                summary="First event",
+                created_at=1_710_755_200,
+            )
+            runtime.append_event(
+                kind="event_two",
+                summary="Second event",
+                created_at=1_710_755_201,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("> event_two: Second event", activity.body)
+
+                app.action_previous_activity_event()
+
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("> event_one: First event", activity.body)
+                self.assertIn("Summary: First event", activity.body)
 
     async def test_app_renders_additional_threads(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -1062,9 +1096,47 @@ Return reviewed code and a clear summary.
 
                 tasks = app.query_one("#tasks", Panel)
                 self.assertIn("Run: workflow-run-", tasks.body)
-                self.assertIn("Root: task-", tasks.body)
+                self.assertIn("Root: > task-", tasks.body)
+                self.assertIn("State: in_progress", tasks.body)
                 self.assertIn("standard-build: architect", tasks.body)
                 self.assertIn("thread-agent-architect-", tasks.body)
+
+    async def test_app_can_switch_selected_task(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_task(
+                task_id="task-1",
+                title="First task",
+                state="planned",
+                created_at=1_710_755_200,
+            )
+            runtime.create_task(
+                task_id="task-2",
+                title="Second task",
+                state="blocked",
+                created_at=1_710_755_201,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                tasks = app.query_one("#tasks", Panel)
+                self.assertIn("> task-1", tasks.body)
+                self.assertIn("First task", tasks.body)
+
+                app.action_next_task()
+
+                tasks = app.query_one("#tasks", Panel)
+                self.assertIn("> task-2", tasks.body)
+                self.assertIn("State: blocked", tasks.body)
+                self.assertIn("Second task", tasks.body)
 
     async def test_switching_workflow_runs_focuses_the_related_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

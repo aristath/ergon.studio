@@ -91,6 +91,10 @@ class ErgonStudioApp(App[None]):
         ("f10", "request_fix_cycle_for_selected_workflow_run", "Request Fix Cycle"),
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
+        ("alt+h", "previous_activity_event", "Previous Activity"),
+        ("alt+j", "next_task", "Next Task"),
+        ("alt+k", "previous_task", "Previous Task"),
+        ("alt+l", "next_activity_event", "Next Activity"),
         ("alt+n", "next_memory_fact", "Next Memory"),
         ("alt+p", "previous_memory_fact", "Previous Memory"),
         ("ctrl+n", "next_agent", "Next Agent"),
@@ -163,10 +167,14 @@ class ErgonStudioApp(App[None]):
         self.selected_approval_id: str | None = None
         self.selected_artifact_id: str | None = None
         self.selected_memory_fact_id: str | None = None
+        self.selected_task_id: str | None = None
+        self.selected_event_id: str | None = None
         self._time_cursor = int(time.time())
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_memory_fact()
+        self._normalize_selected_task()
+        self._normalize_selected_event()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -241,6 +249,7 @@ class ErgonStudioApp(App[None]):
         if self.selected_workflow_run_id is not None:
             run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
             if run_view is not None:
+                selected_task = self.runtime.get_task(self.selected_task_id) if self.selected_task_id is not None else None
                 lines = [
                     (
                         f"Run: {run_view.workflow_run.id} "
@@ -249,7 +258,7 @@ class ErgonStudioApp(App[None]):
                 ]
                 if run_view.root_task is not None:
                     lines.append(
-                        f"Root: {run_view.root_task.id} [{run_view.root_task.state}] {run_view.root_task.title}"
+                        f"Root: {'> ' if run_view.root_task.id == self.selected_task_id else ''}{run_view.root_task.id} [{run_view.root_task.state}] {run_view.root_task.title}"
                     )
                 else:
                     lines.append("Root: missing")
@@ -259,20 +268,29 @@ class ErgonStudioApp(App[None]):
                     return "\n".join(lines)
 
                 for step in run_view.steps:
-                    lines.append(f"  task: {step.task.id} [{step.task.state}] {step.task.title}")
+                    lines.append(
+                        f"  task: {'> ' if step.task.id == self.selected_task_id else ''}{step.task.id} [{step.task.state}] {step.task.title}"
+                    )
                     if not step.threads:
                         lines.append("    thread: none")
                         continue
                     for thread in step.threads:
                         lines.append(f"    thread: {thread.id} ({self._thread_label(thread)})")
+                lines.extend(self._task_preview_lines(selected_task))
                 return "\n".join(lines)
 
-        tasks = self.runtime.list_tasks()
+        tasks = self._visible_tasks()
         if not tasks:
             return "No tasks yet."
+        selected_task = self.runtime.get_task(self.selected_task_id) if self.selected_task_id is not None else None
         return "\n".join(
-            f"{task.id} [{task.state}] {task.title}"
-            for task in tasks
+            [
+                *[
+                    f"{'> ' if task.id == self.selected_task_id else '  '}{task.id} [{task.state}] {task.title}"
+                    for task in tasks
+                ],
+                *self._task_preview_lines(selected_task),
+            ]
         )
 
     def _render_main_chat_body(self) -> str:
@@ -314,7 +332,7 @@ class ErgonStudioApp(App[None]):
         if self.selected_workflow_run_id is not None:
             run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
             if run_view is not None:
-                events = self.runtime.list_events_for_workflow_run(self.selected_workflow_run_id)
+                events = self._visible_events()
                 lines = [
                     (
                         f"Run: {run_view.workflow_run.id} "
@@ -324,19 +342,14 @@ class ErgonStudioApp(App[None]):
                 if not events:
                     lines.append("No activity for selected run.")
                     return "\n".join(lines)
-                lines.extend(
-                    f"{event.kind}: {event.summary}"
-                    for event in events[-8:]
-                )
+                lines.extend(self._event_lines(events))
+                lines.extend(self._event_preview_lines(events))
                 return "\n".join(lines)
 
-        events = self.runtime.list_events()
+        events = self._visible_events()
         if not events:
             return "No activity yet."
-        return "\n".join(
-            f"{event.kind}: {event.summary}"
-            for event in events[-8:]
-        )
+        return "\n".join(self._event_lines(events) + self._event_preview_lines(events))
 
     def _render_approvals_body(self) -> str:
         approvals = self._visible_approvals()
@@ -422,6 +435,8 @@ class ErgonStudioApp(App[None]):
             "Shortcuts: Esc clear run focus, F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
             "Artifacts: F11/F12 select\n"
+            "Activity: Alt+H / Alt+L select\n"
+            "Tasks: Alt+J / Alt+K select\n"
             "Memory: Alt+N / Alt+P select\n"
             f"Providers: {provider_text}\n"
             f"Provider Details: {'; '.join(provider_lines) if provider_lines else 'none'}\n"
@@ -545,6 +560,18 @@ class ErgonStudioApp(App[None]):
 
     def action_previous_thread(self) -> None:
         self._cycle_thread(-1)
+
+    def action_next_activity_event(self) -> None:
+        self._cycle_activity_event(1)
+
+    def action_previous_activity_event(self) -> None:
+        self._cycle_activity_event(-1)
+
+    def action_next_task(self) -> None:
+        self._cycle_task(1)
+
+    def action_previous_task(self) -> None:
+        self._cycle_task(-1)
 
     def action_next_agent(self) -> None:
         self._cycle_agent(1)
@@ -701,6 +728,44 @@ class ErgonStudioApp(App[None]):
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
 
+    def _cycle_task(self, direction: int) -> None:
+        tasks = self._visible_tasks()
+        if not tasks:
+            self.selected_task_id = None
+            self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
+            return
+
+        task_ids = [task.id for task in tasks]
+        if self.selected_task_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = task_ids.index(self.selected_task_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_task_id = task_ids[(current_index + direction) % len(task_ids)]
+        self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
+
+    def _cycle_activity_event(self, direction: int) -> None:
+        events = self._visible_events()
+        if not events:
+            self.selected_event_id = None
+            self.query_one("#activity", Panel).set_body(self._render_activity_body())
+            return
+
+        event_ids = [event.id for event in events]
+        if self.selected_event_id is None:
+            current_index = len(event_ids) - 1
+        else:
+            try:
+                current_index = event_ids.index(self.selected_event_id)
+            except ValueError:
+                current_index = len(event_ids) - 1
+
+        self.selected_event_id = event_ids[(current_index + direction) % len(event_ids)]
+        self.query_one("#activity", Panel).set_body(self._render_activity_body())
+
     @staticmethod
     def _thread_label(thread) -> str:
         if getattr(thread, "assigned_agent_id", None):
@@ -751,6 +816,8 @@ class ErgonStudioApp(App[None]):
         preferred_thread_id = self.runtime.preferred_thread_id_for_workflow_run(self.selected_workflow_run_id)
         if preferred_thread_id is not None:
             self.selected_thread_id = preferred_thread_id
+        self._normalize_selected_task()
+        self._normalize_selected_event()
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_thread()
@@ -871,6 +938,8 @@ class ErgonStudioApp(App[None]):
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_memory_fact()
+        self._normalize_selected_task()
+        self._normalize_selected_event()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
@@ -913,6 +982,22 @@ class ErgonStudioApp(App[None]):
         if self.selected_memory_fact_id not in fact_ids:
             self.selected_memory_fact_id = fact_ids[0]
 
+    def _normalize_selected_task(self) -> None:
+        task_ids = [task.id for task in self._visible_tasks()]
+        if not task_ids:
+            self.selected_task_id = None
+            return
+        if self.selected_task_id not in task_ids:
+            self.selected_task_id = task_ids[0]
+
+    def _normalize_selected_event(self) -> None:
+        event_ids = [event.id for event in self._visible_events()]
+        if not event_ids:
+            self.selected_event_id = None
+            return
+        if self.selected_event_id not in event_ids:
+            self.selected_event_id = event_ids[-1]
+
     def _normalize_selected_thread(self) -> None:
         thread_ids = [thread.id for thread in self._visible_threads()]
         if not thread_ids:
@@ -927,6 +1012,25 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_threads_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_threads()
+
+    def _visible_events(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_events_for_workflow_run(self.selected_workflow_run_id)[-8:]
+        return self.runtime.list_events()[-8:]
+
+    def _visible_tasks(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is None:
+                return []
+            tasks = []
+            if run_view.root_task is not None:
+                tasks.append(run_view.root_task)
+            tasks.extend(step.task for step in run_view.steps)
+            return tasks
+        return self.runtime.list_tasks()
 
     def _visible_approvals(self):
         if self.selected_workflow_run_id is not None:
@@ -1003,3 +1107,49 @@ class ErgonStudioApp(App[None]):
             f"Kind: {selected.kind}",
             selected.content,
         ]
+
+    def _task_preview_lines(self, selected_task) -> list[str]:
+        if selected_task is None:
+            return []
+        related_threads = [
+            thread.id
+            for thread in self.runtime.list_threads()
+            if thread.parent_task_id == selected_task.id
+        ]
+        lines = [
+            "",
+            "Preview:",
+            f"State: {selected_task.state}",
+        ]
+        if selected_task.parent_task_id is not None:
+            lines.append(f"Parent: {selected_task.parent_task_id}")
+        lines.append(selected_task.title)
+        if related_threads:
+            lines.append(f"Threads: {', '.join(related_threads)}")
+        return lines
+
+    def _event_lines(self, events) -> list[str]:
+        return [
+            f"{'> ' if event.id == self.selected_event_id else '  '}{event.kind}: {event.summary}"
+            for event in events
+        ]
+
+    def _event_preview_lines(self, events) -> list[str]:
+        selected = None
+        for event in events:
+            if event.id == self.selected_event_id:
+                selected = event
+                break
+        if selected is None:
+            return []
+        lines = [
+            "",
+            "Preview:",
+            f"Kind: {selected.kind}",
+            f"Summary: {selected.summary}",
+        ]
+        if selected.task_id is not None:
+            lines.append(f"Task: {selected.task_id}")
+        if selected.thread_id is not None:
+            lines.append(f"Thread: {selected.thread_id}")
+        return lines

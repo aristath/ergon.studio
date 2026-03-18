@@ -104,7 +104,7 @@ class ErgonStudioApp(App[None]):
                 )
                 yield Panel("Artifacts", "Diffs and generated artifacts will appear here.", panel_id="artifacts", classes="panel")
             with Vertical(id="right-sidebar"):
-                yield Panel("Approvals", "Approval requests will appear here.", panel_id="approvals", classes="panel")
+                yield Panel("Approvals", self._render_approvals_body(), panel_id="approvals", classes="panel")
                 yield Panel(
                     "Memory",
                     (
@@ -174,6 +174,15 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{event.kind}: {event.summary}"
             for event in events[-8:]
+        )
+
+    def _render_approvals_body(self) -> str:
+        approvals = self.runtime.list_approvals()
+        if not approvals:
+            return "No approvals pending."
+        return "\n".join(
+            f"{approval.id} [{approval.risk_class}] {approval.action}"
+            for approval in approvals
         )
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

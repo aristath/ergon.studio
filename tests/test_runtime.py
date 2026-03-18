@@ -29,6 +29,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
             self.assertEqual(runtime.list_main_messages(), [])
             self.assertEqual(runtime.list_events(), [])
+            self.assertEqual(runtime.list_approvals(), [])
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -183,3 +184,28 @@ class RuntimeTests(unittest.TestCase):
                 runtime.conversation_store.read_message_body(messages[0]),
                 "Looks good overall.\n",
             )
+
+    def test_runtime_can_request_and_list_approvals(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.request_approval(
+                approval_id="approval-1",
+                requester="coder",
+                action="write_file",
+                risk_class="moderate",
+                reason="Update README",
+                created_at=1_710_755_200,
+            )
+
+            approvals = runtime.list_approvals()
+
+            self.assertEqual([approval.id for approval in approvals], ["approval-1"])
+            self.assertEqual(approvals[0].status, "pending")

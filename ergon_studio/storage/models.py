@@ -82,3 +82,18 @@ class EventRecord:
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class ApprovalRecord:
+    id: str
+    session_id: str
+    requester: str
+    action: str
+    risk_class: str
+    reason: str
+    status: str
+    created_at: int
+
+    def __post_init__(self) -> None:
+        validate_unix_time(self.created_at, "created_at")

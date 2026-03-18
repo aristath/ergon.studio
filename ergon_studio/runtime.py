@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from ergon_studio.approval_store import ApprovalStore
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.event_store import EventStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import EventRecord, MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, EventRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
@@ -27,6 +28,7 @@ class RuntimeContext:
     conversation_store: ConversationStore
     task_store: TaskStore
     event_store: EventStore
+    approval_store: ApprovalStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -41,6 +43,9 @@ class RuntimeContext:
 
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
+
+    def list_approvals(self) -> list[ApprovalRecord]:
+        return self.approval_store.list_approvals(self.main_session_id)
 
     def create_thread(
         self,
@@ -168,6 +173,26 @@ class RuntimeContext:
             task_id=task_id,
         )
 
+    def request_approval(
+        self,
+        *,
+        approval_id: str,
+        requester: str,
+        action: str,
+        risk_class: str,
+        reason: str,
+        created_at: int,
+    ) -> ApprovalRecord:
+        return self.approval_store.request_approval(
+            session_id=self.main_session_id,
+            approval_id=approval_id,
+            requester=requester,
+            action=action,
+            risk_class=risk_class,
+            reason=reason,
+            created_at=created_at,
+        )
+
     def ensure_main_conversation(self) -> None:
         self.conversation_store.ensure_session(self.main_session_id, created_at=0)
         self.conversation_store.ensure_thread(
@@ -185,6 +210,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
     event_store = EventStore(paths)
+    approval_store = ApprovalStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
@@ -192,6 +218,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         conversation_store=conversation_store,
         task_store=task_store,
         event_store=event_store,
+        approval_store=approval_store,
     )
     runtime.ensure_main_conversation()
     return runtime

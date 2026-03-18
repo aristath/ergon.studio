@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import EventRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, EventRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -62,6 +62,19 @@ SCHEMA_STATEMENTS = (
       created_at INTEGER NOT NULL,
       thread_id TEXT,
       task_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS approvals (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      requester TEXT NOT NULL,
+      action TEXT NOT NULL,
+      risk_class TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -357,6 +370,53 @@ class MetadataStore:
                 created_at=row[4],
                 thread_id=row[5],
                 task_id=row[6],
+            )
+            for row in rows
+        ]
+
+    def insert_approval(self, record: ApprovalRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO approvals (
+                  id, session_id, requester, action, risk_class, reason, status, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.requester,
+                    record.action,
+                    record.risk_class,
+                    record.reason,
+                    record.status,
+                    record.created_at,
+                ),
+            )
+            connection.commit()
+
+    def list_approvals(self, session_id: str) -> list[ApprovalRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at
+                FROM approvals
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            ApprovalRecord(
+                id=row[0],
+                session_id=row[1],
+                requester=row[2],
+                action=row[3],
+                risk_class=row[4],
+                reason=row[5],
+                status=row[6],
+                created_at=row[7],
             )
             for row in rows
         ]

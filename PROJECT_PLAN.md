@@ -25,6 +25,8 @@ Core principles:
 - full codebase agency
 - minimal heuristic behavior
 - no keyword-triggered actions
+- test-driven development
+- extensive automated testing
 
 ## 2. Core Technology Decisions
 
@@ -36,6 +38,7 @@ Locked decisions:
 - model access: OpenAI-compatible endpoints plus supported native providers
 - no custom provider abstraction at this stage
 - product name: ergon.studio
+- Python package name: ergon_studio
 
 Primary stack:
 - Python
@@ -114,6 +117,11 @@ Heuristics rule:
 We should keep heuristic checks and behavior to a minimum.
 We should not trigger actions based on keywords or substring matching under any circumstances.
 Routing, delegation, approvals, and workflow selection should be driven by structured state, explicit user intent, typed model outputs, and orchestrator decisions rather than text-pattern rules.
+
+Testing rule:
+We follow TDD.
+Core functionality should be implemented test-first whenever practical.
+The project should maintain extensive automated coverage across unit, integration, and end-to-end layers.
 
 ## 5. Conversation and Thread Model
 
@@ -1165,6 +1173,7 @@ We need both software tests and orchestration evaluations.
 - tool tests
 - workflow tests
 - TUI component tests
+- end-to-end tests
 
 ### 17.2 Agent and Workflow Evals
 
@@ -1182,6 +1191,9 @@ This product cannot rely only on normal software tests because a core part of th
 Testing rule:
 - test workflow decisions and transitions through structured state and typed outputs
 - do not encode behavior tests around keyword-triggering assumptions
+- write tests before or alongside implementation as the default development mode
+- maintain strong coverage for both deterministic code and orchestrated flows
+- prefer deterministic fixtures and fake providers in unit and integration tests
 
 ## 18. Packaging and Distribution
 

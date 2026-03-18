@@ -71,6 +71,41 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual(agent.name, "Orchestrator")
             self.assertEqual(agent.client.model_id, "qwen2.5-coder")
+            self.assertEqual(runtime.agent_status_summary("orchestrator"), "ready via local (qwen2.5-coder)")
+
+    def test_runtime_can_reload_registry_after_config_changes(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            self.assertEqual(runtime.agent_status_summary("orchestrator"), "not configured")
+
+            save_global_config(
+                runtime.paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                        }
+                    },
+                    "role_assignments": {"orchestrator": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+
+            runtime.reload_registry()
+
+            self.assertEqual(runtime.agent_status_summary("orchestrator"), "ready via local (qwen2.5-coder)")
 
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime

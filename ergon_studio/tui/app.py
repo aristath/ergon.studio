@@ -203,12 +203,17 @@ class ErgonStudioApp(App[None]):
         providers = self.runtime.list_provider_ids()
         agents = self.runtime.list_agent_ids()
         workflows = self.runtime.list_workflow_ids()
+        orchestrator_status = self.runtime.agent_status_summary("orchestrator")
 
         provider_text = ", ".join(providers) if providers else "none"
         agent_text = ", ".join(agents)
         workflow_text = ", ".join(workflows)
 
         return (
+            f"Config: {self.runtime.paths.config_path}\n"
+            f"Agents Dir: {self.runtime.paths.agents_dir}\n"
+            f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
+            f"Orchestrator: {orchestrator_status}\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"

@@ -43,6 +43,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No artifacts yet.", app.query_one("#artifacts", Panel).body)
                 self.assertIn("orchestrator", app.query_one("#settings", Panel).body)
                 self.assertIn("standard-build", app.query_one("#settings", Panel).body)
+                self.assertIn("Orchestrator: not configured", app.query_one("#settings", Panel).body)
 
     async def test_app_renders_persisted_main_thread_messages(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

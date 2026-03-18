@@ -43,12 +43,38 @@ class RuntimeContext:
     def build_agent(self, agent_id: str):
         return build_agent(self.registry, agent_id, tool_registry=self.tool_registry)
 
+    def reload_registry(self) -> None:
+        object.__setattr__(self, "registry", load_registry(self.paths))
+
     def can_build_agent(self, agent_id: str) -> bool:
         try:
             self.build_agent(agent_id)
         except (KeyError, ValueError):
             return False
         return True
+
+    def assigned_provider_name(self, agent_id: str) -> str | None:
+        definition = self.registry.agent_definitions.get(agent_id)
+        if definition is None:
+            return None
+
+        role = str(definition.metadata.get("role", definition.id))
+        role_assignments = self.registry.config.get("role_assignments", {})
+        provider_name = role_assignments.get(role) or role_assignments.get(agent_id)
+        if not provider_name:
+            return None
+        if provider_name not in self.registry.config.get("providers", {}):
+            return None
+        return provider_name
+
+    def agent_status_summary(self, agent_id: str) -> str:
+        provider_name = self.assigned_provider_name(agent_id)
+        if provider_name is None:
+            return "not configured"
+
+        provider = self.registry.config["providers"][provider_name]
+        model_name = provider.get("model", "unknown-model")
+        return f"ready via {provider_name} ({model_name})"
 
     def list_threads(self) -> list[ThreadRecord]:
         return self.conversation_store.list_threads(self.main_session_id)

@@ -37,6 +37,15 @@ def load_definition(path: Path) -> DefinitionDocument:
     )
 
 
+def save_definition(path: Path, metadata: dict[str, Any], body: str) -> DefinitionDocument:
+    if "id" not in metadata:
+        raise ValueError("definition metadata must include an id")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_definition(metadata=metadata, body=body), encoding="utf-8")
+    return load_definition(path)
+
+
 def load_definitions_from_dir(directory: Path) -> dict[str, DefinitionDocument]:
     definitions: dict[str, DefinitionDocument] = {}
     if not directory.exists():
@@ -48,6 +57,12 @@ def load_definitions_from_dir(directory: Path) -> dict[str, DefinitionDocument]:
             raise ValueError(f"duplicate definition id: {definition.id}")
         definitions[definition.id] = definition
     return definitions
+
+
+def render_definition(*, metadata: dict[str, Any], body: str) -> str:
+    frontmatter = yaml.safe_dump(metadata, sort_keys=False).strip()
+    cleaned_body = body.strip()
+    return f"---\n{frontmatter}\n---\n{cleaned_body}\n"
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

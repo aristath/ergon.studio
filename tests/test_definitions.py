@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.definitions import load_definition, load_definitions_from_dir
+from ergon_studio.definitions import load_definition, load_definitions_from_dir, save_definition
 
 
 class DefinitionLoaderTests(unittest.TestCase):
@@ -69,3 +69,27 @@ Reviews code critically.
             definitions = load_definitions_from_dir(definitions_dir)
 
             self.assertEqual(sorted(definitions.keys()), ["coder", "reviewer"])
+
+    def test_save_definition_round_trips_markdown_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            definition_path = Path(temp_dir) / "orchestrator.md"
+
+            saved = save_definition(
+                definition_path,
+                {
+                    "id": "orchestrator",
+                    "role": "orchestrator",
+                    "temperature": 0.2,
+                },
+                """## Identity
+Lead engineer.
+
+## Rules
+Avoid keyword-triggered behavior.
+""",
+            )
+
+            self.assertEqual(saved.id, "orchestrator")
+            self.assertEqual(saved.metadata["temperature"], 0.2)
+            self.assertEqual(saved.sections["Identity"], "Lead engineer.")
+            self.assertEqual(saved.sections["Rules"], "Avoid keyword-triggered behavior.")

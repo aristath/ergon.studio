@@ -4,6 +4,9 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+import re
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from agent_framework import FunctionTool, tool
 
@@ -75,6 +78,16 @@ def build_workspace_tool_registry(
                     )
         return matches
 
+    @tool(name="web_lookup", approval_mode="always_require", kind="network")
+    def web_lookup(query: str, limit: int = 5) -> list[dict[str, str]]:
+        request = Request(
+            f"https://duckduckgo.com/html/?q={quote(query)}",
+            headers={"User-Agent": "ergon.studio/0.1"},
+        )
+        with urlopen(request, timeout=10) as response:
+            html = response.read().decode("utf-8", errors="replace")
+        return _parse_web_lookup_results(html, limit)
+
     @tool(name="run_command", approval_mode="always_require", kind="shell")
     def run_command(command: str, timeout: int = 60) -> dict[str, int | str]:
         if run_command_handler is not None:
@@ -104,5 +117,35 @@ def build_workspace_tool_registry(
         "patch_file": patch_file,
         "list_files": list_files,
         "search_files": search_files,
+        "web_lookup": web_lookup,
         "run_command": run_command,
     }
+
+
+def _parse_web_lookup_results(html: str, limit: int) -> list[dict[str, str]]:
+    titles = re.findall(
+        r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    snippets = re.findall(
+        r'<(?:a|div)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</(?:a|div)>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    results: list[dict[str, str]] = []
+    for index, (url, title_html) in enumerate(titles[:limit]):
+        title = _strip_html(title_html)
+        snippet = _strip_html(snippets[index]) if index < len(snippets) else ""
+        results.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+            }
+        )
+    return results
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", value)).strip()

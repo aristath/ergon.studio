@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
@@ -19,6 +20,7 @@ class ToolRegistryTests(unittest.TestCase):
                     "patch_file",
                     "run_command",
                     "search_files",
+                    "web_lookup",
                     "list_files",
                 }.issubset(registry.keys())
             )
@@ -84,6 +86,50 @@ class ToolRegistryTests(unittest.TestCase):
 
             self.assertEqual(observed, [("pwd", 5)])
             self.assertEqual(result["command_run_id"], "command-run-1")
+
+    def test_web_lookup_parses_search_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            registry = build_workspace_tool_registry(project_root)
+            html = """
+<html>
+  <body>
+    <a class="result__a" href="https://example.com/one">First Result</a>
+    <div class="result__snippet">First snippet</div>
+    <a class="result__a" href="https://example.com/two">Second Result</a>
+    <div class="result__snippet">Second snippet</div>
+  </body>
+</html>
+"""
+
+            class FakeResponse:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def read(self) -> bytes:
+                    return html.encode("utf-8")
+
+            with patch("ergon_studio.tool_registry.urlopen", return_value=FakeResponse()):
+                results = registry["web_lookup"].func(query="ergon studio", limit=2)
+
+            self.assertEqual(
+                results,
+                [
+                    {
+                        "title": "First Result",
+                        "url": "https://example.com/one",
+                        "snippet": "First snippet",
+                    },
+                    {
+                        "title": "Second Result",
+                        "url": "https://example.com/two",
+                        "snippet": "Second snippet",
+                    },
+                ],
+            )
 
     def test_tools_reject_paths_outside_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

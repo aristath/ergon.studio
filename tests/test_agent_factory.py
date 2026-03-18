@@ -127,3 +127,68 @@ Lead engineer.
 
             with self.assertRaisesRegex(ValueError, "unknown tool"):
                 build_agent(registry, "orchestrator", tool_registry={})
+
+    def test_build_agent_can_resolve_seeded_researcher_tools(self) -> None:
+        from ergon_studio.agent_factory import build_agent
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            home_dir = base / "home"
+            project_root = base / "repo"
+            home_dir.mkdir()
+            project_root.mkdir()
+            paths = StudioPaths(
+                home_dir=home_dir,
+                project_root=project_root,
+                project_uuid=UUID("12345678-1234-5678-1234-567812345678"),
+            )
+            paths.ensure_global_layout()
+            save_global_config(
+                paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                        }
+                    },
+                    "role_assignments": {"researcher": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+            (paths.agents_dir / "researcher.md").write_text(
+                """---
+id: researcher
+name: Researcher
+role: researcher
+tools:
+  - search_files
+  - web_lookup
+---
+## Identity
+Research specialist.
+""",
+                encoding="utf-8",
+            )
+            registry = load_registry(paths)
+
+            def search_files(pattern: str, path: str = ".") -> list[dict[str, int | str]]:
+                return [{"path": path, "line_number": 1, "line": pattern}]
+
+            def web_lookup(query: str, limit: int = 5) -> list[dict[str, str]]:
+                return [{"title": query, "url": "https://example.com", "snippet": str(limit)}]
+
+            agent = build_agent(
+                registry,
+                "researcher",
+                tool_registry={
+                    "search_files": search_files,
+                    "web_lookup": web_lookup,
+                },
+            )
+
+            self.assertEqual(agent.id, "researcher")
+            self.assertEqual(len(agent.default_options["tools"]), 2)

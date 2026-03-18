@@ -559,7 +559,7 @@ class RuntimeContext:
             )
             thread = self.create_agent_thread(
                 agent_id=agent_id,
-                created_at=created_at + offset + 100,
+                created_at=created_at + len(participants) + offset,
                 parent_task_id=child_task.id,
             )
             threads.append(thread)

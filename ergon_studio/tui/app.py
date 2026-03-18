@@ -387,15 +387,16 @@ class ErgonStudioApp(App[None]):
         self._open_workflow_definition_editor(self.selected_workflow_id)
 
     async def action_start_selected_workflow(self) -> None:
+        created_at = int(time.time())
         workflow_run, threads = self.runtime.start_workflow_run(
             workflow_id=self.selected_workflow_id,
-            created_at=int(time.time()),
+            created_at=created_at,
         )
         self.selected_workflow_run_id = workflow_run.id
         if threads:
             _, thread, _ = await self.runtime.advance_workflow_run(
                 workflow_run_id=workflow_run.id,
-                created_at=int(time.time()),
+                created_at=created_at + (len(threads) * 2) + 2,
             )
             if thread is not None:
                 self.selected_thread_id = thread.id

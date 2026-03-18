@@ -81,6 +81,7 @@ class DefinitionEditorScreen(ModalScreen[None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("escape", "clear_workflow_run_focus", "Clear Run Focus"),
         ("f1", "previous_approval", "Previous Approval"),
         ("f2", "next_approval", "Next Approval"),
         ("f3", "previous_workflow_run", "Previous Run"),
@@ -393,7 +394,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Shortcuts: Esc clear run focus, F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
             "Artifacts: F11/F12 select\n"
             "Memory: Alt+N / Alt+P select\n"
@@ -603,6 +604,12 @@ class ErgonStudioApp(App[None]):
 
     def action_previous_workflow_run(self) -> None:
         self._cycle_workflow_run(-1)
+
+    def action_clear_workflow_run_focus(self) -> None:
+        if self.selected_workflow_run_id is None:
+            return
+        self.selected_workflow_run_id = None
+        self._refresh_panels()
 
     def action_next_approval(self) -> None:
         self._cycle_approval(1)

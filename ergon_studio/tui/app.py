@@ -116,7 +116,7 @@ class ErgonStudioApp(App[None]):
                 )
                 yield Panel(
                     "Settings",
-                    f"Configured providers: {len(self.runtime.registry.config.get('providers', {}))}",
+                    self._render_settings_body(),
                     panel_id="settings",
                     classes="panel",
                 )
@@ -183,6 +183,21 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{approval.id} [{approval.risk_class}] {approval.action}"
             for approval in approvals
+        )
+
+    def _render_settings_body(self) -> str:
+        providers = self.runtime.list_provider_ids()
+        agents = self.runtime.list_agent_ids()
+        workflows = self.runtime.list_workflow_ids()
+
+        provider_text = ", ".join(providers) if providers else "none"
+        agent_text = ", ".join(agents)
+        workflow_text = ", ".join(workflows)
+
+        return (
+            f"Providers: {provider_text}\n"
+            f"Agents: {agent_text}\n"
+            f"Workflows: {workflow_text}"
         )
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

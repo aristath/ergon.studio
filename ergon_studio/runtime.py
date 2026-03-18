@@ -47,6 +47,15 @@ class RuntimeContext:
     def list_approvals(self) -> list[ApprovalRecord]:
         return self.approval_store.list_approvals(self.main_session_id)
 
+    def list_agent_ids(self) -> list[str]:
+        return sorted(self.registry.agent_definitions.keys())
+
+    def list_workflow_ids(self) -> list[str]:
+        return sorted(self.registry.workflow_definitions.keys())
+
+    def list_provider_ids(self) -> list[str]:
+        return sorted(self.registry.config.get("providers", {}).keys())
+
     def create_thread(
         self,
         *,

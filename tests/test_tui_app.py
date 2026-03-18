@@ -35,6 +35,8 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
+                self.assertIn("orchestrator", app.query_one("#settings", Panel).body)
+                self.assertIn("standard-build", app.query_one("#settings", Panel).body)
 
     async def test_app_renders_persisted_main_thread_messages(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

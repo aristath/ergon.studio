@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.conversation_store import ConversationStore
+from ergon_studio.event_store import EventStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import EventRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
@@ -24,6 +26,7 @@ class RuntimeContext:
     tool_registry: dict[str, object]
     conversation_store: ConversationStore
     task_store: TaskStore
+    event_store: EventStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -35,6 +38,9 @@ class RuntimeContext:
 
     def list_tasks(self) -> list[TaskRecord]:
         return self.task_store.list_tasks(self.main_session_id)
+
+    def list_events(self) -> list[EventRecord]:
+        return self.event_store.list_events(self.main_session_id)
 
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
@@ -49,7 +55,7 @@ class RuntimeContext:
         created_at: int,
     ) -> MessageRecord:
         self.ensure_main_conversation()
-        return self.conversation_store.append_message(
+        message = self.conversation_store.append_message(
             thread_id=self.main_thread_id,
             message_id=message_id,
             sender=sender,
@@ -57,6 +63,13 @@ class RuntimeContext:
             body=body,
             created_at=created_at,
         )
+        self.append_event(
+            kind="message_created",
+            summary=f"{sender} posted to {self.main_thread_id}",
+            created_at=created_at,
+            thread_id=self.main_thread_id,
+        )
+        return message
 
     def create_task(
         self,
@@ -68,13 +81,39 @@ class RuntimeContext:
         parent_task_id: str | None = None,
     ) -> TaskRecord:
         self.ensure_main_conversation()
-        return self.task_store.create_task(
+        task = self.task_store.create_task(
             session_id=self.main_session_id,
             task_id=task_id,
             title=title,
             state=state,
             created_at=created_at,
             parent_task_id=parent_task_id,
+        )
+        self.append_event(
+            kind="task_created",
+            summary=f"Created task {task_id}",
+            created_at=created_at,
+            task_id=task_id,
+        )
+        return task
+
+    def append_event(
+        self,
+        *,
+        kind: str,
+        summary: str,
+        created_at: int,
+        thread_id: str | None = None,
+        task_id: str | None = None,
+    ) -> EventRecord:
+        return self.event_store.append_event(
+            session_id=self.main_session_id,
+            event_id=f"event-{uuid4().hex}",
+            kind=kind,
+            summary=summary,
+            created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
         )
 
     def ensure_main_conversation(self) -> None:
@@ -92,12 +131,14 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     tool_registry = build_workspace_tool_registry(paths.project_root)
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
+    event_store = EventStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
         tool_registry=tool_registry,
         conversation_store=conversation_store,
         task_store=task_store,
+        event_store=event_store,
     )
     runtime.ensure_main_conversation()
     return runtime

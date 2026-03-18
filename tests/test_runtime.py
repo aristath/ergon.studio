@@ -28,6 +28,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_tasks(), [])
             self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
             self.assertEqual(runtime.list_main_messages(), [])
+            self.assertEqual(runtime.list_events(), [])
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -89,6 +90,10 @@ class RuntimeTests(unittest.TestCase):
                 runtime.conversation_store.read_message_body(messages[0]),
                 "Hello from runtime.\n",
             )
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["message_created"],
+            )
 
     def test_runtime_can_create_and_list_tasks(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -112,3 +117,7 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([task.id for task in tasks], ["task-1"])
             self.assertEqual(tasks[0].title, "Build real task panel")
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["task_created"],
+            )

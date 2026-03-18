@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import EventRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -51,6 +51,18 @@ SCHEMA_STATEMENTS = (
       artifact_id TEXT,
       tool_call_id TEXT,
       FOREIGN KEY(thread_id) REFERENCES threads(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      thread_id TEXT,
+      task_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
 )
@@ -300,6 +312,51 @@ class MetadataStore:
                 task_id=row[6],
                 artifact_id=row[7],
                 tool_call_id=row[8],
+            )
+            for row in rows
+        ]
+
+    def insert_event(self, record: EventRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO events (
+                  id, session_id, kind, summary, created_at, thread_id, task_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.kind,
+                    record.summary,
+                    record.created_at,
+                    record.thread_id,
+                    record.task_id,
+                ),
+            )
+            connection.commit()
+
+    def list_events(self, session_id: str) -> list[EventRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, kind, summary, created_at, thread_id, task_id
+                FROM events
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            EventRecord(
+                id=row[0],
+                session_id=row[1],
+                kind=row[2],
+                summary=row[3],
+                created_at=row[4],
+                thread_id=row[5],
+                task_id=row[6],
             )
             for row in rows
         ]

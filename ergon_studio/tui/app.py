@@ -83,7 +83,7 @@ class ErgonStudioApp(App[None]):
             with Vertical(id="left-sidebar"):
                 yield Panel("Tasks", self._render_tasks_body(), panel_id="tasks", classes="panel")
                 yield Panel("Threads", self._render_threads_body(), panel_id="threads", classes="panel")
-                yield Panel("Activity", "Workflow activity will appear here.", panel_id="activity", classes="panel")
+                yield Panel("Activity", self._render_activity_body(), panel_id="activity", classes="panel")
             with Vertical(id="center-column"):
                 yield Panel(
                     "Main Chat",
@@ -145,6 +145,15 @@ class ErgonStudioApp(App[None]):
             rendered_messages.append(f"[{message.sender}] {body}")
         return "\n\n".join(rendered_messages)
 
+    def _render_activity_body(self) -> str:
+        events = self.runtime.list_events()
+        if not events:
+            return "No activity yet."
+        return "\n".join(
+            f"{event.kind}: {event.summary}"
+            for event in events[-8:]
+        )
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         message_body = event.value.strip()
         if not message_body:
@@ -161,4 +170,5 @@ class ErgonStudioApp(App[None]):
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#activity", Panel).set_body(self._render_activity_body())
         event.input.value = ""

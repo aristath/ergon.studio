@@ -33,6 +33,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#settings"))
                 self.assertIn("thread-main", app.query_one("#threads", Panel).body)
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
+                self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
 
     async def test_app_renders_persisted_main_thread_messages(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -81,8 +82,10 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test():
                 tasks = app.query_one("#tasks", Panel)
+                activity = app.query_one("#activity", Panel)
                 self.assertIn("task-1", tasks.body)
                 self.assertIn("Build task sidebar", tasks.body)
+                self.assertIn("task_created", activity.body)
 
     async def test_submitting_input_persists_a_user_message(self) -> None:
         from textual.widgets import Input
@@ -105,5 +108,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("enter")
 
                 main_chat = app.query_one("#main-chat", Panel)
+                activity = app.query_one("#activity", Panel)
                 self.assertIn("Ship the next slice.", main_chat.body)
+                self.assertIn("message_created", activity.body)
                 self.assertEqual(len(runtime.list_main_messages()), 1)

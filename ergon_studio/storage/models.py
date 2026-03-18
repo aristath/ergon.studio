@@ -68,3 +68,17 @@ class MessageRecord:
         if not isinstance(self.body_path, Path):
             raise TypeError("body_path must be a Path")
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class EventRecord:
+    id: str
+    session_id: str
+    kind: str
+    summary: str
+    created_at: int
+    thread_id: str | None = None
+    task_id: str | None = None
+
+    def __post_init__(self) -> None:
+        validate_unix_time(self.created_at, "created_at")

@@ -229,6 +229,32 @@ class MetadataStore:
             tool_call_id=row[8],
         )
 
+    def list_messages(self, thread_id: str) -> list[MessageRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, thread_id, sender, kind, body_path, created_at, task_id, artifact_id, tool_call_id
+                FROM messages
+                WHERE thread_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (thread_id,),
+            ).fetchall()
+        return [
+            MessageRecord(
+                id=row[0],
+                thread_id=row[1],
+                sender=row[2],
+                kind=row[3],
+                body_path=Path(row[4]),
+                created_at=row[5],
+                task_id=row[6],
+                artifact_id=row[7],
+                tool_call_id=row[8],
+            )
+            for row in rows
+        ]
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.execute("PRAGMA foreign_keys = ON")

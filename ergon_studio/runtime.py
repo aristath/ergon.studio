@@ -9,9 +9,10 @@ from ergon_studio.agent_factory import build_agent
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.event_store import EventStore
+from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, EventRecord, MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
@@ -29,6 +30,7 @@ class RuntimeContext:
     task_store: TaskStore
     event_store: EventStore
     approval_store: ApprovalStore
+    memory_store: MemoryStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -55,6 +57,9 @@ class RuntimeContext:
 
     def list_provider_ids(self) -> list[str]:
         return sorted(self.registry.config.get("providers", {}).keys())
+
+    def list_memory_facts(self) -> list[MemoryFactRecord]:
+        return self.memory_store.list_facts()
 
     def create_thread(
         self,
@@ -202,6 +207,23 @@ class RuntimeContext:
             created_at=created_at,
         )
 
+    def add_memory_fact(
+        self,
+        *,
+        fact_id: str,
+        scope: str,
+        kind: str,
+        content: str,
+        created_at: int,
+    ) -> MemoryFactRecord:
+        return self.memory_store.add_fact(
+            fact_id=fact_id,
+            scope=scope,
+            kind=kind,
+            content=content,
+            created_at=created_at,
+        )
+
     def ensure_main_conversation(self) -> None:
         self.conversation_store.ensure_session(self.main_session_id, created_at=0)
         self.conversation_store.ensure_thread(
@@ -220,6 +242,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     task_store = TaskStore(paths)
     event_store = EventStore(paths)
     approval_store = ApprovalStore(paths)
+    memory_store = MemoryStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
@@ -228,6 +251,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         task_store=task_store,
         event_store=event_store,
         approval_store=approval_store,
+        memory_store=memory_store,
     )
     runtime.ensure_main_conversation()
     return runtime

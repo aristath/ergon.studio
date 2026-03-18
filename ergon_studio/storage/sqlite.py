@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import ApprovalRecord, EventRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -76,6 +76,15 @@ SCHEMA_STATEMENTS = (
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_facts (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL
     )
     """,
 )
@@ -417,6 +426,43 @@ class MetadataStore:
                 reason=row[5],
                 status=row[6],
                 created_at=row[7],
+            )
+            for row in rows
+        ]
+
+    def insert_memory_fact(self, record: MemoryFactRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO memory_facts (id, scope, kind, content, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.scope,
+                    record.kind,
+                    record.content,
+                    record.created_at,
+                ),
+            )
+            connection.commit()
+
+    def list_memory_facts(self) -> list[MemoryFactRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, scope, kind, content, created_at
+                FROM memory_facts
+                ORDER BY created_at ASC, id ASC
+                """
+            ).fetchall()
+        return [
+            MemoryFactRecord(
+                id=row[0],
+                scope=row[1],
+                kind=row[2],
+                content=row[3],
+                created_at=row[4],
             )
             for row in rows
         ]

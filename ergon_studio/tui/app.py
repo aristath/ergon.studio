@@ -107,10 +107,7 @@ class ErgonStudioApp(App[None]):
                 yield Panel("Approvals", self._render_approvals_body(), panel_id="approvals", classes="panel")
                 yield Panel(
                     "Memory",
-                    (
-                        f"Agents: {len(self.runtime.registry.agent_definitions)}\n"
-                        f"Workflows: {len(self.runtime.registry.workflow_definitions)}"
-                    ),
+                    self._render_memory_body(),
                     panel_id="memory",
                     classes="panel",
                 )
@@ -183,6 +180,15 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{approval.id} [{approval.risk_class}] {approval.action}"
             for approval in approvals
+        )
+
+    def _render_memory_body(self) -> str:
+        facts = self.runtime.list_memory_facts()
+        if not facts:
+            return "No memory facts yet."
+        return "\n".join(
+            f"{fact.id} [{fact.kind}] {fact.content}"
+            for fact in facts[-8:]
         )
 
     def _render_settings_body(self) -> str:

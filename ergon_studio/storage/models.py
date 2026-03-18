@@ -97,3 +97,15 @@ class ApprovalRecord:
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class MemoryFactRecord:
+    id: str
+    scope: str
+    kind: str
+    content: str
+    created_at: int
+
+    def __post_init__(self) -> None:
+        validate_unix_time(self.created_at, "created_at")

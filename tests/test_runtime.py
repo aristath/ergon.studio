@@ -30,6 +30,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_main_messages(), [])
             self.assertEqual(runtime.list_events(), [])
             self.assertEqual(runtime.list_approvals(), [])
+            self.assertEqual(runtime.list_memory_facts(), [])
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -209,3 +210,27 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([approval.id for approval in approvals], ["approval-1"])
             self.assertEqual(approvals[0].status, "pending")
+
+    def test_runtime_can_add_and_list_memory_facts(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.add_memory_fact(
+                fact_id="fact-1",
+                scope="project",
+                kind="decision",
+                content="Use Textual for the TUI.",
+                created_at=1_710_755_200,
+            )
+
+            facts = runtime.list_memory_facts()
+
+            self.assertEqual([fact.id for fact in facts], ["fact-1"])
+            self.assertEqual(facts[0].content, "Use Textual for the TUI.")

@@ -192,13 +192,20 @@ class RuntimeContext:
         )
         return thread
 
-    def create_agent_thread(self, *, agent_id: str, created_at: int) -> ThreadRecord:
+    def create_agent_thread(
+        self,
+        *,
+        agent_id: str,
+        created_at: int,
+        parent_task_id: str | None = None,
+    ) -> ThreadRecord:
         return self.create_thread(
             thread_id=f"thread-agent-{agent_id}-{uuid4().hex[:8]}",
             kind="agent_direct",
             created_at=created_at,
             assigned_agent_id=agent_id,
             summary=f"Direct thread with {agent_id}",
+            parent_task_id=parent_task_id,
         )
 
     def get_thread(self, thread_id: str) -> ThreadRecord | None:

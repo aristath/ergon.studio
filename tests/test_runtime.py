@@ -324,10 +324,12 @@ Return reviewed code and a clear summary.
             thread = runtime.create_agent_thread(
                 agent_id="architect",
                 created_at=1_710_755_200,
+                parent_task_id="task-1",
             )
 
             self.assertEqual(thread.kind, "agent_direct")
             self.assertEqual(thread.assigned_agent_id, "architect")
+            self.assertEqual(thread.parent_task_id, "task-1")
             self.assertEqual(runtime.get_thread(thread.id), thread)
 
     def test_runtime_can_append_messages_to_additional_threads(self) -> None:

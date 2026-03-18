@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from uuid import uuid4
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -343,9 +344,17 @@ class ErgonStudioApp(App[None]):
         self._cycle_agent(-1)
 
     def action_open_selected_agent_thread(self) -> None:
+        created_at = int(time.time())
+        task = self.runtime.create_task(
+            task_id=f"task-{uuid4().hex[:8]}",
+            title=f"Agent thread: {self.selected_agent_id}",
+            state="in_progress",
+            created_at=created_at,
+        )
         thread = self.runtime.create_agent_thread(
             agent_id=self.selected_agent_id,
-            created_at=int(time.time()),
+            created_at=created_at + 1,
+            parent_task_id=task.id,
         )
         self.selected_thread_id = thread.id
         self._refresh_panels()

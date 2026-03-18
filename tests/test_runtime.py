@@ -351,6 +351,7 @@ Return reviewed code and a clear summary.
 
             self.assertEqual(workflow_run.workflow_id, "standard-build")
             self.assertEqual(workflow_run.state, "running")
+            self.assertEqual(workflow_run.current_step_index, 0)
             self.assertEqual(len(threads), 3)
             self.assertEqual([thread.assigned_agent_id for thread in threads], ["architect", "coder", "reviewer"])
             self.assertEqual(
@@ -631,4 +632,68 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [message.sender for message in runtime.list_thread_messages(thread.id)],
                 ["orchestrator", "architect"],
+            )
+
+    async def test_runtime_can_advance_workflow_run_to_next_agent(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Build the next feature.",
+                created_at=1_710_755_200,
+            )
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_210,
+            )
+            fake_agents = {
+                "architect": FakeAgent("Architecture ready."),
+                "coder": FakeAgent("Implementation ready."),
+                "reviewer": FakeAgent("Review complete."),
+            }
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                advanced_run, first_thread, _ = await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_220,
+                )
+                second_run, second_thread, _ = await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_230,
+                )
+
+            self.assertEqual(first_thread.id, threads[0].id)
+            self.assertEqual(advanced_run.current_step_index, 1)
+            self.assertEqual(second_thread.id, threads[1].id)
+            self.assertEqual(second_run.current_step_index, 2)
+            second_thread_messages = runtime.list_thread_messages(threads[1].id)
+            self.assertIn("Architecture ready.", runtime.conversation_store.read_message_body(second_thread_messages[0]))
+            self.assertEqual(
+                [event.kind for event in runtime.list_events() if event.kind.startswith("workflow_")],
+                ["workflow_started", "workflow_advanced", "workflow_advanced"],
             )

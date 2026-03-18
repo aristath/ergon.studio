@@ -81,7 +81,10 @@ class DefinitionEditorScreen(ModalScreen[None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("f3", "previous_workflow_run", "Previous Run"),
+        ("f4", "next_workflow_run", "Next Run"),
         ("f5", "start_selected_workflow", "Start Workflow"),
+        ("f6", "advance_selected_workflow_run", "Advance Workflow"),
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
         ("ctrl+n", "next_agent", "Next Agent"),
@@ -146,6 +149,7 @@ class ErgonStudioApp(App[None]):
         self.selected_thread_id = runtime.main_thread_id
         self.selected_agent_id = "orchestrator"
         self.selected_workflow_id = "standard-build"
+        self.selected_workflow_run_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -283,7 +287,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: F5 start workflow, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -312,7 +316,7 @@ class ErgonStudioApp(App[None]):
         if not runs:
             return "No workflow runs yet."
         return "\n".join(
-            f"{run.id} [{run.state}] {run.workflow_id}"
+            f"{'> ' if run.id == self.selected_workflow_run_id else '  '}{run.id} [{run.state}] step={run.current_step_index} {run.workflow_id}"
             for run in runs[-8:]
         )
 
@@ -383,20 +387,37 @@ class ErgonStudioApp(App[None]):
         self._open_workflow_definition_editor(self.selected_workflow_id)
 
     async def action_start_selected_workflow(self) -> None:
-        _, threads = self.runtime.start_workflow_run(
+        workflow_run, threads = self.runtime.start_workflow_run(
             workflow_id=self.selected_workflow_id,
             created_at=int(time.time()),
         )
+        self.selected_workflow_run_id = workflow_run.id
         if threads:
-            self.selected_thread_id = threads[0].id
-            goal = self.runtime.latest_main_user_message_body()
-            if goal:
-                await self.runtime.send_message_to_agent_thread(
-                    thread_id=threads[0].id,
-                    body=f"Workflow kickoff: {self.selected_workflow_id}\n\nGoal:\n{goal}",
-                    created_at=int(time.time()),
-                )
+            _, thread, _ = await self.runtime.advance_workflow_run(
+                workflow_run_id=workflow_run.id,
+                created_at=int(time.time()),
+            )
+            if thread is not None:
+                self.selected_thread_id = thread.id
         self._refresh_panels()
+
+    async def action_advance_selected_workflow_run(self) -> None:
+        if self.selected_workflow_run_id is None:
+            return
+        workflow_run, thread, _ = await self.runtime.advance_workflow_run(
+            workflow_run_id=self.selected_workflow_run_id,
+            created_at=int(time.time()),
+        )
+        self.selected_workflow_run_id = workflow_run.id
+        if thread is not None:
+            self.selected_thread_id = thread.id
+        self._refresh_panels()
+
+    def action_next_workflow_run(self) -> None:
+        self._cycle_workflow_run(1)
+
+    def action_previous_workflow_run(self) -> None:
+        self._cycle_workflow_run(-1)
 
     def action_edit_orchestrator_definition(self) -> None:
         self._open_agent_definition_editor("orchestrator")
@@ -458,6 +479,23 @@ class ErgonStudioApp(App[None]):
 
         self.selected_workflow_id = workflow_ids[(current_index + direction) % len(workflow_ids)]
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
+
+    def _cycle_workflow_run(self, direction: int) -> None:
+        runs = self.runtime.list_workflow_runs()
+        if not runs:
+            return
+
+        run_ids = [run.id for run in runs]
+        if self.selected_workflow_run_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = run_ids.index(self.selected_workflow_run_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_workflow_run_id = run_ids[(current_index + direction) % len(run_ids)]
+        self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)

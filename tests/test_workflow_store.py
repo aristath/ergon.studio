@@ -40,6 +40,7 @@ class WorkflowStoreTests(unittest.TestCase):
 
             self.assertEqual(first.workflow_id, "standard-build")
             self.assertEqual(second.root_task_id, "task-2")
+            self.assertEqual(first.current_step_index, 0)
             self.assertEqual(
                 [run.id for run in store.list_workflow_runs("session-main")],
                 ["workflow-run-1", "workflow-run-2"],

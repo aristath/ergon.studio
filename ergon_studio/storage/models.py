@@ -62,10 +62,14 @@ class WorkflowRunRecord:
     created_at: int
     updated_at: int
     root_task_id: str | None = None
+    current_step_index: int = 0
+    last_thread_id: str | None = None
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
         validate_unix_time(self.updated_at, "updated_at")
+        if type(self.current_step_index) is not int:
+            raise TypeError("current_step_index must be an int")
 
 
 @dataclass(frozen=True)

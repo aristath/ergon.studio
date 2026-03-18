@@ -78,6 +78,8 @@ class MetadataStoreTests(unittest.TestCase):
                 created_at=1_710_755_500,
                 updated_at=1_710_755_500,
                 root_task_id="task-1",
+                current_step_index=1,
+                last_thread_id="thread-1",
             )
             store.insert_workflow_run(workflow_run)
 

@@ -49,6 +49,8 @@ SCHEMA_STATEMENTS = (
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       root_task_id TEXT,
+      current_step_index INTEGER NOT NULL DEFAULT 0,
+      last_thread_id TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -123,6 +125,8 @@ def initialize_database(db_path: Path) -> None:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
         _ensure_column(connection, table_name="threads", column_name="assigned_agent_id", definition="TEXT")
+        _ensure_column(connection, table_name="workflow_runs", column_name="current_step_index", definition="INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, table_name="workflow_runs", column_name="last_thread_id", definition="TEXT")
         connection.commit()
 
 
@@ -276,9 +280,9 @@ class MetadataStore:
             connection.execute(
                 """
                 INSERT INTO workflow_runs (
-                  id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                  id, session_id, workflow_id, state, created_at, updated_at, root_task_id, current_step_index, last_thread_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -288,6 +292,8 @@ class MetadataStore:
                     record.created_at,
                     record.updated_at,
                     record.root_task_id,
+                    record.current_step_index,
+                    record.last_thread_id,
                 ),
             )
             connection.commit()
@@ -296,7 +302,7 @@ class MetadataStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id, current_step_index, last_thread_id
                 FROM workflow_runs
                 WHERE id = ?
                 """,
@@ -312,13 +318,15 @@ class MetadataStore:
             created_at=row[4],
             updated_at=row[5],
             root_task_id=row[6],
+            current_step_index=row[7],
+            last_thread_id=row[8],
         )
 
     def list_workflow_runs(self, session_id: str) -> list[WorkflowRunRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id, current_step_index, last_thread_id
                 FROM workflow_runs
                 WHERE session_id = ?
                 ORDER BY created_at ASC, id ASC
@@ -334,9 +342,30 @@ class MetadataStore:
                 created_at=row[4],
                 updated_at=row[5],
                 root_task_id=row[6],
+                current_step_index=row[7],
+                last_thread_id=row[8],
             )
             for row in rows
         ]
+
+    def update_workflow_run(self, record: WorkflowRunRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE workflow_runs
+                SET state = ?, updated_at = ?, root_task_id = ?, current_step_index = ?, last_thread_id = ?
+                WHERE id = ?
+                """,
+                (
+                    record.state,
+                    record.updated_at,
+                    record.root_task_id,
+                    record.current_step_index,
+                    record.last_thread_id,
+                    record.id,
+                ),
+            )
+            connection.commit()
 
     def list_tasks(self, session_id: str) -> list[TaskRecord]:
         with self._connect() as connection:

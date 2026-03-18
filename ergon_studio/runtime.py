@@ -145,6 +145,9 @@ class RuntimeContext:
     def list_workflow_runs(self) -> list[WorkflowRunRecord]:
         return self.workflow_store.list_workflow_runs(self.main_session_id)
 
+    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord | None:
+        return self.workflow_store.get_workflow_run(workflow_run_id)
+
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
 
@@ -399,6 +402,61 @@ class RuntimeContext:
         )
         return prompt_message, reply_message
 
+    def _workflow_threads_for_run(self, workflow_run: WorkflowRunRecord) -> list[ThreadRecord]:
+        if workflow_run.root_task_id is None:
+            return []
+        child_tasks = [
+            task
+            for task in self.list_tasks()
+            if task.parent_task_id == workflow_run.root_task_id
+        ]
+        child_tasks_by_id = {task.id: task for task in child_tasks}
+        threads = [
+            thread
+            for thread in self.list_threads()
+            if thread.parent_task_id in child_tasks_by_id
+        ]
+        return sorted(
+            threads,
+            key=lambda thread: (
+                child_tasks_by_id[thread.parent_task_id].created_at if thread.parent_task_id else 0,
+                thread.created_at,
+                thread.id,
+            ),
+        )
+
+    def _workflow_prompt_for_step(
+        self,
+        *,
+        workflow_run: WorkflowRunRecord,
+        threads: list[ThreadRecord],
+        next_index: int,
+    ) -> str:
+        if next_index == 0:
+            goal = self.latest_main_user_message_body()
+            if goal:
+                return f"Workflow kickoff: {workflow_run.workflow_id}\n\nGoal:\n{goal}"
+            return f"Workflow kickoff: {workflow_run.workflow_id}"
+
+        previous_thread = threads[next_index - 1]
+        previous_output = self._latest_agent_message_body(previous_thread.id)
+        if previous_output:
+            return (
+                f"Continue workflow: {workflow_run.workflow_id}\n\n"
+                f"Previous step output from {previous_thread.assigned_agent_id}:\n"
+                f"{previous_output}"
+            )
+        return f"Continue workflow: {workflow_run.workflow_id}"
+
+    def _latest_agent_message_body(self, thread_id: str) -> str | None:
+        thread = self.get_thread(thread_id)
+        messages = self.list_thread_messages(thread_id)
+        for message in reversed(messages):
+            if thread is not None and thread.assigned_agent_id is not None and message.sender != thread.assigned_agent_id:
+                continue
+            return self.conversation_store.read_message_body(message).rstrip("\n")
+        return None
+
     def create_task(
         self,
         *,
@@ -465,6 +523,79 @@ class RuntimeContext:
             threads.append(thread)
 
         return workflow_run, threads
+
+    async def advance_workflow_run(
+        self,
+        *,
+        workflow_run_id: str,
+        created_at: int,
+    ) -> tuple[WorkflowRunRecord, ThreadRecord | None, MessageRecord | None]:
+        workflow_run = self.get_workflow_run(workflow_run_id)
+        if workflow_run is None:
+            raise ValueError(f"unknown workflow run: {workflow_run_id}")
+
+        threads = self._workflow_threads_for_run(workflow_run)
+        next_index = workflow_run.current_step_index
+        if next_index >= len(threads):
+            completed = WorkflowRunRecord(
+                id=workflow_run.id,
+                session_id=workflow_run.session_id,
+                workflow_id=workflow_run.workflow_id,
+                state="completed",
+                created_at=workflow_run.created_at,
+                updated_at=created_at,
+                root_task_id=workflow_run.root_task_id,
+                current_step_index=workflow_run.current_step_index,
+                last_thread_id=workflow_run.last_thread_id,
+            )
+            self.workflow_store.update_workflow_run(completed)
+            self.append_event(
+                kind="workflow_completed",
+                summary=f"Completed workflow {workflow_run.workflow_id}",
+                created_at=created_at,
+                task_id=workflow_run.root_task_id,
+            )
+            return completed, None, None
+
+        thread = threads[next_index]
+        prompt = self._workflow_prompt_for_step(
+            workflow_run=workflow_run,
+            threads=threads,
+            next_index=next_index,
+        )
+        _, reply = await self.send_message_to_agent_thread(
+            thread_id=thread.id,
+            body=prompt,
+            created_at=created_at,
+        )
+
+        updated = WorkflowRunRecord(
+            id=workflow_run.id,
+            session_id=workflow_run.session_id,
+            workflow_id=workflow_run.workflow_id,
+            state="completed" if next_index + 1 >= len(threads) else "running",
+            created_at=workflow_run.created_at,
+            updated_at=created_at + 1,
+            root_task_id=workflow_run.root_task_id,
+            current_step_index=next_index + 1,
+            last_thread_id=thread.id,
+        )
+        self.workflow_store.update_workflow_run(updated)
+        self.append_event(
+            kind="workflow_advanced",
+            summary=f"Advanced workflow {workflow_run.workflow_id} to {thread.assigned_agent_id}",
+            created_at=created_at + 1,
+            thread_id=thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+        if updated.state == "completed":
+            self.append_event(
+                kind="workflow_completed",
+                summary=f"Completed workflow {workflow_run.workflow_id}",
+                created_at=created_at + 2,
+                task_id=workflow_run.root_task_id,
+            )
+        return updated, thread, reply
 
     def append_event(
         self,

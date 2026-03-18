@@ -19,6 +19,8 @@ class WorkflowStore:
         state: str,
         created_at: int,
         root_task_id: str | None = None,
+        current_step_index: int = 0,
+        last_thread_id: str | None = None,
     ) -> WorkflowRunRecord:
         if self.metadata.get_session(session_id) is None:
             self.metadata.insert_session(
@@ -36,9 +38,17 @@ class WorkflowStore:
             created_at=created_at,
             updated_at=created_at,
             root_task_id=root_task_id,
+            current_step_index=current_step_index,
+            last_thread_id=last_thread_id,
         )
         self.metadata.insert_workflow_run(record)
         return record
+
+    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord | None:
+        return self.metadata.get_workflow_run(workflow_run_id)
+
+    def update_workflow_run(self, record: WorkflowRunRecord) -> None:
+        self.metadata.update_workflow_run(record)
 
     def list_workflow_runs(self, session_id: str) -> list[WorkflowRunRecord]:
         return self.metadata.list_workflow_runs(session_id)

@@ -1163,10 +1163,16 @@ class ErgonStudioApp(App[None]):
             self.selected_approval_id = approval_ids[0]
 
     def _normalize_selected_artifact(self) -> None:
-        artifact_ids = [artifact.id for artifact in self._visible_artifacts()]
+        artifacts = self._visible_artifacts()
+        artifact_ids = [artifact.id for artifact in artifacts]
         if not artifact_ids:
             self.selected_artifact_id = None
             return
+        if self.selected_workflow_run_id is not None:
+            report_ids = [artifact.id for artifact in artifacts if artifact.kind == "workflow-report"]
+            if report_ids and self.selected_artifact_id not in report_ids:
+                self.selected_artifact_id = report_ids[-1]
+                return
         if self.selected_artifact_id not in artifact_ids:
             self.selected_artifact_id = artifact_ids[0]
 

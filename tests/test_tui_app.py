@@ -293,9 +293,9 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("standard-build", runs.body)
                 self.assertIn("> workflow-run-", runs.body)
                 self.assertIn("Workflow: standard-build", tasks.body)
-                self.assertIn("[completed] standard-build: architect", tasks.body)
+                self.assertIn("[blocked] standard-build: architect", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
-                self.assertIn("workflow_advanced", activity.body)
+                self.assertIn("agent_unavailable", activity.body)
 
     async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -428,6 +428,63 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     main_chat = app.query_one("#main-chat", Panel)
                     self.assertIn("Workflow complete: single-agent-execution", main_chat.body)
                     self.assertIn("Final output from coder:", main_chat.body)
+
+    async def test_app_can_request_fix_cycle_for_selected_workflow_run(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Build the next feature.",
+                created_at=1_710_755_200,
+            )
+            app = ErgonStudioApp(runtime)
+            fake_agents = {
+                "architect": FakeAgent("Architecture ready."),
+                "coder": FakeAgent("Implementation ready."),
+                "reviewer": FakeAgent("Needs fixes."),
+                "fixer": FakeAgent("Fixes applied."),
+            }
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                async with app.run_test():
+                    await app.action_start_selected_workflow()
+                    await app.action_advance_selected_workflow_run()
+                    await app.action_advance_selected_workflow_run()
+                    app.action_request_fix_cycle_for_selected_workflow_run()
+
+                    runs = app.query_one("#workflow-runs", Panel)
+                    threads = app.query_one("#threads", Panel)
+                    tasks = app.query_one("#tasks", Panel)
+                    activity = app.query_one("#activity", Panel)
+                    self.assertIn("[repairing]", runs.body)
+                    self.assertIn("agent_direct:fixer", threads.body)
+                    self.assertIn("[planned] standard-build: fixer", tasks.body)
+                    self.assertIn("workflow_fix_cycle_requested", activity.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

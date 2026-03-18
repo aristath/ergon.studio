@@ -85,6 +85,7 @@ class ErgonStudioApp(App[None]):
         ("f4", "next_workflow_run", "Next Run"),
         ("f5", "start_selected_workflow", "Start Workflow"),
         ("f6", "advance_selected_workflow_run", "Advance Workflow"),
+        ("f10", "request_fix_cycle_for_selected_workflow_run", "Request Fix Cycle"),
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
         ("ctrl+n", "next_agent", "Next Agent"),
@@ -150,6 +151,7 @@ class ErgonStudioApp(App[None]):
         self.selected_agent_id = "orchestrator"
         self.selected_workflow_id = "standard-build"
         self.selected_workflow_run_id: str | None = None
+        self._time_cursor = int(time.time())
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -287,7 +289,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -328,7 +330,7 @@ class ErgonStudioApp(App[None]):
 
         event.input.disabled = True
         try:
-            created_at = int(time.time())
+            created_at = self._next_timestamp()
             selected_thread = self.runtime.get_thread(self.selected_thread_id)
             if selected_thread is not None and selected_thread.id != self.runtime.main_thread_id:
                 await self.runtime.send_message_to_agent_thread(
@@ -359,7 +361,7 @@ class ErgonStudioApp(App[None]):
         self._cycle_agent(-1)
 
     def action_open_selected_agent_thread(self) -> None:
-        created_at = int(time.time())
+        created_at = self._next_timestamp()
         task = self.runtime.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
             title=f"Agent thread: {self.selected_agent_id}",
@@ -387,7 +389,7 @@ class ErgonStudioApp(App[None]):
         self._open_workflow_definition_editor(self.selected_workflow_id)
 
     async def action_start_selected_workflow(self) -> None:
-        created_at = int(time.time())
+        created_at = self._next_timestamp()
         workflow_run, threads = self.runtime.start_workflow_run(
             workflow_id=self.selected_workflow_id,
             created_at=created_at,
@@ -396,7 +398,7 @@ class ErgonStudioApp(App[None]):
         if threads:
             _, thread, _ = await self.runtime.advance_workflow_run(
                 workflow_run_id=workflow_run.id,
-                created_at=created_at + (len(threads) * 2) + 2,
+                created_at=self._next_timestamp(),
             )
             if thread is not None:
                 self.selected_thread_id = thread.id
@@ -407,11 +409,23 @@ class ErgonStudioApp(App[None]):
             return
         workflow_run, thread, _ = await self.runtime.advance_workflow_run(
             workflow_run_id=self.selected_workflow_run_id,
-            created_at=int(time.time()),
+            created_at=self._next_timestamp(),
         )
         self.selected_workflow_run_id = workflow_run.id
         if thread is not None:
             self.selected_thread_id = thread.id
+        self._refresh_panels()
+
+    def action_request_fix_cycle_for_selected_workflow_run(self) -> None:
+        if self.selected_workflow_run_id is None:
+            return
+        workflow_run, threads = self.runtime.request_workflow_fix_cycle(
+            workflow_run_id=self.selected_workflow_run_id,
+            created_at=self._next_timestamp(),
+        )
+        self.selected_workflow_run_id = workflow_run.id
+        if threads:
+            self.selected_thread_id = threads[0].id
         self._refresh_panels()
 
     def action_next_workflow_run(self) -> None:
@@ -525,7 +539,7 @@ class ErgonStudioApp(App[None]):
         self.runtime.save_agent_definition_text(
             agent_id=agent_id,
             text=text,
-            created_at=int(time.time()),
+            created_at=self._next_timestamp(),
         )
         self.selected_agent_id = agent_id
         self._refresh_panels()
@@ -534,7 +548,7 @@ class ErgonStudioApp(App[None]):
         self.runtime.save_workflow_definition_text(
             workflow_id=workflow_id,
             text=text,
-            created_at=int(time.time()),
+            created_at=self._next_timestamp(),
         )
         self.selected_workflow_id = workflow_id
         self._refresh_panels()
@@ -542,7 +556,7 @@ class ErgonStudioApp(App[None]):
     def _save_global_config(self, text: str) -> None:
         self.runtime.save_global_config_text(
             text=text,
-            created_at=int(time.time()),
+            created_at=self._next_timestamp(),
         )
         self._refresh_panels()
 
@@ -559,3 +573,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
         self.query_one("#settings", Panel).set_body(self._render_settings_body())
+
+    def _next_timestamp(self) -> int:
+        self._time_cursor += 1
+        return self._time_cursor

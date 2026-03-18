@@ -662,6 +662,33 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 ["orchestrator", "architect"],
             )
 
+    async def test_runtime_blocks_workflow_when_agent_is_unavailable(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_200,
+            )
+
+            blocked_run, blocked_thread, reply = await runtime.advance_workflow_run(
+                workflow_run_id=workflow_run.id,
+                created_at=1_710_755_210,
+            )
+
+            self.assertIsNone(reply)
+            self.assertEqual(blocked_thread.id, threads[0].id)
+            self.assertEqual(blocked_run.state, "blocked")
+            self.assertEqual(runtime.get_task(blocked_thread.parent_task_id).state, "blocked")
+            self.assertIn("workflow_blocked", [event.kind for event in runtime.list_events()])
+
     async def test_runtime_can_advance_workflow_run_to_next_agent(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -777,3 +804,72 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "Workflow complete: single-agent-execution",
                 runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]),
             )
+
+    async def test_runtime_can_request_workflow_fix_cycle(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Build the next feature.",
+                created_at=1_710_755_200,
+            )
+            workflow_run, _ = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_210,
+            )
+            fake_agents = {
+                "architect": FakeAgent("Architecture ready."),
+                "coder": FakeAgent("Implementation ready."),
+                "reviewer": FakeAgent("Needs fixes."),
+                "fixer": FakeAgent("Fixes applied."),
+            }
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_220,
+                )
+                await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_230,
+                )
+                completed_run, _, _ = await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_240,
+                )
+                repaired_run, repair_threads = runtime.request_workflow_fix_cycle(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_250,
+                )
+
+            self.assertEqual(completed_run.state, "completed")
+            self.assertEqual(repaired_run.state, "repairing")
+            self.assertEqual([thread.assigned_agent_id for thread in repair_threads], ["fixer", "reviewer"])
+            self.assertEqual(repaired_run.current_step_index, 3)
+            self.assertEqual(runtime.get_task(repaired_run.root_task_id).state, "in_progress")
+            self.assertIn("workflow_fix_cycle_requested", [event.kind for event in runtime.list_events()])

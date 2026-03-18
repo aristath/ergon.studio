@@ -547,24 +547,60 @@ class RuntimeContext:
             created_at=created_at + 1,
             task_id=root_task.id,
         )
-
-        threads: list[ThreadRecord] = []
-        for offset, agent_id in enumerate(participants, start=2):
-            child_task = self.create_task(
-                task_id=f"task-{uuid4().hex[:8]}",
-                title=f"{workflow_id}: {agent_id}",
-                state="planned",
-                created_at=created_at + offset,
-                parent_task_id=root_task.id,
-            )
-            thread = self.create_agent_thread(
-                agent_id=agent_id,
-                created_at=created_at + len(participants) + offset,
-                parent_task_id=child_task.id,
-            )
-            threads.append(thread)
-
+        threads = self._append_workflow_steps(
+            workflow_id=workflow_id,
+            root_task_id=root_task.id,
+            participants=participants,
+            created_at=created_at + 2,
+        )
         return workflow_run, threads
+
+    def request_workflow_fix_cycle(
+        self,
+        *,
+        workflow_run_id: str,
+        created_at: int,
+    ) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        workflow_run = self.get_workflow_run(workflow_run_id)
+        if workflow_run is None:
+            raise ValueError(f"unknown workflow run: {workflow_run_id}")
+
+        existing_threads = self._workflow_threads_for_run(workflow_run)
+        if workflow_run.current_step_index < len(existing_threads):
+            raise ValueError("workflow run still has pending steps")
+        if workflow_run.root_task_id is None:
+            raise ValueError("workflow run has no root task")
+
+        threads = self._append_workflow_steps(
+            workflow_id=workflow_run.workflow_id,
+            root_task_id=workflow_run.root_task_id,
+            participants=("fixer", "reviewer"),
+            created_at=created_at,
+        )
+        updated = WorkflowRunRecord(
+            id=workflow_run.id,
+            session_id=workflow_run.session_id,
+            workflow_id=workflow_run.workflow_id,
+            state="repairing",
+            created_at=workflow_run.created_at,
+            updated_at=created_at + 1,
+            root_task_id=workflow_run.root_task_id,
+            current_step_index=len(existing_threads),
+            last_thread_id=workflow_run.last_thread_id,
+        )
+        self.workflow_store.update_workflow_run(updated)
+        self.update_task_state(
+            task_id=workflow_run.root_task_id,
+            state="in_progress",
+            updated_at=created_at + 1,
+        )
+        self.append_event(
+            kind="workflow_fix_cycle_requested",
+            summary=f"Requested fix cycle for workflow {workflow_run.workflow_id}",
+            created_at=created_at + 1,
+            task_id=workflow_run.root_task_id,
+        )
+        return updated, threads
 
     async def advance_workflow_run(
         self,
@@ -616,6 +652,33 @@ class RuntimeContext:
             body=prompt,
             created_at=created_at,
         )
+        if reply is None:
+            blocked = WorkflowRunRecord(
+                id=workflow_run.id,
+                session_id=workflow_run.session_id,
+                workflow_id=workflow_run.workflow_id,
+                state="blocked",
+                created_at=workflow_run.created_at,
+                updated_at=created_at + 1,
+                root_task_id=workflow_run.root_task_id,
+                current_step_index=workflow_run.current_step_index,
+                last_thread_id=thread.id,
+            )
+            self.workflow_store.update_workflow_run(blocked)
+            if thread.parent_task_id is not None:
+                self.update_task_state(
+                    task_id=thread.parent_task_id,
+                    state="blocked",
+                    updated_at=created_at + 1,
+                )
+            self.append_event(
+                kind="workflow_blocked",
+                summary=f"Workflow {workflow_run.workflow_id} blocked at {thread.assigned_agent_id}",
+                created_at=created_at + 1,
+                thread_id=thread.id,
+                task_id=workflow_run.root_task_id,
+            )
+            return blocked, thread, None
 
         updated = WorkflowRunRecord(
             id=workflow_run.id,
@@ -661,6 +724,31 @@ class RuntimeContext:
                 task_id=workflow_run.root_task_id,
             )
         return updated, thread, reply
+
+    def _append_workflow_steps(
+        self,
+        *,
+        workflow_id: str,
+        root_task_id: str,
+        participants: tuple[str, ...],
+        created_at: int,
+    ) -> list[ThreadRecord]:
+        threads: list[ThreadRecord] = []
+        for offset, agent_id in enumerate(participants):
+            child_task = self.create_task(
+                task_id=f"task-{uuid4().hex[:8]}",
+                title=f"{workflow_id}: {agent_id}",
+                state="planned",
+                created_at=created_at + offset,
+                parent_task_id=root_task_id,
+            )
+            thread = self.create_agent_thread(
+                agent_id=agent_id,
+                created_at=created_at + len(participants) + offset,
+                parent_task_id=child_task.id,
+            )
+            threads.append(thread)
+        return threads
 
     def append_event(
         self,

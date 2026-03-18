@@ -4,7 +4,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
-from ergon_studio.paths import StudioPaths
+from ergon_studio.runtime import RuntimeContext
 
 
 class Panel(Static):
@@ -59,9 +59,9 @@ class ErgonStudioApp(App[None]):
     }
     """
 
-    def __init__(self, paths: StudioPaths) -> None:
+    def __init__(self, runtime: RuntimeContext) -> None:
         super().__init__()
-        self.paths = paths
+        self.runtime = runtime
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -73,13 +73,29 @@ class ErgonStudioApp(App[None]):
             with Vertical(id="center-column"):
                 yield Panel(
                     "Main Chat",
-                    f"Project UUID: {self.paths.project_uuid}\nWorkspace: {self.paths.project_root}",
+                    (
+                        f"Project UUID: {self.runtime.paths.project_uuid}\n"
+                        f"Workspace: {self.runtime.paths.project_root}"
+                    ),
                     panel_id="main-chat",
                     classes="panel",
                 )
                 yield Panel("Artifacts", "Diffs and generated artifacts will appear here.", panel_id="artifacts", classes="panel")
             with Vertical(id="right-sidebar"):
                 yield Panel("Approvals", "Approval requests will appear here.", panel_id="approvals", classes="panel")
-                yield Panel("Memory", "Session and project memory will appear here.", panel_id="memory", classes="panel")
-                yield Panel("Settings", "Models, prompts, and workflows will appear here.", panel_id="settings", classes="panel")
+                yield Panel(
+                    "Memory",
+                    (
+                        f"Agents: {len(self.runtime.registry.agent_definitions)}\n"
+                        f"Workflows: {len(self.runtime.registry.workflow_definitions)}"
+                    ),
+                    panel_id="memory",
+                    classes="panel",
+                )
+                yield Panel(
+                    "Settings",
+                    f"Configured providers: {len(self.runtime.registry.config.get('providers', {}))}",
+                    panel_id="settings",
+                    classes="panel",
+                )
         yield Footer()

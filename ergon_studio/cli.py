@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import ErgonStudioApp
 
 
@@ -51,11 +52,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "tui":
-        paths = bootstrap_workspace(
+        runtime = load_runtime(
             project_root=args.project_root,
             home_dir=args.home_dir,
         )
-        app = ErgonStudioApp(paths)
+        app = ErgonStudioApp(runtime)
         app.run()
         return 0
 

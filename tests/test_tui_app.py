@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.runtime import load_runtime
 
 
 class TuiAppTests(unittest.IsolatedAsyncioTestCase):
@@ -17,8 +17,8 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
             home_dir = base / "home"
             project_root.mkdir()
             home_dir.mkdir()
-            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
-            app = ErgonStudioApp(paths)
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
 
             async with app.run_test():
                 self.assertEqual(app.title, "ergon.studio")

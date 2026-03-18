@@ -1236,11 +1236,15 @@ Be concise and structural.
                 editor.load_text(
                     """{
   "providers": {
-    "local": {
+                    "local": {
       "type": "openai_chat",
       "base_url": "http://localhost:8080/v1",
       "api_key": "not-needed",
-      "model": "qwen2.5-coder"
+      "model": "qwen2.5-coder",
+      "capabilities": {
+        "tool_calling": true,
+        "structured_output": true
+      }
     }
   },
   "role_assignments": {
@@ -1258,6 +1262,7 @@ Be concise and structural.
                 activity = app.query_one("#activity", Panel)
                 self.assertIn("Orchestrator: ready via local (qwen2.5-coder)", settings.body)
                 self.assertIn("local: openai_chat qwen2.5-coder @ http://localhost:8080/v1", settings.body)
+                self.assertIn("tool_calling=True", settings.body)
                 self.assertIn("Assignments: orchestrator->local", settings.body)
                 self.assertIn("config_saved", activity.body)
 

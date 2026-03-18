@@ -203,3 +203,65 @@ Research specialist.
             self.assertEqual(agent.id, "researcher")
             self.assertEqual(len(agent.default_options["tools"]), 2)
             self.assertEqual(len(agent.context_providers), 5)
+
+    def test_build_agent_can_attach_mcp_servers_from_definition(self) -> None:
+        from ergon_studio.agent_factory import build_agent
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            home_dir = base / "home"
+            project_root = base / "repo"
+            home_dir.mkdir()
+            project_root.mkdir()
+            paths = StudioPaths(
+                home_dir=home_dir,
+                project_root=project_root,
+                project_uuid=UUID("12345678-1234-5678-1234-567812345678"),
+            )
+            paths.ensure_global_layout()
+            save_global_config(
+                paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                            "temperature": 0.3,
+                            "capabilities": {
+                                "tool_calling": True,
+                                "structured_output": True,
+                            },
+                        }
+                    },
+                    "role_assignments": {"researcher": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+            (paths.agents_dir / "researcher.md").write_text(
+                """---
+id: researcher
+name: Researcher
+role: researcher
+mcp_servers:
+  - name: docs
+    transport: stdio
+    command: npx
+    args:
+      - docs-server
+---
+## Identity
+Research specialist.
+""",
+                encoding="utf-8",
+            )
+            registry = load_registry(paths)
+
+            agent = build_agent(registry, "researcher", tool_registry={})
+
+            self.assertEqual(agent.default_options["temperature"], 0.3)
+            self.assertEqual(agent.default_options["tools"], [])
+            self.assertEqual(len(agent.mcp_tools), 1)
+            self.assertEqual(agent.mcp_tools[0].name, "docs")

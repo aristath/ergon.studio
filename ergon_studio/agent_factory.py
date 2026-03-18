@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from agent_framework import Agent
+from agent_framework import Agent, MCPStdioTool, MCPStreamableHTTPTool, MCPWebsocketTool
 from agent_framework.openai import OpenAIChatClient
 
 from ergon_studio.artifact_store import ArtifactStore
@@ -46,6 +46,8 @@ def build_agent(
     for key in ("temperature", "max_tokens"):
         if key in definition.metadata:
             default_options[key] = definition.metadata[key]
+        elif key in provider_config:
+            default_options[key] = provider_config[key]
 
     return Agent(
         client=client,
@@ -94,25 +96,75 @@ def _build_client(provider_config: dict[str, Any]) -> OpenAIChatClient:
         model_id=model_id,
         api_key=provider_config.get("api_key"),
         base_url=provider_config.get("base_url"),
+        instruction_role=provider_config.get("instruction_role"),
     )
 
 
 def _resolve_tools(
     definition: DefinitionDocument,
     tool_registry: Mapping[str, Callable[..., Any]],
-) -> list[Callable[..., Any]]:
+) -> list[object]:
     tool_names = definition.metadata.get("tools", [])
-    if not tool_names:
-        return []
-    if not isinstance(tool_names, list):
+    if tool_names and not isinstance(tool_names, list):
         raise ValueError(f"tools for '{definition.id}' must be a list")
 
-    resolved: list[Callable[..., Any]] = []
-    for tool_name in tool_names:
+    resolved: list[Callable[..., Any] | object] = []
+    for tool_name in tool_names or []:
         if tool_name not in tool_registry:
             raise ValueError(f"unknown tool: {tool_name}")
         resolved.append(tool_registry[tool_name])
+    resolved.extend(_resolve_mcp_tools(definition))
     return resolved
+
+
+def _resolve_mcp_tools(definition: DefinitionDocument) -> list[object]:
+    servers = definition.metadata.get("mcp_servers", [])
+    if not servers:
+        return []
+    if not isinstance(servers, list):
+        raise ValueError(f"mcp_servers for '{definition.id}' must be a list")
+
+    tools: list[object] = []
+    for server in servers:
+        if not isinstance(server, dict):
+            raise ValueError(f"mcp server entries for '{definition.id}' must be mappings")
+        tools.append(_build_mcp_tool(server))
+    return tools
+
+
+def _build_mcp_tool(config: dict[str, Any]) -> object:
+    name = config.get("name")
+    transport = config.get("transport")
+    if not isinstance(name, str) or not name:
+        raise ValueError("mcp server entries must define a non-empty name")
+    if transport not in {"stdio", "streamable_http", "websocket"}:
+        raise ValueError(f"unsupported mcp transport: {transport}")
+
+    common_kwargs: dict[str, Any] = {
+        "description": config.get("description"),
+        "approval_mode": config.get("approval_mode"),
+        "allowed_tools": config.get("allowed_tools"),
+    }
+    if transport == "stdio":
+        command = config.get("command")
+        if not isinstance(command, str) or not command:
+            raise ValueError(f"mcp stdio server '{name}' must define command")
+        args = config.get("args")
+        env = config.get("env")
+        return MCPStdioTool(
+            name=name,
+            command=command,
+            args=args if isinstance(args, list) else None,
+            env=env if isinstance(env, dict) else None,
+            **common_kwargs,
+        )
+
+    url = config.get("url")
+    if not isinstance(url, str) or not url:
+        raise ValueError(f"mcp server '{name}' must define url")
+    if transport == "streamable_http":
+        return MCPStreamableHTTPTool(name=name, url=url, **common_kwargs)
+    return MCPWebsocketTool(name=name, url=url, **common_kwargs)
 
 
 def _build_context_providers(

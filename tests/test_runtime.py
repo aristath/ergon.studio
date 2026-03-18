@@ -59,6 +59,10 @@ class RuntimeTests(unittest.TestCase):
                             "base_url": "http://localhost:8080/v1",
                             "api_key": "not-needed",
                             "model": "qwen2.5-coder",
+                            "capabilities": {
+                                "tool_calling": True,
+                                "structured_output": True,
+                            },
                         }
                     },
                     "role_assignments": {"orchestrator": "local"},
@@ -73,6 +77,10 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(agent.name, "Orchestrator")
             self.assertEqual(agent.client.model_id, "qwen2.5-coder")
             self.assertEqual(runtime.agent_status_summary("orchestrator"), "ready via local (qwen2.5-coder)")
+            self.assertEqual(
+                runtime.provider_capabilities("local"),
+                {"tool_calling": True, "structured_output": True},
+            )
 
     def test_runtime_can_reload_registry_after_config_changes(self) -> None:
         from ergon_studio.runtime import load_runtime

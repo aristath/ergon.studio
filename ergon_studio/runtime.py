@@ -102,6 +102,24 @@ class RuntimeContext:
             return None
         return provider_name
 
+    def provider_details(self, provider_name: str) -> dict[str, object] | None:
+        providers = self.registry.config.get("providers", {})
+        if not isinstance(providers, dict):
+            return None
+        provider = providers.get(provider_name)
+        if not isinstance(provider, dict):
+            return None
+        return provider
+
+    def provider_capabilities(self, provider_name: str) -> dict[str, object]:
+        provider = self.provider_details(provider_name)
+        if provider is None:
+            return {}
+        capabilities = provider.get("capabilities", {})
+        if not isinstance(capabilities, dict):
+            return {}
+        return capabilities
+
     def agent_status_summary(self, agent_id: str) -> str:
         provider_name = self.assigned_provider_name(agent_id)
         if provider_name is None:

@@ -459,10 +459,15 @@ class ErgonStudioApp(App[None]):
             provider_type = str(provider.get("type", "unknown"))
             model = str(provider.get("model", "unknown-model"))
             base_url = str(provider.get("base_url", ""))
+            capabilities = provider.get("capabilities", {})
+            capability_text = ""
+            if isinstance(capabilities, dict) and capabilities:
+                capability_items = [f"{key}={value}" for key, value in sorted(capabilities.items())]
+                capability_text = f" capabilities({', '.join(capability_items)})"
             if base_url:
-                provider_lines.append(f"{provider_id}: {provider_type} {model} @ {base_url}")
+                provider_lines.append(f"{provider_id}: {provider_type} {model} @ {base_url}{capability_text}")
             else:
-                provider_lines.append(f"{provider_id}: {provider_type} {model}")
+                provider_lines.append(f"{provider_id}: {provider_type} {model}{capability_text}")
 
         return (
             f"Config: {self.runtime.paths.config_path}\n"

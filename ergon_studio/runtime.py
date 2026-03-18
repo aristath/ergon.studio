@@ -42,6 +42,35 @@ class RuntimeContext:
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
 
+    def create_thread(
+        self,
+        *,
+        thread_id: str,
+        kind: str,
+        created_at: int,
+        summary: str | None = None,
+        parent_task_id: str | None = None,
+        parent_thread_id: str | None = None,
+    ) -> ThreadRecord:
+        self.ensure_main_conversation()
+        thread = self.conversation_store.create_thread(
+            session_id=self.main_session_id,
+            thread_id=thread_id,
+            kind=kind,
+            created_at=created_at,
+            summary=summary,
+            parent_task_id=parent_task_id,
+            parent_thread_id=parent_thread_id,
+        )
+        self.append_event(
+            kind="thread_created",
+            summary=f"Created thread {thread_id}",
+            created_at=created_at,
+            thread_id=thread_id,
+            task_id=parent_task_id,
+        )
+        return thread
+
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
 
@@ -117,11 +146,12 @@ class RuntimeContext:
         )
 
     def ensure_main_conversation(self) -> None:
-        self.conversation_store.ensure_session(self.main_session_id)
+        self.conversation_store.ensure_session(self.main_session_id, created_at=0)
         self.conversation_store.ensure_thread(
             session_id=self.main_session_id,
             thread_id=self.main_thread_id,
             kind="main",
+            created_at=0,
         )
 
 

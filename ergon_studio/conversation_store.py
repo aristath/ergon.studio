@@ -26,7 +26,10 @@ class ConversationStore:
         existing = self.metadata.get_session(session_id)
         if existing is not None:
             return existing
-        return self.create_session(session_id=session_id, created_at=created_at or _now())
+        return self.create_session(
+            session_id=session_id,
+            created_at=created_at if created_at is not None else _now(),
+        )
 
     def create_thread(
         self,
@@ -72,7 +75,7 @@ class ConversationStore:
             session_id=session_id,
             thread_id=thread_id,
             kind=kind,
-            created_at=created_at or _now(),
+            created_at=created_at if created_at is not None else _now(),
             summary=summary,
             parent_task_id=parent_task_id,
             parent_thread_id=parent_thread_id,

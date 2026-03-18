@@ -87,6 +87,31 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Build task sidebar", tasks.body)
                 self.assertIn("task_created", activity.body)
 
+    async def test_app_renders_additional_threads(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_thread(
+                thread_id="thread-review-1",
+                kind="review",
+                created_at=1_710_755_200,
+                summary="Review thread",
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                threads = app.query_one("#threads", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("thread-review-1", threads.body)
+                self.assertIn("thread_created", activity.body)
+
     async def test_submitting_input_persists_a_user_message(self) -> None:
         from textual.widgets import Input
 

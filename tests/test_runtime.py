@@ -121,3 +121,32 @@ class RuntimeTests(unittest.TestCase):
                 [event.kind for event in runtime.list_events()],
                 ["task_created"],
             )
+
+    def test_runtime_can_create_and_list_additional_threads(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_thread(
+                thread_id="thread-review-1",
+                kind="review",
+                created_at=1_710_755_200,
+                summary="Review thread",
+            )
+
+            threads = runtime.list_threads()
+
+            self.assertEqual(
+                [thread.id for thread in threads],
+                ["thread-main", "thread-review-1"],
+            )
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["thread_created"],
+            )

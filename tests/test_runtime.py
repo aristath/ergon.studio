@@ -1620,3 +1620,105 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(updated_run.last_thread_id, threads[1].id)
             self.assertEqual(runtime.preferred_thread_id_for_workflow_run(workflow_run.id), threads[1].id)
+
+    async def test_runtime_can_delegate_to_agent_without_user_managing_threads(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent("Implementation complete.")):
+                result = await runtime.delegate_to_agent(
+                    agent_id="coder",
+                    request="Implement the feature.",
+                    title="Feature delivery",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["agent_id"], "coder")
+            tasks = runtime.list_tasks()
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].state, "completed")
+            threads = [thread for thread in runtime.list_threads() if thread.id != runtime.main_thread_id]
+            self.assertEqual(len(threads), 1)
+            self.assertEqual(threads[0].assigned_agent_id, "coder")
+            thread_messages = runtime.list_thread_messages(threads[0].id)
+            self.assertEqual([message.sender for message in thread_messages], ["orchestrator", "coder"])
+            self.assertIn("delegation_completed", [event.kind for event in runtime.list_events()])
+
+    async def test_runtime_can_run_workflow_end_to_end_with_orchestrator_review(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture plan ready."),
+            "coder": FakeAgent("Implementation finished."),
+            "reviewer": FakeAgent("Review passed."),
+            "orchestrator": FakeAgent("Accepted. This matches the goal and is ready to present."),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.state, "completed")
+            self.assertEqual(workflow_run.current_step_index, 3)
+            self.assertIsInstance(result["last_thread_id"], str)
+            self.assertIn("Accepted.", result["review_summary"])
+
+            run_threads = runtime.list_threads_for_workflow_run(workflow_run.id)
+            self.assertEqual(
+                [thread.assigned_agent_id for thread in run_threads],
+                ["architect", "coder", "reviewer", "orchestrator"],
+            )
+            artifacts = runtime.list_artifacts_for_workflow_run(workflow_run.id)
+            self.assertTrue(any(artifact.kind == "workflow-report" for artifact in artifacts))
+            report = next(artifact for artifact in artifacts if artifact.kind == "workflow-report")
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("## Orchestrator Review", body)
+            self.assertIn("Accepted. This matches the goal", body)

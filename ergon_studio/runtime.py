@@ -30,6 +30,7 @@ from ergon_studio.tool_context import ToolExecutionContext, current_tool_executi
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
 from ergon_studio.workflow_compiler import compile_workflow_definition
+from ergon_studio.workflow_runtime import execute_defined_workflow
 from ergon_studio.workflow_store import WorkflowStore
 
 
@@ -265,13 +266,11 @@ class RuntimeContext:
             return []
 
         task_ids: set[str] = set()
-        thread_ids: set[str] = set()
+        thread_ids = {thread.id for thread in self.list_threads_for_workflow_run(workflow_run_id)}
         if run_view.root_task is not None:
             task_ids.add(run_view.root_task.id)
         for step in run_view.steps:
             task_ids.add(step.task.id)
-            for thread in step.threads:
-                thread_ids.add(thread.id)
 
         artifacts = [
             artifact
@@ -288,9 +287,16 @@ class RuntimeContext:
         if run_view is None:
             return []
         threads: list[ThreadRecord] = []
+        if run_view.root_task is not None:
+            threads.extend(
+                thread
+                for thread in self.list_threads()
+                if thread.parent_task_id == run_view.root_task.id
+            )
         for step in run_view.steps:
             threads.extend(step.threads)
-        return sorted(threads, key=lambda thread: (thread.created_at, thread.id))
+        unique_threads = {thread.id: thread for thread in threads}
+        return sorted(unique_threads.values(), key=lambda thread: (thread.created_at, thread.id))
 
     def list_events_for_workflow_run(self, workflow_run_id: str) -> list[EventRecord]:
         run_view = self.describe_workflow_run(workflow_run_id)
@@ -298,13 +304,11 @@ class RuntimeContext:
             return []
 
         task_ids: set[str] = set()
-        thread_ids: set[str] = set()
+        thread_ids = {thread.id for thread in self.list_threads_for_workflow_run(workflow_run_id)}
         if run_view.root_task is not None:
             task_ids.add(run_view.root_task.id)
         for step in run_view.steps:
             task_ids.add(step.task.id)
-            for thread in step.threads:
-                thread_ids.add(thread.id)
 
         events = [
             event
@@ -332,13 +336,11 @@ class RuntimeContext:
             return []
 
         task_ids: set[str] = set()
-        thread_ids: set[str] = set()
+        thread_ids = {thread.id for thread in self.list_threads_for_workflow_run(workflow_run_id)}
         if run_view.root_task is not None:
             task_ids.add(run_view.root_task.id)
         for step in run_view.steps:
             task_ids.add(step.task.id)
-            for thread in step.threads:
-                thread_ids.add(thread.id)
 
         approvals = [
             approval
@@ -363,8 +365,60 @@ class RuntimeContext:
     def list_agent_ids(self) -> list[str]:
         return sorted(self.registry.agent_definitions.keys())
 
+    def list_agent_summaries(self) -> list[dict[str, object]]:
+        summaries: list[dict[str, object]] = []
+        for agent_id in self.list_agent_ids():
+            definition = self.registry.agent_definitions[agent_id]
+            summaries.append(
+                {
+                    "id": agent_id,
+                    "name": str(definition.metadata.get("name", agent_id)),
+                    "role": str(definition.metadata.get("role", agent_id)),
+                    "tools": tuple(str(tool) for tool in definition.metadata.get("tools", []) or []),
+                    "status": self.agent_status_summary(agent_id),
+                }
+            )
+        return summaries
+
+    def describe_agent_definition(self, agent_id: str) -> dict[str, object]:
+        definition = self.registry.agent_definitions[agent_id]
+        return {
+            "id": definition.id,
+            "name": str(definition.metadata.get("name", definition.id)),
+            "role": str(definition.metadata.get("role", definition.id)),
+            "metadata": dict(definition.metadata),
+            "sections": dict(definition.sections),
+        }
+
     def list_workflow_ids(self) -> list[str]:
         return sorted(self.registry.workflow_definitions.keys())
+
+    def list_workflow_summaries(self) -> list[dict[str, object]]:
+        summaries: list[dict[str, object]] = []
+        for workflow_id in self.list_workflow_ids():
+            definition = self.registry.workflow_definitions[workflow_id]
+            purpose = definition.sections.get("Purpose", "")
+            summaries.append(
+                {
+                    "id": workflow_id,
+                    "name": str(definition.metadata.get("name", workflow_id)),
+                    "orchestration": str(definition.metadata.get("orchestration", "unknown")),
+                    "step_groups": self.workflow_step_groups(workflow_id),
+                    "purpose": purpose,
+                }
+            )
+        return summaries
+
+    def describe_workflow_definition(self, workflow_id: str) -> dict[str, object]:
+        definition = self.registry.workflow_definitions[workflow_id]
+        return {
+            "id": definition.id,
+            "name": str(definition.metadata.get("name", definition.id)),
+            "orchestration": str(definition.metadata.get("orchestration", "unknown")),
+            "metadata": dict(definition.metadata),
+            "sections": dict(definition.sections),
+            "step_groups": self.workflow_step_groups(workflow_id),
+        }
 
     def workflow_steps(self, workflow_id: str) -> tuple[str, ...]:
         groups = self.workflow_step_groups(workflow_id)
@@ -430,13 +484,11 @@ class RuntimeContext:
             return []
 
         task_ids: set[str] = set()
-        thread_ids: set[str] = set()
+        thread_ids = {thread.id for thread in self.list_threads_for_workflow_run(workflow_run_id)}
         if run_view.root_task is not None:
             task_ids.add(run_view.root_task.id)
         for step in run_view.steps:
             task_ids.add(step.task.id)
-            for thread in step.threads:
-                thread_ids.add(thread.id)
 
         command_runs = [
             command_run
@@ -451,13 +503,11 @@ class RuntimeContext:
             return []
 
         task_ids: set[str] = set()
-        thread_ids: set[str] = set()
+        thread_ids = {thread.id for thread in self.list_threads_for_workflow_run(workflow_run_id)}
         if run_view.root_task is not None:
             task_ids.add(run_view.root_task.id)
         for step in run_view.steps:
             task_ids.add(step.task.id)
-            for thread in step.threads:
-                thread_ids.add(thread.id)
 
         tool_calls = [
             tool_call
@@ -725,6 +775,142 @@ class RuntimeContext:
             body=body,
             created_at=created_at,
         )
+
+    async def delegate_to_agent(
+        self,
+        *,
+        agent_id: str,
+        request: str,
+        title: str | None = None,
+        created_at: int | None = None,
+        parent_thread_id: str | None = None,
+    ) -> dict[str, object]:
+        if created_at is None:
+            created_at = int(time.time())
+        context = current_tool_execution_context()
+        resolved_parent_thread_id = parent_thread_id if parent_thread_id is not None else (context.thread_id if context is not None else None)
+        task = self.create_task(
+            task_id=f"task-{uuid4().hex[:8]}",
+            title=title or f"Delegation: {agent_id}",
+            state="in_progress",
+            created_at=created_at,
+        )
+        thread = self.create_thread(
+            thread_id=f"thread-agent-{agent_id}-{uuid4().hex[:8]}",
+            kind="agent_direct",
+            created_at=created_at + 1,
+            assigned_agent_id=agent_id,
+            summary=title or f"Delegated thread for {agent_id}",
+            parent_task_id=task.id,
+            parent_thread_id=resolved_parent_thread_id,
+        )
+        _, reply = await self.send_message_to_agent_thread(
+            thread_id=thread.id,
+            body=request,
+            created_at=created_at + 2,
+        )
+        if reply is None:
+            self.update_task_state(
+                task_id=task.id,
+                state="blocked",
+                updated_at=created_at + 3,
+            )
+            self.append_event(
+                kind="delegation_blocked",
+                summary=f"Delegation to {agent_id} blocked",
+                created_at=created_at + 3,
+                thread_id=thread.id,
+                task_id=task.id,
+            )
+            return {
+                "status": "blocked",
+                "agent_id": agent_id,
+                "task_id": task.id,
+                "thread_id": thread.id,
+                "result": "",
+            }
+
+        reply_body = self.conversation_store.read_message_body(reply).rstrip("\n")
+        self.update_task_state(
+            task_id=task.id,
+            state="completed",
+            updated_at=created_at + 3,
+        )
+        self.append_event(
+            kind="delegation_completed",
+            summary=f"Delegation to {agent_id} completed",
+            created_at=created_at + 3,
+            thread_id=thread.id,
+            task_id=task.id,
+        )
+        return {
+            "status": "completed",
+            "agent_id": agent_id,
+            "task_id": task.id,
+            "thread_id": thread.id,
+            "result": reply_body,
+        }
+
+    async def run_workflow(
+        self,
+        *,
+        workflow_id: str,
+        goal: str,
+        created_at: int | None = None,
+        parent_thread_id: str | None = None,
+    ) -> dict[str, object]:
+        if created_at is None:
+            created_at = int(time.time())
+        context = current_tool_execution_context()
+        resolved_parent_thread_id = parent_thread_id if parent_thread_id is not None else (context.thread_id if context is not None else None)
+        workflow_run, _ = self.start_workflow_run(
+            workflow_id=workflow_id,
+            created_at=created_at,
+        )
+        review_created_at = created_at + 100
+        if workflow_run.root_task_id is not None:
+            self.whiteboard_store.update_task_whiteboard(
+                task_id=workflow_run.root_task_id,
+                updated_at=created_at + 1,
+                section_updates={"Goal": goal},
+            )
+        review_thread = self.create_thread(
+            thread_id=f"thread-review-orchestrator-{uuid4().hex[:8]}",
+            kind="review",
+            created_at=review_created_at,
+            assigned_agent_id="orchestrator",
+            summary=f"Acceptance review for {workflow_id}",
+            parent_task_id=workflow_run.root_task_id,
+            parent_thread_id=resolved_parent_thread_id,
+        )
+        self.append_event(
+            kind="workflow_review_requested",
+            summary=f"Requested orchestrator review for {workflow_id}",
+            created_at=review_created_at,
+            thread_id=review_thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+        run_view = self.describe_workflow_run(workflow_run.id)
+        if run_view is None:
+            raise ValueError(f"unknown workflow run: {workflow_run.id}")
+        summary = await execute_defined_workflow(
+            runtime=self,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            created_at=review_created_at + 1,
+        )
+        return {
+            "workflow_run_id": summary.workflow_run_id,
+            "workflow_id": summary.workflow_id,
+            "status": summary.state,
+            "current_step_index": summary.current_step_index,
+            "last_thread_id": summary.last_thread_id,
+            "review_thread_id": summary.review_thread_id,
+            "review_summary": summary.review_summary or "",
+            "artifact_id": summary.artifact_id,
+        }
 
     def append_message_to_thread(
         self,
@@ -1671,6 +1857,19 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
             run_command_handler=runtime.run_workspace_command,
             write_file_handler=runtime.write_workspace_file,
             patch_file_handler=runtime.patch_workspace_file,
+            list_agents_handler=runtime.list_agent_summaries,
+            describe_agent_handler=runtime.describe_agent_definition,
+            list_workflows_handler=runtime.list_workflow_summaries,
+            describe_workflow_handler=runtime.describe_workflow_definition,
+            delegate_to_agent_handler=lambda agent_id, request, title=None: runtime.delegate_to_agent(
+                agent_id=agent_id,
+                request=request,
+                title=title,
+            ),
+            run_workflow_handler=lambda workflow_id, goal: runtime.run_workflow(
+                workflow_id=workflow_id,
+                goal=goal,
+            ),
         ),
     )
     runtime.ensure_main_conversation()

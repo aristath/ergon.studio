@@ -30,6 +30,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.main_session_id, "session-main")
             self.assertEqual(runtime.main_thread_id, "thread-main")
             self.assertEqual(runtime.list_tasks(), [])
+            self.assertEqual(runtime.list_workflow_runs(), [])
             self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
             self.assertEqual(runtime.list_main_messages(), [])
             self.assertEqual(runtime.list_events(), [])
@@ -331,6 +332,32 @@ Return reviewed code and a clear summary.
             self.assertEqual(thread.assigned_agent_id, "architect")
             self.assertEqual(thread.parent_task_id, "task-1")
             self.assertEqual(runtime.get_thread(thread.id), thread)
+
+    def test_runtime_can_start_workflow_run(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(workflow_run.workflow_id, "standard-build")
+            self.assertEqual(workflow_run.state, "running")
+            self.assertEqual(len(threads), 3)
+            self.assertEqual([thread.assigned_agent_id for thread in threads], ["architect", "coder", "reviewer"])
+            self.assertEqual(
+                [run.id for run in runtime.list_workflow_runs()],
+                [workflow_run.id],
+            )
+            self.assertIn("workflow_started", [event.kind for event in runtime.list_events()])
 
     def test_runtime_can_append_messages_to_additional_threads(self) -> None:
         from ergon_studio.runtime import load_runtime

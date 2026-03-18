@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.storage.models import MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 from ergon_studio.storage.sqlite import MetadataStore, initialize_database
 
 
@@ -70,11 +70,22 @@ class MetadataStoreTests(unittest.TestCase):
             store.insert_thread(thread)
             store.insert_task(task)
             store.insert_message(message)
+            workflow_run = WorkflowRunRecord(
+                id="workflow-run-1",
+                session_id="session-1",
+                workflow_id="standard-build",
+                state="running",
+                created_at=1_710_755_500,
+                updated_at=1_710_755_500,
+                root_task_id="task-1",
+            )
+            store.insert_workflow_run(workflow_run)
 
             self.assertEqual(store.get_session("session-1"), session)
             self.assertEqual(store.get_thread("thread-1"), thread)
             self.assertEqual(store.get_task("task-1"), task)
             self.assertEqual(store.get_message("message-1"), message)
+            self.assertEqual(store.get_workflow_run("workflow-run-1"), workflow_run)
 
     def test_message_metadata_stores_body_path_not_message_body(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

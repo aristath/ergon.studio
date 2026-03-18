@@ -19,9 +19,10 @@ from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
+from ergon_studio.workflow_store import WorkflowStore
 
 
 MAIN_SESSION_ID = "session-main"
@@ -36,6 +37,7 @@ class RuntimeContext:
     agent_session_store: AgentSessionStore
     conversation_store: ConversationStore
     task_store: TaskStore
+    workflow_store: WorkflowStore
     event_store: EventStore
     approval_store: ApprovalStore
     memory_store: MemoryStore
@@ -139,6 +141,9 @@ class RuntimeContext:
 
     def list_tasks(self) -> list[TaskRecord]:
         return self.task_store.list_tasks(self.main_session_id)
+
+    def list_workflow_runs(self) -> list[WorkflowRunRecord]:
+        return self.workflow_store.list_workflow_runs(self.main_session_id)
 
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
@@ -413,6 +418,47 @@ class RuntimeContext:
         )
         return task
 
+    def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        participants = _workflow_participants(workflow_id)
+        root_task = self.create_task(
+            task_id=f"task-{uuid4().hex[:8]}",
+            title=f"Workflow: {workflow_id}",
+            state="in_progress",
+            created_at=created_at,
+        )
+        workflow_run = self.workflow_store.create_workflow_run(
+            session_id=self.main_session_id,
+            workflow_run_id=f"workflow-run-{uuid4().hex[:8]}",
+            workflow_id=workflow_id,
+            state="running",
+            created_at=created_at + 1,
+            root_task_id=root_task.id,
+        )
+        self.append_event(
+            kind="workflow_started",
+            summary=f"Started workflow {workflow_id}",
+            created_at=created_at + 1,
+            task_id=root_task.id,
+        )
+
+        threads: list[ThreadRecord] = []
+        for offset, agent_id in enumerate(participants, start=2):
+            child_task = self.create_task(
+                task_id=f"task-{uuid4().hex[:8]}",
+                title=f"{workflow_id}: {agent_id}",
+                state="planned",
+                created_at=created_at + offset,
+                parent_task_id=root_task.id,
+            )
+            thread = self.create_agent_thread(
+                agent_id=agent_id,
+                created_at=created_at + offset + 100,
+                parent_task_id=child_task.id,
+            )
+            threads.append(thread)
+
+        return workflow_run, threads
+
     def append_event(
         self,
         *,
@@ -529,6 +575,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     agent_session_store = AgentSessionStore(paths)
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
+    workflow_store = WorkflowStore(paths)
     event_store = EventStore(paths)
     approval_store = ApprovalStore(paths)
     memory_store = MemoryStore(paths)
@@ -540,6 +587,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         agent_session_store=agent_session_store,
         conversation_store=conversation_store,
         task_store=task_store,
+        workflow_store=workflow_store,
         event_store=event_store,
         approval_store=approval_store,
         memory_store=memory_store,
@@ -547,3 +595,20 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     )
     runtime.ensure_main_conversation()
     return runtime
+
+
+def _workflow_participants(workflow_id: str) -> tuple[str, ...]:
+    workflow_map = {
+        "direct-response": (),
+        "single-agent-execution": ("coder",),
+        "architecture-first": ("architect",),
+        "research-then-decide": ("researcher",),
+        "standard-build": ("architect", "coder", "reviewer"),
+        "best-of-n": ("coder", "reviewer"),
+        "debate": ("architect", "brainstormer", "reviewer"),
+        "review-driven-repair": ("reviewer", "fixer"),
+        "test-driven-repair": ("tester", "fixer", "reviewer"),
+        "approval-gated": (),
+        "replanning": ("architect",),
+    }
+    return workflow_map.get(workflow_id, ())

@@ -81,6 +81,7 @@ class DefinitionEditorScreen(ModalScreen[None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("f5", "start_selected_workflow", "Start Workflow"),
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
         ("ctrl+n", "next_agent", "Next Agent"),
@@ -152,6 +153,7 @@ class ErgonStudioApp(App[None]):
             with Vertical(id="left-sidebar"):
                 yield Panel("Tasks", self._render_tasks_body(), panel_id="tasks", classes="panel")
                 yield Panel("Workflows", self._render_workflows_body(), panel_id="workflows", classes="panel")
+                yield Panel("Runs", self._render_workflow_runs_body(), panel_id="workflow-runs", classes="panel")
                 yield Panel("Threads", self._render_threads_body(), panel_id="threads", classes="panel")
                 yield Panel("Activity", self._render_activity_body(), panel_id="activity", classes="panel")
             with Vertical(id="center-column"):
@@ -281,7 +283,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Shortcuts: F5 start workflow, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -303,6 +305,15 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{'> ' if workflow_id == self.selected_workflow_id else '  '}{workflow_id}"
             for workflow_id in workflow_ids
+        )
+
+    def _render_workflow_runs_body(self) -> str:
+        runs = self.runtime.list_workflow_runs()
+        if not runs:
+            return "No workflow runs yet."
+        return "\n".join(
+            f"{run.id} [{run.state}] {run.workflow_id}"
+            for run in runs[-8:]
         )
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -370,6 +381,15 @@ class ErgonStudioApp(App[None]):
 
     def action_edit_selected_workflow_definition(self) -> None:
         self._open_workflow_definition_editor(self.selected_workflow_id)
+
+    def action_start_selected_workflow(self) -> None:
+        _, threads = self.runtime.start_workflow_run(
+            workflow_id=self.selected_workflow_id,
+            created_at=int(time.time()),
+        )
+        if threads:
+            self.selected_thread_id = threads[0].id
+        self._refresh_panels()
 
     def action_edit_orchestrator_definition(self) -> None:
         self._open_agent_definition_editor("orchestrator")
@@ -483,6 +503,7 @@ class ErgonStudioApp(App[None]):
     def _refresh_panels(self) -> None:
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
+        self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#team", Panel).set_body(self._render_team_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())

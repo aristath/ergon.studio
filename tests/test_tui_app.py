@@ -30,6 +30,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#main-chat"))
                 self.assertIsNotNone(app.query_one("#tasks"))
                 self.assertIsNotNone(app.query_one("#workflows"))
+                self.assertIsNotNone(app.query_one("#workflow-runs"))
                 self.assertIsNotNone(app.query_one("#threads"))
                 self.assertIsNotNone(app.query_one("#activity"))
                 self.assertIsNotNone(app.query_one("#artifacts"))
@@ -40,6 +41,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("thread-main", app.query_one("#threads", Panel).body)
                 self.assertIn("> orchestrator", app.query_one("#team", Panel).body)
                 self.assertIn("> standard-build", app.query_one("#workflows", Panel).body)
+                self.assertIn("No workflow runs yet.", app.query_one("#workflow-runs", Panel).body)
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
@@ -267,6 +269,31 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 app.action_next_workflow()
 
                 self.assertIn("> test-driven-repair", workflows.body)
+
+    async def test_app_can_start_selected_workflow(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                app.action_start_selected_workflow()
+
+                runs = app.query_one("#workflow-runs", Panel)
+                tasks = app.query_one("#tasks", Panel)
+                threads = app.query_one("#threads", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("standard-build", runs.body)
+                self.assertIn("Workflow: standard-build", tasks.body)
+                self.assertIn("agent_direct:architect", threads.body)
+                self.assertIn("workflow_started", activity.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

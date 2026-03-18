@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -37,6 +37,18 @@ SCHEMA_STATEMENTS = (
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       parent_task_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      root_task_id TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -258,6 +270,73 @@ class MetadataStore:
             updated_at=row[5],
             parent_task_id=row[6],
         )
+
+    def insert_workflow_run(self, record: WorkflowRunRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workflow_runs (
+                  id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.workflow_id,
+                    record.state,
+                    record.created_at,
+                    record.updated_at,
+                    record.root_task_id,
+                ),
+            )
+            connection.commit()
+
+    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                FROM workflow_runs
+                WHERE id = ?
+                """,
+                (workflow_run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return WorkflowRunRecord(
+            id=row[0],
+            session_id=row[1],
+            workflow_id=row[2],
+            state=row[3],
+            created_at=row[4],
+            updated_at=row[5],
+            root_task_id=row[6],
+        )
+
+    def list_workflow_runs(self, session_id: str) -> list[WorkflowRunRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, workflow_id, state, created_at, updated_at, root_task_id
+                FROM workflow_runs
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            WorkflowRunRecord(
+                id=row[0],
+                session_id=row[1],
+                workflow_id=row[2],
+                state=row[3],
+                created_at=row[4],
+                updated_at=row[5],
+                root_task_id=row[6],
+            )
+            for row in rows
+        ]
 
     def list_tasks(self, session_id: str) -> list[TaskRecord]:
         with self._connect() as connection:

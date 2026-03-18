@@ -54,6 +54,21 @@ class TaskRecord:
 
 
 @dataclass(frozen=True)
+class WorkflowRunRecord:
+    id: str
+    session_id: str
+    workflow_id: str
+    state: str
+    created_at: int
+    updated_at: int
+    root_task_id: str | None = None
+
+    def __post_init__(self) -> None:
+        validate_unix_time(self.created_at, "created_at")
+        validate_unix_time(self.updated_at, "updated_at")
+
+
+@dataclass(frozen=True)
 class MessageRecord:
     id: str
     thread_id: str

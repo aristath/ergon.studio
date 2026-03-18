@@ -476,6 +476,8 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Workflow: standard-build", tasks.body)
                 self.assertIn("[blocked] standard-build: architect", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
+                self.assertIn("Root: task-", runs.body)
+                self.assertIn("Next agent: architect", runs.body)
 
     async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

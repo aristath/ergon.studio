@@ -422,10 +422,32 @@ class ErgonStudioApp(App[None]):
         runs = self.runtime.list_workflow_runs()
         if not runs:
             return "No workflow runs yet."
-        return "\n".join(
+        lines = [
             f"{'> ' if run.id == self.selected_workflow_run_id else '  '}{run.id} [{run.state}] step={run.current_step_index} {run.workflow_id}"
             for run in runs[-8:]
-        )
+        ]
+        if self.selected_workflow_run_id is None:
+            return "\n".join(lines)
+
+        run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+        if run_view is None:
+            return "\n".join(lines)
+
+        lines.append("")
+        if run_view.root_task is not None:
+            lines.append(
+                f"Root: {run_view.root_task.id} [{run_view.root_task.state}] {run_view.root_task.title}"
+            )
+        lines.append(f"Steps: {run_view.workflow_run.current_step_index}/{len(run_view.steps)}")
+        if run_view.workflow_run.last_thread_id is not None:
+            lines.append(f"Last thread: {run_view.workflow_run.last_thread_id}")
+        if run_view.workflow_run.current_step_index < len(run_view.steps):
+            next_step = run_view.steps[run_view.workflow_run.current_step_index]
+            next_agent = next_step.threads[0].assigned_agent_id if next_step.threads else "unknown"
+            lines.append(f"Next agent: {next_agent}")
+        else:
+            lines.append("Next agent: none")
+        return "\n".join(lines)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         message_body = event.value.strip()

@@ -202,7 +202,7 @@ class RuntimeContext:
         reason: str,
         created_at: int,
     ) -> ApprovalRecord:
-        return self.approval_store.request_approval(
+        approval = self.approval_store.request_approval(
             session_id=self.main_session_id,
             approval_id=approval_id,
             requester=requester,
@@ -211,6 +211,12 @@ class RuntimeContext:
             reason=reason,
             created_at=created_at,
         )
+        self.append_event(
+            kind="approval_requested",
+            summary=f"{requester} requested approval for {action}",
+            created_at=created_at,
+        )
+        return approval
 
     def add_memory_fact(
         self,
@@ -221,13 +227,19 @@ class RuntimeContext:
         content: str,
         created_at: int,
     ) -> MemoryFactRecord:
-        return self.memory_store.add_fact(
+        fact = self.memory_store.add_fact(
             fact_id=fact_id,
             scope=scope,
             kind=kind,
             content=content,
             created_at=created_at,
         )
+        self.append_event(
+            kind="memory_fact_added",
+            summary=f"Added memory fact {fact_id}",
+            created_at=created_at,
+        )
+        return fact
 
     def create_artifact(
         self,

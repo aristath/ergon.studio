@@ -211,6 +211,10 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([approval.id for approval in approvals], ["approval-1"])
             self.assertEqual(approvals[0].status, "pending")
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["approval_requested"],
+            )
 
     def test_runtime_can_add_and_list_memory_facts(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -235,6 +239,10 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([fact.id for fact in facts], ["fact-1"])
             self.assertEqual(facts[0].content, "Use Textual for the TUI.")
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["memory_fact_added"],
+            )
 
     def test_runtime_can_create_and_list_artifacts(self) -> None:
         from ergon_studio.runtime import load_runtime

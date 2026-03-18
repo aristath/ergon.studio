@@ -183,3 +183,25 @@ class CommandRunRecord:
         if not isinstance(self.output_path, Path):
             raise TypeError("output_path must be a Path")
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    id: str
+    session_id: str
+    tool_name: str
+    status: str
+    request_path: Path
+    created_at: int
+    response_path: Path | None = None
+    thread_id: str | None = None
+    task_id: str | None = None
+    agent_id: str | None = None
+    error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.request_path, Path):
+            raise TypeError("request_path must be a Path")
+        if self.response_path is not None and not isinstance(self.response_path, Path):
+            raise TypeError("response_path must be a Path or None")
+        validate_unix_time(self.created_at, "created_at")

@@ -36,6 +36,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#commands"))
                 self.assertIsNotNone(app.query_one("#artifacts"))
                 self.assertIsNotNone(app.query_one("#approvals"))
+                self.assertIsNotNone(app.query_one("#tool-calls"))
                 self.assertIsNotNone(app.query_one("#memory"))
                 self.assertIsNotNone(app.query_one("#team"))
                 self.assertIsNotNone(app.query_one("#settings"))
@@ -47,6 +48,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No commands yet.", app.query_one("#commands", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
+                self.assertIn("No tool calls yet.", app.query_one("#tool-calls", Panel).body)
                 self.assertIn("No memory facts yet.", app.query_one("#memory", Panel).body)
                 self.assertIn("No artifacts yet.", app.query_one("#artifacts", Panel).body)
                 self.assertIn("orchestrator", app.query_one("#settings", Panel).body)
@@ -189,6 +191,36 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[completed/0] pwd", commands.body)
                 self.assertIn("Cwd:", commands.body)
                 self.assertIn("# Command Run", commands.body)
+
+    async def test_app_renders_tool_calls(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.tool_call_store.record_tool_call(
+                session_id=runtime.main_session_id,
+                tool_call_id="tool-call-1",
+                tool_name="read_file",
+                arguments={"path": "README.md"},
+                result={"content": "hello"},
+                status="completed",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="orchestrator",
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                tool_calls = app.query_one("#tool-calls", Panel)
+                self.assertIn("> tool-call-1", tool_calls.body)
+                self.assertIn("Tool: read_file", tool_calls.body)
+                self.assertIn('"path": "README.md"', tool_calls.body)
 
     async def test_app_can_switch_selected_command_run(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

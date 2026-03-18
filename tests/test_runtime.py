@@ -37,6 +37,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_approvals(), [])
             self.assertEqual(runtime.list_memory_facts(), [])
             self.assertEqual(runtime.list_artifacts(), [])
+            self.assertEqual(runtime.list_tool_calls(), [])
             self.assertIsNotNone(runtime.agent_session_store)
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:

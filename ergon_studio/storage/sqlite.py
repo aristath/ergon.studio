@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -135,6 +135,22 @@ SCHEMA_STATEMENTS = (
       thread_id TEXT,
       task_id TEXT,
       agent_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      request_path TEXT NOT NULL,
+      response_path TEXT,
+      created_at INTEGER NOT NULL,
+      thread_id TEXT,
+      task_id TEXT,
+      agent_id TEXT,
+      error_message TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -822,6 +838,59 @@ class MetadataStore:
                 thread_id=row[8],
                 task_id=row[9],
                 agent_id=row[10],
+            )
+            for row in rows
+        ]
+
+    def insert_tool_call(self, record: ToolCallRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO tool_calls (
+                  id, session_id, tool_name, status, request_path, response_path, created_at, thread_id, task_id, agent_id, error_message
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.tool_name,
+                    record.status,
+                    str(record.request_path),
+                    str(record.response_path) if record.response_path is not None else None,
+                    record.created_at,
+                    record.thread_id,
+                    record.task_id,
+                    record.agent_id,
+                    record.error_message,
+                ),
+            )
+            connection.commit()
+
+    def list_tool_calls(self, session_id: str) -> list[ToolCallRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, tool_name, status, request_path, response_path, created_at, thread_id, task_id, agent_id, error_message
+                FROM tool_calls
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            ToolCallRecord(
+                id=row[0],
+                session_id=row[1],
+                tool_name=row[2],
+                status=row[3],
+                request_path=Path(row[4]),
+                response_path=Path(row[5]) if row[5] is not None else None,
+                created_at=row[6],
+                thread_id=row[7],
+                task_id=row[8],
+                agent_id=row[9],
+                error_message=row[10],
             )
             for row in rows
         ]

@@ -23,8 +23,9 @@ from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
+from ergon_studio.tool_call_store import ToolCallStore
 from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
@@ -63,6 +64,7 @@ class RuntimeContext:
     whiteboard_store: WhiteboardStore
     artifact_store: ArtifactStore
     command_store: CommandStore
+    tool_call_store: ToolCallStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -76,6 +78,7 @@ class RuntimeContext:
             artifact_store=self.artifact_store,
             whiteboard_store=self.whiteboard_store,
             event_store=self.event_store,
+            tool_call_store=self.tool_call_store,
         )
 
     def reload_registry(self) -> None:
@@ -412,6 +415,9 @@ class RuntimeContext:
     def list_command_runs(self) -> list[CommandRunRecord]:
         return self.command_store.list_command_runs(self.main_session_id)
 
+    def list_tool_calls(self) -> list[ToolCallRecord]:
+        return self.tool_call_store.list_tool_calls(self.main_session_id)
+
     def list_command_runs_for_workflow_run(self, workflow_run_id: str) -> list[CommandRunRecord]:
         run_view = self.describe_workflow_run(workflow_run_id)
         if run_view is None:
@@ -433,11 +439,44 @@ class RuntimeContext:
         ]
         return sorted(command_runs, key=lambda command_run: (command_run.created_at, command_run.id))
 
+    def list_tool_calls_for_workflow_run(self, workflow_run_id: str) -> list[ToolCallRecord]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+
+        task_ids: set[str] = set()
+        thread_ids: set[str] = set()
+        if run_view.root_task is not None:
+            task_ids.add(run_view.root_task.id)
+        for step in run_view.steps:
+            task_ids.add(step.task.id)
+            for thread in step.threads:
+                thread_ids.add(thread.id)
+
+        tool_calls = [
+            tool_call
+            for tool_call in self.list_tool_calls()
+            if tool_call.task_id in task_ids or tool_call.thread_id in thread_ids
+        ]
+        return sorted(tool_calls, key=lambda tool_call: (tool_call.created_at, tool_call.id))
+
     def read_command_output(self, command_run_id: str) -> str:
         for command_run in self.list_command_runs():
             if command_run.id == command_run_id:
                 return self.command_store.read_command_output(command_run)
         raise ValueError(f"unknown command run: {command_run_id}")
+
+    def read_tool_call_request(self, tool_call_id: str) -> str:
+        for tool_call in self.list_tool_calls():
+            if tool_call.id == tool_call_id:
+                return self.tool_call_store.read_request(tool_call)
+        raise ValueError(f"unknown tool call: {tool_call_id}")
+
+    def read_tool_call_response(self, tool_call_id: str) -> str:
+        for tool_call in self.list_tool_calls():
+            if tool_call.id == tool_call_id:
+                return self.tool_call_store.read_response(tool_call)
+        raise ValueError(f"unknown tool call: {tool_call_id}")
 
     def read_artifact_body(self, artifact_id: str) -> str:
         for artifact in self.list_artifacts():
@@ -1592,6 +1631,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     whiteboard_store = WhiteboardStore(paths)
     artifact_store = ArtifactStore(paths)
     command_store = CommandStore(paths)
+    tool_call_store = ToolCallStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
@@ -1606,6 +1646,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         whiteboard_store=whiteboard_store,
         artifact_store=artifact_store,
         command_store=command_store,
+        tool_call_store=tool_call_store,
     )
     object.__setattr__(
         runtime,

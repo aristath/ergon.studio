@@ -96,6 +96,8 @@ class ErgonStudioApp(App[None]):
         ("alt+j", "next_task", "Next Task"),
         ("alt+k", "previous_task", "Previous Task"),
         ("alt+l", "next_activity_event", "Next Activity"),
+        ("alt+b", "previous_tool_call", "Previous Tool"),
+        ("alt+m", "next_tool_call", "Next Tool"),
         ("alt+n", "next_memory_fact", "Next Memory"),
         ("alt+p", "previous_memory_fact", "Previous Memory"),
         ("alt+u", "previous_command_run", "Previous Command"),
@@ -174,6 +176,7 @@ class ErgonStudioApp(App[None]):
         self.selected_task_id: str | None = None
         self.selected_event_id: str | None = None
         self.selected_command_run_id: str | None = None
+        self.selected_tool_call_id: str | None = None
         self._time_cursor = int(time.time())
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
@@ -181,6 +184,7 @@ class ErgonStudioApp(App[None]):
         self._normalize_selected_task()
         self._normalize_selected_event()
         self._normalize_selected_command_run()
+        self._normalize_selected_tool_call()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -209,6 +213,7 @@ class ErgonStudioApp(App[None]):
             with Vertical(id="right-sidebar"):
                 yield Panel("Team", self._render_team_body(), panel_id="team", classes="panel")
                 yield Panel("Approvals", self._render_approvals_body(), panel_id="approvals", classes="panel")
+                yield Panel("Tool Calls", self._render_tool_calls_body(), panel_id="tool-calls", classes="panel")
                 yield Panel(
                     "Memory",
                     self._render_memory_body(),
@@ -438,6 +443,28 @@ class ErgonStudioApp(App[None]):
             return "No commands yet."
         return "\n".join(self._command_lines(command_runs) + self._command_preview_lines())
 
+    def _render_tool_calls_body(self) -> str:
+        tool_calls = self._visible_tool_calls()
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not tool_calls:
+                    lines.append("No tool calls for selected run.")
+                    return "\n".join(lines)
+                lines.extend(self._tool_call_lines(tool_calls))
+                lines.extend(self._tool_call_preview_lines())
+                return "\n".join(lines)
+
+        if not tool_calls:
+            return "No tool calls yet."
+        return "\n".join(self._tool_call_lines(tool_calls) + self._tool_call_preview_lines())
+
     def _render_settings_body(self) -> str:
         providers = self.runtime.list_provider_ids()
         agents = self.runtime.list_agent_ids()
@@ -478,6 +505,7 @@ class ErgonStudioApp(App[None]):
             "Run Command: Ctrl+X\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
             "Commands: Alt+U / Alt+I select\n"
+            "Tool Calls: Alt+B / Alt+M select\n"
             "Artifacts: F11/F12 select\n"
             "Activity: Alt+H / Alt+L select\n"
             "Tasks: Alt+J / Alt+K select\n"
@@ -636,6 +664,12 @@ class ErgonStudioApp(App[None]):
 
     def action_previous_command_run(self) -> None:
         self._cycle_command_run(-1)
+
+    def action_next_tool_call(self) -> None:
+        self._cycle_tool_call(1)
+
+    def action_previous_tool_call(self) -> None:
+        self._cycle_tool_call(-1)
 
     def action_next_agent(self) -> None:
         self._cycle_agent(1)
@@ -908,6 +942,7 @@ class ErgonStudioApp(App[None]):
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
         self._normalize_selected_command_run()
+        self._normalize_selected_tool_call()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
@@ -917,6 +952,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+        self.query_one("#tool-calls", Panel).set_body(self._render_tool_calls_body())
 
     def _cycle_approval(self, direction: int) -> None:
         approvals = self._visible_approvals()
@@ -993,6 +1029,25 @@ class ErgonStudioApp(App[None]):
 
         self.selected_command_run_id = command_run_ids[(current_index + direction) % len(command_run_ids)]
         self.query_one("#commands", Panel).set_body(self._render_commands_body())
+
+    def _cycle_tool_call(self, direction: int) -> None:
+        tool_calls = self._visible_tool_calls()
+        if not tool_calls:
+            self.selected_tool_call_id = None
+            self.query_one("#tool-calls", Panel).set_body(self._render_tool_calls_body())
+            return
+
+        tool_call_ids = [tool_call.id for tool_call in tool_calls]
+        if self.selected_tool_call_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = tool_call_ids.index(self.selected_tool_call_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_tool_call_id = tool_call_ids[(current_index + direction) % len(tool_call_ids)]
+        self.query_one("#tool-calls", Panel).set_body(self._render_tool_calls_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
@@ -1078,6 +1133,7 @@ class ErgonStudioApp(App[None]):
         self._normalize_selected_task()
         self._normalize_selected_event()
         self._normalize_selected_command_run()
+        self._normalize_selected_tool_call()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
@@ -1090,6 +1146,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#commands", Panel).set_body(self._render_commands_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+        self.query_one("#tool-calls", Panel).set_body(self._render_tool_calls_body())
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
         self.query_one("#settings", Panel).set_body(self._render_settings_body())
 
@@ -1145,6 +1202,14 @@ class ErgonStudioApp(App[None]):
         if self.selected_command_run_id not in command_run_ids:
             self.selected_command_run_id = command_run_ids[-1]
 
+    def _normalize_selected_tool_call(self) -> None:
+        tool_call_ids = [tool_call.id for tool_call in self._visible_tool_calls()]
+        if not tool_call_ids:
+            self.selected_tool_call_id = None
+            return
+        if self.selected_tool_call_id not in tool_call_ids:
+            self.selected_tool_call_id = tool_call_ids[-1]
+
     def _normalize_selected_thread(self) -> None:
         thread_ids = [thread.id for thread in self._visible_threads()]
         if not thread_ids:
@@ -1192,6 +1257,13 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_command_runs_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_command_runs()
+
+    def _visible_tool_calls(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_tool_calls_for_workflow_run(self.selected_workflow_run_id)
+        return self.runtime.list_tool_calls()
 
     def _approval_lines(self, approvals) -> list[str]:
         return [
@@ -1280,6 +1352,53 @@ class ErgonStudioApp(App[None]):
             lines.append(f"Task: {selected.task_id}")
         body = self.runtime.read_command_output(selected.id).rstrip("\n")
         lines.extend(["", body if body else "(empty)"])
+        return lines
+
+    def _tool_call_lines(self, tool_calls) -> list[str]:
+        return [
+            (
+                f"{'> ' if tool_call.id == self.selected_tool_call_id else '  '}"
+                f"{tool_call.id} [{tool_call.status}] {tool_call.tool_name}"
+            )
+            for tool_call in tool_calls[-8:]
+        ]
+
+    def _tool_call_preview_lines(self) -> list[str]:
+        if self.selected_tool_call_id is None:
+            return []
+
+        selected = None
+        for tool_call in self._visible_tool_calls():
+            if tool_call.id == self.selected_tool_call_id:
+                selected = tool_call
+                break
+        if selected is None:
+            return []
+
+        lines = [
+            "",
+            "Preview:",
+            f"Tool: {selected.tool_name}",
+            f"Status: {selected.status}",
+        ]
+        if selected.agent_id is not None:
+            lines.append(f"Agent: {selected.agent_id}")
+        if selected.thread_id is not None:
+            lines.append(f"Thread: {selected.thread_id}")
+        if selected.task_id is not None:
+            lines.append(f"Task: {selected.task_id}")
+        if selected.error_message is not None:
+            lines.append(f"Error: {selected.error_message}")
+        lines.extend(
+            [
+                "",
+                "Arguments:",
+                self.runtime.read_tool_call_request(selected.id).rstrip("\n") or "(empty)",
+            ]
+        )
+        response_body = self.runtime.read_tool_call_response(selected.id).rstrip("\n")
+        if response_body:
+            lines.extend(["", "Result:", response_body])
         return lines
 
     def _memory_lines(self, facts) -> list[str]:

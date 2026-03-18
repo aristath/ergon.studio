@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import time
 from typing import Any
 
 from agent_framework import Agent, MCPStdioTool, MCPStreamableHTTPTool, MCPWebsocketTool
@@ -13,6 +14,8 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.tool_call_logging import build_tool_call_middleware
+from ergon_studio.tool_call_store import ToolCallStore
 from ergon_studio.whiteboard_store import WhiteboardStore
 
 
@@ -26,12 +29,17 @@ def build_agent(
     artifact_store: ArtifactStore | None = None,
     whiteboard_store: WhiteboardStore | None = None,
     event_store: EventStore | None = None,
+    tool_call_store: ToolCallStore | None = None,
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
     provider_name = _resolve_provider_name(registry.config, role, definition.id)
     provider_config = registry.config["providers"][provider_name]
-    client = _build_client(provider_config)
+    client = _build_client(
+        provider_config,
+        event_store=event_store,
+        tool_call_store=tool_call_store,
+    )
     tools = _resolve_tools(definition, tool_registry or {})
     context_providers = _build_context_providers(
         definition=definition,
@@ -83,7 +91,12 @@ def _resolve_provider_name(config: dict[str, Any], role: str, agent_id: str) -> 
     return provider_name
 
 
-def _build_client(provider_config: dict[str, Any]) -> OpenAIChatClient:
+def _build_client(
+    provider_config: dict[str, Any],
+    *,
+    event_store: EventStore | None,
+    tool_call_store: ToolCallStore | None,
+) -> OpenAIChatClient:
     provider_type = provider_config.get("type", "openai_chat")
     if provider_type != "openai_chat":
         raise ValueError(f"unsupported provider type: {provider_type}")
@@ -92,11 +105,22 @@ def _build_client(provider_config: dict[str, Any]) -> OpenAIChatClient:
     if not model_id:
         raise ValueError("provider config must define a model")
 
+    middleware: list[object] = []
+    if event_store is not None and tool_call_store is not None:
+        middleware.append(
+            build_tool_call_middleware(
+                tool_call_store=tool_call_store,
+                event_store=event_store,
+                now=lambda: int(time.time()),
+            )
+        )
+
     return OpenAIChatClient(
         model_id=model_id,
         api_key=provider_config.get("api_key"),
         base_url=provider_config.get("base_url"),
         instruction_role=provider_config.get("instruction_role"),
+        middleware=middleware or None,
     )
 
 

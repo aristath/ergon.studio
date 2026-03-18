@@ -469,8 +469,8 @@ Agents receive whiteboard context before each run.
             self.assertEqual(workflow_run.workflow_id, "standard-build")
             self.assertEqual(workflow_run.state, "running")
             self.assertEqual(workflow_run.current_step_index, 0)
-            self.assertEqual(len(threads), 3)
-            self.assertEqual([thread.assigned_agent_id for thread in threads], ["architect", "coder", "reviewer"])
+            self.assertEqual(len(threads), 4)
+            self.assertEqual([thread.assigned_agent_id for thread in threads], ["architect", "coder", "tester", "reviewer"])
             self.assertEqual(
                 [run.id for run in runtime.list_workflow_runs()],
                 [workflow_run.id],
@@ -1117,7 +1117,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(runtime.list_main_messages()), 1)
             self.assertEqual(
                 [event.kind for event in runtime.list_events()],
-                ["message_created", "agent_unavailable"],
+                ["message_created", "orchestrator_turn_planned", "agent_unavailable"],
             )
 
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
@@ -1224,6 +1224,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             fake_agents = {
                 "architect": FakeAgent("Architecture ready."),
                 "coder": FakeAgent("Implementation ready."),
+                "tester": FakeAgent("Tests passed."),
                 "reviewer": FakeAgent("Review complete."),
             }
 
@@ -1492,6 +1493,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             fake_agents = {
                 "architect": FakeAgent("Architecture ready."),
                 "coder": FakeAgent("Implementation ready."),
+                "tester": FakeAgent("Tests passed."),
                 "reviewer": FakeAgent("Needs fixes."),
                 "fixer": FakeAgent("Fixes applied."),
             }
@@ -1510,9 +1512,13 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     workflow_run_id=workflow_run.id,
                     created_at=1_710_755_230,
                 )
-                completed_run, _, _ = await runtime.advance_workflow_run(
+                await runtime.advance_workflow_run(
                     workflow_run_id=workflow_run.id,
                     created_at=1_710_755_240,
+                )
+                completed_run, _, _ = await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_245,
                 )
                 repaired_run, repair_threads = runtime.request_workflow_fix_cycle(
                     workflow_run_id=workflow_run.id,
@@ -1522,7 +1528,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(completed_run.state, "completed")
             self.assertEqual(repaired_run.state, "repairing")
             self.assertEqual([thread.assigned_agent_id for thread in repair_threads], ["fixer", "reviewer"])
-            self.assertEqual(repaired_run.current_step_index, 3)
+            self.assertEqual(repaired_run.current_step_index, 4)
             self.assertEqual(runtime.get_task(repaired_run.root_task_id).state, "in_progress")
             self.assertIn("workflow_fix_cycle_requested", [event.kind for event in runtime.list_events()])
 
@@ -1552,6 +1558,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [
                     "standard-build: architect",
                     "standard-build: coder",
+                    "standard-build: tester",
                     "standard-build: reviewer",
                 ],
             )
@@ -1561,7 +1568,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 [step.threads[0].assigned_agent_id for step in tree.steps],
-                ["architect", "coder", "reviewer"],
+                ["architect", "coder", "tester", "reviewer"],
             )
 
     async def test_runtime_prefers_last_thread_for_workflow_run_selection(self) -> None:
@@ -1678,8 +1685,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
         fake_agents = {
             "architect": FakeAgent("Architecture plan ready."),
             "coder": FakeAgent("Implementation finished."),
+            "tester": FakeAgent("Verification passed."),
             "reviewer": FakeAgent("Review passed."),
-            "orchestrator": FakeAgent("Accepted. This matches the goal and is ready to present."),
+            "orchestrator": FakeAgent('{"accepted": true, "summary": "This matches the goal and is ready to present."}'),
         }
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1695,6 +1703,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "build_agent",
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -1707,18 +1718,18 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(workflow_run)
             assert workflow_run is not None
             self.assertEqual(workflow_run.state, "completed")
-            self.assertEqual(workflow_run.current_step_index, 3)
+            self.assertEqual(workflow_run.current_step_index, 4)
             self.assertIsInstance(result["last_thread_id"], str)
-            self.assertIn("Accepted.", result["review_summary"])
+            self.assertIn("ACCEPTED:", result["review_summary"])
 
             run_threads = runtime.list_threads_for_workflow_run(workflow_run.id)
             self.assertEqual(
                 [thread.assigned_agent_id for thread in run_threads],
-                ["architect", "coder", "reviewer", "orchestrator"],
+                ["architect", "coder", "tester", "reviewer", "orchestrator"],
             )
             artifacts = runtime.list_artifacts_for_workflow_run(workflow_run.id)
             self.assertTrue(any(artifact.kind == "workflow-report" for artifact in artifacts))
             report = next(artifact for artifact in artifacts if artifact.kind == "workflow-report")
             body = runtime.read_artifact_body(report.id)
             self.assertIn("## Orchestrator Review", body)
-            self.assertIn("Accepted. This matches the goal", body)
+            self.assertIn("ACCEPTED: This matches the goal", body)

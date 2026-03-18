@@ -35,10 +35,11 @@ def build_workspace_tool_registry(
 
     @tool(name="read_file", approval_mode="never_require")
     def read_file(path: str) -> str:
+        """Read the contents of a single file in the workspace."""
         target = resolve_path(path)
         return target.read_text(encoding="utf-8")
 
-    @tool(name="write_file", approval_mode="always_require")
+    @tool(name="write_file", approval_mode="never_require")
     def write_file(path: str, content: str) -> dict[str, str]:
         if write_file_handler is not None:
             return write_file_handler(path, content)
@@ -47,7 +48,7 @@ def build_workspace_tool_registry(
         target.write_text(content, encoding="utf-8")
         return {"path": str(target.relative_to(workspace_root)), "status": "written"}
 
-    @tool(name="patch_file", approval_mode="always_require")
+    @tool(name="patch_file", approval_mode="never_require")
     def patch_file(path: str, old_text: str, new_text: str) -> dict[str, int | str]:
         if patch_file_handler is not None:
             return patch_file_handler(path, old_text, new_text)
@@ -65,6 +66,7 @@ def build_workspace_tool_registry(
 
     @tool(name="list_files", approval_mode="never_require")
     def list_files(path: str = ".") -> list[str]:
+        """List files in the workspace. Use this to inspect repo structure before reading or editing."""
         target = resolve_path(path)
         if target.is_file():
             return [str(target.relative_to(workspace_root))]
@@ -76,6 +78,11 @@ def build_workspace_tool_registry(
 
     @tool(name="search_files", approval_mode="never_require")
     def search_files(pattern: str, path: str = ".") -> list[dict[str, int | str]]:
+        """Search for a specific text pattern inside files. Do not use this to list the workspace."""
+        if not pattern.strip():
+            raise ValueError("pattern must be a non-empty string")
+        if all(character in {"*", ".", "?", " "} for character in pattern):
+            raise ValueError("pattern must be specific text; use list_files to inspect the workspace")
         target = resolve_path(path)
         files = [target] if target.is_file() else sorted(file_path for file_path in target.rglob("*") if file_path.is_file())
         matches: list[dict[str, int | str]] = []
@@ -91,7 +98,7 @@ def build_workspace_tool_registry(
                     )
         return matches
 
-    @tool(name="web_lookup", approval_mode="always_require", kind="network")
+    @tool(name="web_lookup", approval_mode="never_require", kind="network")
     def web_lookup(query: str, limit: int = 5) -> list[dict[str, str]]:
         request = Request(
             f"https://duckduckgo.com/html/?q={quote(query)}",
@@ -101,7 +108,7 @@ def build_workspace_tool_registry(
             html = response.read().decode("utf-8", errors="replace")
         return _parse_web_lookup_results(html, limit)
 
-    @tool(name="run_command", approval_mode="always_require", kind="shell")
+    @tool(name="run_command", approval_mode="never_require", kind="shell")
     def run_command(command: str, timeout: int = 60) -> dict[str, int | str]:
         if run_command_handler is not None:
             return run_command_handler(command, timeout)

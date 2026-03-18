@@ -227,3 +227,11 @@ class ToolRegistryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "outside the project workspace"):
                 registry["read_file"].func(path="../secret.txt")
+
+    def test_search_files_rejects_non_specific_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            registry = build_workspace_tool_registry(project_root)
+
+            with self.assertRaisesRegex(ValueError, "specific text"):
+                registry["search_files"].func(pattern="*")

@@ -762,7 +762,7 @@ Selected tasks show their whiteboard in the TUI.
                 workflows = app.query_one("#workflows", Panel)
                 self.assertIn("> standard-build", workflows.body)
                 self.assertIn("Orchestration: sequential", workflows.body)
-                self.assertIn("Steps: architect -> coder -> reviewer", workflows.body)
+                self.assertIn("Steps: architect -> coder -> tester -> reviewer", workflows.body)
                 self.assertIn("Run the normal plan-build-review-fix loop.", workflows.body)
 
                 app.action_next_workflow()
@@ -995,6 +995,7 @@ Selected tasks show their whiteboard in the TUI.
             fake_agents = {
                 "architect": FakeAgent("Architecture ready."),
                 "coder": FakeAgent("Implementation ready."),
+                "tester": FakeAgent("Tests passed."),
                 "reviewer": FakeAgent("Needs fixes."),
                 "fixer": FakeAgent("Fixes applied."),
             }
@@ -1007,6 +1008,7 @@ Selected tasks show their whiteboard in the TUI.
             ):
                 async with app.run_test():
                     await app.action_start_selected_workflow()
+                    await app.action_advance_selected_workflow_run()
                     await app.action_advance_selected_workflow_run()
                     await app.action_advance_selected_workflow_run()
                     app.action_request_fix_cycle_for_selected_workflow_run()

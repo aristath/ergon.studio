@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import asyncio
+import json
+import re
 import subprocess
 import time
 from pathlib import Path
 from uuid import uuid4
 
-from agent_framework import Message
+from agent_framework import Agent, Message
 
 from ergon_studio.agent_session_store import AgentSessionStore
 from ergon_studio.approval_store import ApprovalStore
-from ergon_studio.agent_factory import build_agent
+from ergon_studio.agent_factory import build_agent, compose_instructions
 from ergon_studio.artifact_store import ArtifactStore
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.command_store import CommandStore
@@ -49,6 +51,18 @@ class WorkflowRunView:
     workflow_run: WorkflowRunRecord
     root_task: TaskRecord | None
     steps: tuple[WorkflowRunStepView, ...]
+
+
+@dataclass(frozen=True)
+class OrchestratorTurnDecision:
+    mode: str
+    reply: str
+    workflow_id: str | None = None
+    agent_id: str | None = None
+    title: str | None = None
+    request: str | None = None
+    goal: str | None = None
+    deliverable_expected: bool = False
 
 
 @dataclass(frozen=True)
@@ -443,6 +457,8 @@ class RuntimeContext:
             return tuple((step,) for step in legacy_steps)
         if not isinstance(configured_steps, list):
             raise ValueError(f"workflow '{workflow_id}' steps must be a list")
+        if not configured_steps:
+            return ()
         return tuple((step,) for step in _validate_workflow_group(workflow_id, configured_steps))
 
     def list_provider_ids(self) -> list[str]:
@@ -710,6 +726,18 @@ class RuntimeContext:
             return self.conversation_store.read_message_body(message).rstrip("\n")
         return None
 
+    def recent_main_user_context(self, *, limit: int = 4) -> str:
+        user_messages = [message for message in self.list_main_messages() if message.sender == "user"]
+        if not user_messages:
+            return ""
+        selected = user_messages[-limit:]
+        parts = []
+        for message in selected:
+            body = self.conversation_store.read_message_body(message).rstrip("\n")
+            if body:
+                parts.append(body)
+        return "\n\n".join(parts).strip()
+
     def list_thread_messages(self, thread_id: str) -> list[MessageRecord]:
         return self.conversation_store.list_messages(thread_id)
 
@@ -738,14 +766,140 @@ class RuntimeContext:
         body: str,
         created_at: int,
     ) -> tuple[MessageRecord, MessageRecord | None]:
-        return await self._run_agent_turn(
+        user_message = self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="user",
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+        decision = await self._decide_orchestrator_turn(body=body, created_at=created_at + 1)
+        if not decision.deliverable_expected:
+            deliverable_expected = await self._classify_deliverable_intent(
+                body=body,
+                created_at=created_at + 1,
+            )
+            if deliverable_expected:
+                decision = OrchestratorTurnDecision(
+                    mode=decision.mode,
+                    reply=decision.reply,
+                    workflow_id=decision.workflow_id,
+                    agent_id=decision.agent_id,
+                    title=decision.title,
+                    request=decision.request,
+                    goal=decision.goal,
+                    deliverable_expected=True,
+                )
+                self.append_event(
+                    kind="orchestrator_deliverable_detected",
+                    summary="Detected delivery intent for the current turn",
+                    created_at=created_at + 1,
+                    thread_id=self.main_thread_id,
+                )
+        resolved_goal = decision.goal or self.recent_main_user_context(limit=4) or body
+        resolved_request = decision.request or resolved_goal
+        if decision.deliverable_expected and decision.mode == "workflow" and decision.workflow_id in {
+            "architecture-first",
+            "research-then-decide",
+            "debate",
+        }:
+            decision = OrchestratorTurnDecision(
+                mode="workflow",
+                reply=decision.reply,
+                workflow_id="single-agent-execution",
+                agent_id=decision.agent_id,
+                title=decision.title,
+                request=resolved_request,
+                goal=resolved_goal,
+                deliverable_expected=True,
+            )
+            self.append_event(
+                kind="orchestrator_workflow_upgraded",
+                summary="Upgraded non-delivery workflow to single-agent-execution for deliverable request",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+        if decision.deliverable_expected and decision.mode == "reply":
+            decision = OrchestratorTurnDecision(
+                mode="workflow",
+                reply=decision.reply,
+                workflow_id="single-agent-execution",
+                agent_id=decision.agent_id,
+                title=decision.title,
+                request=resolved_request,
+                goal=resolved_goal,
+                deliverable_expected=True,
+            )
+            self.append_event(
+                kind="orchestrator_reply_promoted",
+                summary="Promoted reply-only decision to single-agent-execution for deliverable request",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+        self.append_event(
+            kind="orchestrator_turn_planned",
+            summary=f"Orchestrator selected {decision.mode}",
+            created_at=created_at + 1,
+            thread_id=self.main_thread_id,
+        )
+        if decision.mode == "workflow" and decision.workflow_id is not None:
+            result = await self.run_workflow(
+                workflow_id=decision.workflow_id,
+                goal=resolved_goal,
+                created_at=created_at + 2,
+                parent_thread_id=self.main_thread_id,
+            )
+            summary = self._format_workflow_summary(
+                workflow_id=decision.workflow_id,
+                result=result,
+            )
+            reply = self.append_message_to_main_thread(
+                message_id=f"message-{uuid4().hex}",
+                sender="orchestrator",
+                kind="status_update",
+                body=summary,
+                created_at=created_at + 3,
+            )
+            return user_message, reply
+        if decision.mode == "delegate" and decision.agent_id is not None:
+            result = await self.delegate_to_agent(
+                agent_id=decision.agent_id,
+                request=resolved_request,
+                title=decision.title,
+                created_at=created_at + 2,
+                parent_thread_id=self.main_thread_id,
+            )
+            summary = self._format_delegation_summary(
+                agent_id=decision.agent_id,
+                result=result,
+            )
+            reply = self.append_message_to_main_thread(
+                message_id=f"message-{uuid4().hex}",
+                sender="orchestrator",
+                kind="status_update",
+                body=summary,
+                created_at=created_at + 3,
+            )
+            return user_message, reply
+        if decision.mode == "reply" and decision.reply.strip():
+            reply = self.append_message_to_main_thread(
+                message_id=f"message-{uuid4().hex}",
+                sender="orchestrator",
+                kind="chat",
+                body=decision.reply,
+                created_at=created_at + 2,
+            )
+            return user_message, reply
+        _, reply = await self._run_agent_turn(
             thread_id=self.main_thread_id,
             agent_id="orchestrator",
             prompt_sender="user",
             reply_sender="orchestrator",
             body=body,
-            created_at=created_at,
+            created_at=created_at + 2,
+            record_prompt=False,
         )
+        return user_message, reply
 
     async def send_message_to_agent_thread(
         self,
@@ -909,6 +1063,7 @@ class RuntimeContext:
             "last_thread_id": summary.last_thread_id,
             "review_thread_id": summary.review_thread_id,
             "review_summary": summary.review_summary or "",
+            "review_accepted": summary.review_accepted,
             "artifact_id": summary.artifact_id,
         }
 
@@ -948,15 +1103,18 @@ class RuntimeContext:
         reply_sender: str,
         body: str,
         created_at: int,
-    ) -> tuple[MessageRecord, MessageRecord | None]:
-        prompt_message = self.append_message_to_thread(
-            thread_id=thread_id,
-            message_id=f"message-{uuid4().hex}",
-            sender=prompt_sender,
-            kind="chat",
-            body=body,
-            created_at=created_at,
-        )
+        record_prompt: bool = True,
+    ) -> tuple[MessageRecord | None, MessageRecord | None]:
+        prompt_message = None
+        if record_prompt:
+            prompt_message = self.append_message_to_thread(
+                thread_id=thread_id,
+                message_id=f"message-{uuid4().hex}",
+                sender=prompt_sender,
+                kind="chat",
+                body=body,
+                created_at=created_at,
+            )
 
         try:
             agent = self.build_agent(agent_id)
@@ -1033,6 +1191,252 @@ class RuntimeContext:
             created_at=created_at + 1,
         )
         return prompt_message, reply_message
+
+    async def _decide_orchestrator_turn(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> OrchestratorTurnDecision:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return OrchestratorTurnDecision(mode="act", reply="")
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return OrchestratorTurnDecision(mode="act", reply="")
+        decision_agent = Agent(
+            client=client,
+            id="orchestrator-turn-planner",
+            name="Orchestrator Turn Planner",
+            description="Internal orchestration planner",
+            instructions=_orchestrator_turn_planner_instructions(self),
+        )
+        try:
+            response = await decision_agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=_orchestrator_turn_planner_prompt(self, body),
+                        author_name="system",
+                    )
+                ],
+                session=decision_agent.create_session(session_id=f"main-turn-planner:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_planner_failed",
+                summary=f"Planner failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return OrchestratorTurnDecision(mode="act", reply="")
+        raw = response.text.strip()
+        try:
+            parsed = _parse_turn_decision_json(raw)
+        except ValueError as exc:
+            self.append_event(
+                kind="orchestrator_planner_invalid",
+                summary=f"Planner returned invalid JSON: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return OrchestratorTurnDecision(mode="act", reply="")
+        mode = str(parsed.get("mode", "act")).strip().lower()
+        if mode not in {"reply", "act", "delegate", "workflow"}:
+            mode = "act"
+        return OrchestratorTurnDecision(
+            mode=mode,
+            reply=str(parsed.get("reply", "")).strip(),
+            workflow_id=_optional_text(parsed.get("workflow_id")),
+            agent_id=_optional_text(parsed.get("agent_id")),
+            title=_optional_text(parsed.get("title")),
+            request=_optional_text(parsed.get("request")),
+            goal=_optional_text(parsed.get("goal")),
+            deliverable_expected=_as_bool(parsed.get("deliverable_expected")),
+        )
+
+    async def _classify_deliverable_intent(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> bool:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return False
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return False
+        classifier = Agent(
+            client=client,
+            id="orchestrator-deliverable-classifier",
+            name="Orchestrator Deliverable Classifier",
+            description="Internal delivery intent classifier",
+            instructions=_deliverable_classifier_instructions(),
+        )
+        try:
+            response = await classifier.run(
+                [
+                    Message(
+                        role="user",
+                        text=_deliverable_classifier_prompt(self, body),
+                        author_name="system",
+                    )
+                ],
+                session=classifier.create_session(session_id=f"main-deliverable:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_classifier_failed",
+                summary=f"Deliverable classifier failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return False
+        try:
+            parsed = _parse_turn_decision_json(response.text.strip())
+        except ValueError:
+            return False
+        return _as_bool(parsed.get("deliverable_expected"))
+
+    async def generate_agent_text_without_tools(
+        self,
+        *,
+        agent_id: str,
+        body: str,
+        created_at: int,
+        thread_id: str | None = None,
+        extra_instructions: str = "",
+    ) -> str | None:
+        target_thread_id = thread_id or self.main_thread_id
+        try:
+            base_agent = self.build_agent(agent_id)
+        except (KeyError, ValueError) as exc:
+            self.append_event(
+                kind="agent_unavailable",
+                summary=f"{agent_id} unavailable: {exc}",
+                created_at=created_at + 1,
+                thread_id=target_thread_id,
+            )
+            return None
+        client = getattr(base_agent, "client", None)
+        if client is None:
+            _, reply_message = await self._run_agent_turn(
+                thread_id=target_thread_id,
+                agent_id=agent_id,
+                prompt_sender="workflow",
+                reply_sender=agent_id,
+                body=body,
+                created_at=created_at,
+                record_prompt=False,
+            )
+            if reply_message is None:
+                return None
+            return self.conversation_store.read_message_body(reply_message).rstrip("\n")
+        definition = self.registry.agent_definitions[agent_id]
+        instructions = compose_instructions(definition)
+        if extra_instructions.strip():
+            instructions = f"{instructions}\n\n{extra_instructions.strip()}".strip()
+        agent = Agent(
+            client=client,
+            id=f"{agent_id}-no-tools",
+            name=str(definition.metadata.get("name", agent_id)),
+            description=str(definition.metadata.get("role", agent_id)),
+            instructions=instructions,
+        )
+        try:
+            response = await agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=body,
+                        author_name=prompt_sender,
+                    )
+                ],
+                session=agent.create_session(session_id=f"{thread_id}:{agent_id}:no-tools:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="agent_failed",
+                summary=f"{agent_id} no-tool run failed: {type(exc).__name__}: {exc}",
+                created_at=created_at + 1,
+                thread_id=target_thread_id,
+            )
+            return None
+        response_text = response.text.strip()
+        return response_text or None
+
+    async def run_agent_turn_without_tools(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        prompt_sender: str,
+        reply_sender: str,
+        body: str,
+        created_at: int,
+        extra_instructions: str = "",
+    ) -> tuple[MessageRecord, MessageRecord | None]:
+        prompt_message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender=prompt_sender,
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+        response_text = await self.generate_agent_text_without_tools(
+            agent_id=agent_id,
+            body=body,
+            created_at=created_at,
+            thread_id=thread_id,
+            extra_instructions=extra_instructions,
+        )
+        if not response_text:
+            return prompt_message, None
+        reply_message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender=reply_sender,
+            kind="chat",
+            body=response_text,
+            created_at=created_at + 1,
+        )
+        return prompt_message, reply_message
+
+    def _format_workflow_summary(self, *, workflow_id: str, result: dict[str, object]) -> str:
+        lines = [f"I chose the `{workflow_id}` workflow and ran it end to end."]
+        review_summary = result.get("review_summary")
+        if isinstance(review_summary, str) and review_summary.strip():
+            lines.extend(["", review_summary.strip()])
+        status = result.get("status")
+        if isinstance(status, str) and status != "completed":
+            lines.extend(["", f"Status: {status}"])
+        created_files = self._workspace_file_list(limit=12)
+        if created_files:
+            lines.extend(["", "Current workspace files:", *[f"- {path}" for path in created_files]])
+        return "\n".join(lines)
+
+    def _format_delegation_summary(self, *, agent_id: str, result: dict[str, object]) -> str:
+        lines = [f"I delegated this to `{agent_id}`."]
+        response_text = result.get("result")
+        if isinstance(response_text, str) and response_text.strip():
+            lines.extend(["", response_text.strip()])
+        status = result.get("status")
+        if isinstance(status, str) and status != "completed":
+            lines.extend(["", f"Status: {status}"])
+        return "\n".join(lines)
+
+    def _workspace_file_list(self, *, limit: int = 12) -> list[str]:
+        root = self.paths.project_root.resolve()
+        files = [
+            str(path.relative_to(root))
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and ".ergon.studio" not in path.parts
+        ]
+        return files[:limit]
 
     def run_workspace_command(
         self,
@@ -1874,6 +2278,145 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     )
     runtime.ensure_main_conversation()
     return runtime
+
+
+def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
+    workflow_lines = []
+    for summary in runtime.list_workflow_summaries():
+        workflow_lines.append(
+            f"- {summary['id']}: orchestration={summary['orchestration']} purpose={summary['purpose']}"
+        )
+    agent_lines = []
+    for summary in runtime.list_agent_summaries():
+        if summary["id"] == "orchestrator":
+            continue
+        agent_lines.append(f"- {summary['id']}: role={summary['role']}")
+    return "\n".join(
+        [
+            "You are the internal planning layer for the orchestrator.",
+            "Choose the single best next action for the current user turn.",
+            "Output JSON only. No markdown. No explanation outside the JSON object.",
+            "",
+            "Allowed modes:",
+            '- "reply": discussion, clarification, or a pure conversational answer.',
+            '- "act": let the orchestrator handle the turn directly with its normal tool-enabled agent run.',
+            '- "delegate": hand the work to one specialist thread.',
+            '- "workflow": run a named workflow end to end.',
+            "",
+            "Rules:",
+            "- Prefer workflow for non-trivial implementation, debugging, verification, or delivery work.",
+            "- If the user wants runnable code or an implemented project outcome, prefer `single-agent-execution` for small self-contained work and `standard-build` for broader or riskier work.",
+            "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
+            "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
+            "- If the recent conversation already settled the approach and the latest user turn is approval to proceed, choose delivery work instead of another reply.",
+            "- Prefer delegate only for narrow specialist work.",
+            "- Use reply only when discussion is the real goal or there is not enough information to start.",
+            "- Do not rely on keyword matching. Infer intent from the actual request and context.",
+            "- If the user asked to build or change the repo and enough information exists, do not choose reply.",
+            "- For workflow mode, make `goal` a self-contained summary of the work using the recent conversation, not just the latest short acknowledgment.",
+            "- For delegate mode, make `request` a self-contained specialist brief using the recent conversation.",
+            "",
+            "Available workflows:",
+            *workflow_lines,
+            "",
+            "Available specialists:",
+            *agent_lines,
+            "",
+            "Required JSON shape:",
+            '{"mode":"workflow|delegate|reply|act","workflow_id":null,"agent_id":null,"title":"","request":"","goal":"","reply":"","deliverable_expected":false}',
+        ]
+    )
+
+
+def _orchestrator_turn_planner_prompt(runtime: RuntimeContext, body: str) -> str:
+    recent_messages = runtime.list_main_messages()[-8:]
+    transcript_lines = []
+    for message in recent_messages:
+        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
+        if not text:
+            continue
+        transcript_lines.append(f"{message.sender}: {text}")
+    return "\n".join(
+        [
+            "Main thread transcript:",
+            *transcript_lines,
+            "",
+            "Latest user request:",
+            body,
+        ]
+    )
+
+
+def _deliverable_classifier_instructions() -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal classifier for the orchestrator.",
+            "Decide whether the user expects concrete delivery work to happen now in the repo.",
+            "Output JSON only.",
+            "",
+            "Return:",
+            '{"deliverable_expected": true}',
+            "",
+            "Set `deliverable_expected` to true when the user expects implementation, bug fixing, verification, repo changes, or completed execution now.",
+            "Set `deliverable_expected` to true when the recent conversation already settled the direction and the latest user turn is approval to proceed.",
+            "Set it to false for discussion-only, brainstorming-only, or planning-only turns.",
+            "Use the whole recent conversation, not just the latest short acknowledgment.",
+        ]
+    )
+
+
+def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
+    recent_messages = runtime.list_main_messages()[-8:]
+    transcript_lines = []
+    for message in recent_messages:
+        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
+        if not text:
+            continue
+        transcript_lines.append(f"{message.sender}: {text}")
+    return "\n".join(
+        [
+            "Main thread transcript:",
+            *transcript_lines,
+            "",
+            "Latest user request:",
+            body,
+        ]
+    )
+
+
+def _parse_turn_decision_json(raw: str) -> dict[str, object]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    if not text.startswith("{"):
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match is None:
+            raise ValueError("no JSON object found")
+        text = match.group(0)
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("planner output must decode to an object")
+    return parsed
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0", ""}:
+            return False
+    return False
 
 
 def _legacy_workflow_steps(workflow_id: str) -> tuple[str, ...]:

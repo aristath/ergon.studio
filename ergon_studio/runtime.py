@@ -30,6 +30,19 @@ MAIN_THREAD_ID = "thread-main"
 
 
 @dataclass(frozen=True)
+class WorkflowRunStepView:
+    task: TaskRecord
+    threads: tuple[ThreadRecord, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowRunView:
+    workflow_run: WorkflowRunRecord
+    root_task: TaskRecord | None
+    steps: tuple[WorkflowRunStepView, ...]
+
+
+@dataclass(frozen=True)
 class RuntimeContext:
     paths: StudioPaths
     registry: RuntimeRegistry
@@ -147,6 +160,48 @@ class RuntimeContext:
 
     def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord | None:
         return self.workflow_store.get_workflow_run(workflow_run_id)
+
+    def describe_workflow_run(self, workflow_run_id: str) -> WorkflowRunView | None:
+        workflow_run = self.get_workflow_run(workflow_run_id)
+        if workflow_run is None:
+            return None
+
+        root_task = None
+        if workflow_run.root_task_id is not None:
+            root_task = self.get_task(workflow_run.root_task_id)
+
+        child_tasks = [
+            task
+            for task in self.list_tasks()
+            if task.parent_task_id == workflow_run.root_task_id
+        ]
+        child_tasks = sorted(
+            child_tasks,
+            key=lambda task: (task.created_at, task.id),
+        )
+        threads_by_task_id: dict[str, list[ThreadRecord]] = {}
+        for thread in self.list_threads():
+            if thread.parent_task_id is None:
+                continue
+            threads_by_task_id.setdefault(thread.parent_task_id, []).append(thread)
+
+        steps = tuple(
+            WorkflowRunStepView(
+                task=task,
+                threads=tuple(
+                    sorted(
+                        threads_by_task_id.get(task.id, []),
+                        key=lambda thread: (thread.created_at, thread.id),
+                    )
+                ),
+            )
+            for task in child_tasks
+        )
+        return WorkflowRunView(
+            workflow_run=workflow_run,
+            root_task=root_task,
+            steps=steps,
+        )
 
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)

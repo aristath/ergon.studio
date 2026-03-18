@@ -873,3 +873,41 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(repaired_run.current_step_index, 3)
             self.assertEqual(runtime.get_task(repaired_run.root_task_id).state, "in_progress")
             self.assertIn("workflow_fix_cycle_requested", [event.kind for event in runtime.list_events()])
+
+    def test_runtime_can_describe_workflow_run_tree(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_200,
+            )
+
+            tree = runtime.describe_workflow_run(workflow_run.id)
+
+            self.assertIsNotNone(tree)
+            self.assertEqual(tree.workflow_run.id, workflow_run.id)
+            self.assertEqual(tree.root_task.id, workflow_run.root_task_id)
+            self.assertEqual(
+                [step.task.title for step in tree.steps],
+                [
+                    "standard-build: architect",
+                    "standard-build: coder",
+                    "standard-build: reviewer",
+                ],
+            )
+            self.assertEqual(
+                [step.threads[0].id for step in tree.steps],
+                [thread.id for thread in threads],
+            )
+            self.assertEqual(
+                [step.threads[0].assigned_agent_id for step in tree.steps],
+                ["architect", "coder", "reviewer"],
+            )

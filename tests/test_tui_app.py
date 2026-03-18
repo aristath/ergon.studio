@@ -805,3 +805,25 @@ Return reviewed code and a clear summary.
                     runtime.registry.workflow_definitions["standard-build"].sections["Exit Conditions"],
                     "Return reviewed code and a clear summary.",
                 )
+
+    async def test_app_renders_selected_workflow_run_as_task_tree(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                await app.action_start_selected_workflow()
+
+                tasks = app.query_one("#tasks", Panel)
+                self.assertIn("Run: workflow-run-", tasks.body)
+                self.assertIn("Root: task-", tasks.body)
+                self.assertIn("standard-build: architect", tasks.body)
+                self.assertIn("thread-agent-architect-", tasks.body)

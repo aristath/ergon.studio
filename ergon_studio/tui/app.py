@@ -204,6 +204,35 @@ class ErgonStudioApp(App[None]):
         )
 
     def _render_tasks_body(self) -> str:
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if run_view.root_task is not None:
+                    lines.append(
+                        f"Root: {run_view.root_task.id} [{run_view.root_task.state}] {run_view.root_task.title}"
+                    )
+                else:
+                    lines.append("Root: missing")
+
+                if not run_view.steps:
+                    lines.append("No workflow steps yet.")
+                    return "\n".join(lines)
+
+                for step in run_view.steps:
+                    lines.append(f"  task: {step.task.id} [{step.task.state}] {step.task.title}")
+                    if not step.threads:
+                        lines.append("    thread: none")
+                        continue
+                    for thread in step.threads:
+                        lines.append(f"    thread: {thread.id} ({self._thread_label(thread)})")
+                return "\n".join(lines)
+
         tasks = self.runtime.list_tasks()
         if not tasks:
             return "No tasks yet."
@@ -510,6 +539,7 @@ class ErgonStudioApp(App[None]):
                 current_index = 0
 
         self.selected_workflow_run_id = run_ids[(current_index + direction) % len(run_ids)]
+        self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:

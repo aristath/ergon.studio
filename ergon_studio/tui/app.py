@@ -338,18 +338,13 @@ class ErgonStudioApp(App[None]):
                 if not approvals:
                     lines.append("No approvals for selected run.")
                     return "\n".join(lines)
-                lines.extend(
-                    f"{'> ' if approval.id == self.selected_approval_id else '  '}{approval.id} [{approval.risk_class}] {approval.action}"
-                    for approval in approvals
-                )
+                lines.extend(self._approval_lines(approvals))
+                lines.extend(self._approval_preview_lines(approvals))
                 return "\n".join(lines)
 
         if not approvals:
             return "No approvals pending."
-        return "\n".join(
-            f"{'> ' if approval.id == self.selected_approval_id else '  '}{approval.id} [{approval.risk_class}] {approval.action}"
-            for approval in approvals
-        )
+        return "\n".join(self._approval_lines(approvals) + self._approval_preview_lines(approvals))
 
     def _render_memory_body(self) -> str:
         facts = self.runtime.list_memory_facts()
@@ -812,6 +807,32 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_pending_approvals_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_pending_approvals()
+
+    def _approval_lines(self, approvals) -> list[str]:
+        return [
+            f"{'> ' if approval.id == self.selected_approval_id else '  '}{approval.id} [{approval.risk_class}] {approval.action}"
+            for approval in approvals
+        ]
+
+    def _approval_preview_lines(self, approvals) -> list[str]:
+        selected = None
+        for approval in approvals:
+            if approval.id == self.selected_approval_id:
+                selected = approval
+                break
+        if selected is None:
+            return []
+        lines = [
+            "",
+            "Preview:",
+            f"Requester: {selected.requester}",
+            f"Reason: {selected.reason}",
+        ]
+        if selected.task_id is not None:
+            lines.append(f"Task: {selected.task_id}")
+        if selected.thread_id is not None:
+            lines.append(f"Thread: {selected.thread_id}")
+        return lines
 
     def _visible_artifacts(self):
         if self.selected_workflow_run_id is not None:

@@ -177,6 +177,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 approvals = app.query_one("#approvals", Panel)
                 self.assertIn("> approval-1", approvals.body)
                 self.assertIn("write_file", approvals.body)
+                self.assertIn("Update README", approvals.body)
 
     async def test_app_can_approve_selected_approval(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -304,7 +305,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 requester="orchestrator",
                 action="run_command",
                 risk_class="high",
-                reason="Install dependencies",
+                reason="Install project dependencies",
                 created_at=1_710_755_201,
             )
             app = ErgonStudioApp(runtime)
@@ -317,6 +318,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
 
                 approvals = app.query_one("#approvals", Panel)
                 self.assertIn("> approval-2", approvals.body)
+                self.assertIn("Install project dependencies", approvals.body)
 
     async def test_app_renders_memory_facts(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

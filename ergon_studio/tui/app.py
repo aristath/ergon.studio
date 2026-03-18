@@ -295,6 +295,25 @@ class ErgonStudioApp(App[None]):
         )
 
     def _render_artifacts_body(self) -> str:
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                artifacts = self.runtime.list_artifacts_for_workflow_run(self.selected_workflow_run_id)
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not artifacts:
+                    lines.append("No artifacts for selected run.")
+                    return "\n".join(lines)
+                lines.extend(
+                    f"{artifact.id} [{artifact.kind}] {artifact.title}"
+                    for artifact in artifacts[-8:]
+                )
+                return "\n".join(lines)
+
         artifacts = self.runtime.list_artifacts()
         if not artifacts:
             return "No artifacts yet."
@@ -546,6 +565,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+        self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)

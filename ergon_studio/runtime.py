@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from agent_framework import Message
@@ -16,6 +17,7 @@ from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
+from ergon_studio.definitions import DefinitionDocument, save_definition_text
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
@@ -75,6 +77,23 @@ class RuntimeContext:
         provider = self.registry.config["providers"][provider_name]
         model_name = provider.get("model", "unknown-model")
         return f"ready via {provider_name} ({model_name})"
+
+    def read_agent_definition_text(self, agent_id: str) -> str:
+        definition = self.registry.agent_definitions[agent_id]
+        return definition.path.read_text(encoding="utf-8")
+
+    def save_agent_definition_text(self, *, agent_id: str, text: str, created_at: int | None = None) -> DefinitionDocument:
+        definition = self.registry.agent_definitions[agent_id]
+        saved = save_definition_text(definition.path, text)
+        self.reload_registry()
+        if created_at is None:
+            created_at = int(time.time())
+        self.append_event(
+            kind="definition_saved",
+            summary=f"Saved agent definition {agent_id}",
+            created_at=created_at,
+        )
+        return saved
 
     def list_threads(self) -> list[ThreadRecord]:
         return self.conversation_store.list_threads(self.main_session_id)

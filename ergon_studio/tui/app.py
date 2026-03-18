@@ -4,7 +4,8 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Input, Static
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Header, Input, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext
 
@@ -24,11 +25,63 @@ class Panel(Static):
         self.update(self._render_panel(self.title_text, body))
 
 
+class DefinitionEditorScreen(ModalScreen[None]):
+    BINDINGS = [
+        ("ctrl+s", "save", "Save"),
+        ("escape", "cancel", "Cancel"),
+    ]
+    CSS = """
+    #definition-editor-container {
+      width: 90%;
+      height: 90%;
+      border: round $accent;
+      background: $surface;
+      padding: 1;
+    }
+
+    #definition-editor {
+      height: 1fr;
+      margin: 1 0;
+    }
+
+    #definition-error {
+      color: $error;
+      height: auto;
+    }
+    """
+
+    def __init__(self, *, title: str, initial_text: str, on_save) -> None:
+        super().__init__()
+        self.title = title
+        self.initial_text = initial_text
+        self.on_save = on_save
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="definition-editor-container"):
+            yield Static(f"[b]{self.title}[/b]\n`Ctrl+S` to save, `Esc` to cancel.")
+            yield TextArea(self.initial_text, id="definition-editor", language="markdown")
+            yield Static("", id="definition-error")
+
+    def action_cancel(self) -> None:
+        self.dismiss()
+
+    def action_save(self) -> None:
+        editor = self.query_one("#definition-editor", TextArea)
+        error = self.query_one("#definition-error", Static)
+        try:
+            self.on_save(editor.text)
+        except ValueError as exc:
+            error.update(str(exc))
+            return
+        self.dismiss()
+
+
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
+        ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
     CSS = """
     Screen {
@@ -242,6 +295,16 @@ class ErgonStudioApp(App[None]):
     def action_previous_thread(self) -> None:
         self._cycle_thread(-1)
 
+    def action_edit_orchestrator_definition(self) -> None:
+        initial_text = self.runtime.read_agent_definition_text("orchestrator")
+        self.push_screen(
+            DefinitionEditorScreen(
+                title="Edit Orchestrator Definition",
+                initial_text=initial_text,
+                on_save=self._save_orchestrator_definition,
+            )
+        )
+
     def _cycle_thread(self, direction: int) -> None:
         threads = self.runtime.list_threads()
         if not threads:
@@ -257,6 +320,14 @@ class ErgonStudioApp(App[None]):
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
 
+    def _save_orchestrator_definition(self, text: str) -> None:
+        self.runtime.save_agent_definition_text(
+            agent_id="orchestrator",
+            text=text,
+            created_at=int(time.time()),
+        )
+        self._refresh_panels()
+
     def _refresh_panels(self) -> None:
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
@@ -266,3 +337,4 @@ class ErgonStudioApp(App[None]):
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
         self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
+        self.query_one("#settings", Panel).set_body(self._render_settings_body())

@@ -294,3 +294,49 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     main_chat = app.query_one("#main-chat", Panel)
                     self.assertIn("Ship the next slice.", main_chat.body)
                     self.assertIn("I’m on it.", main_chat.body)
+
+    async def test_app_can_edit_orchestrator_definition(self) -> None:
+        from textual.widgets import TextArea
+
+        from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test() as pilot:
+                app.action_edit_orchestrator_definition()
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, DefinitionEditorScreen)
+                editor = app.screen.query_one("#definition-editor", TextArea)
+                editor.load_text(
+                    """---
+id: orchestrator
+name: Orchestrator
+role: orchestrator
+temperature: 0.2
+tools:
+  - read_file
+---
+## Identity
+Lead engineer for the AI firm.
+
+## Output Style
+Be extremely concise.
+"""
+                )
+                app.screen.action_save()
+                await pilot.pause()
+
+                self.assertIn("definition_saved", app.query_one("#activity", Panel).body)
+                self.assertEqual(
+                    runtime.registry.agent_definitions["orchestrator"].sections["Output Style"],
+                    "Be extremely concise.",
+                )

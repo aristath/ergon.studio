@@ -827,3 +827,33 @@ Return reviewed code and a clear summary.
                 self.assertIn("Root: task-", tasks.body)
                 self.assertIn("standard-build: architect", tasks.body)
                 self.assertIn("thread-agent-architect-", tasks.body)
+
+    async def test_switching_workflow_runs_focuses_the_related_thread(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                await app.action_start_selected_workflow()
+                first_run = runtime.list_workflow_runs()[0]
+                first_thread_id = first_run.last_thread_id
+
+                await app.action_start_selected_workflow()
+                second_run = runtime.list_workflow_runs()[1]
+                self.assertEqual(app.selected_workflow_run_id, second_run.id)
+                self.assertEqual(app.selected_thread_id, second_run.last_thread_id)
+
+                app.action_previous_workflow_run()
+
+                selected_thread = app.query_one("#selected-thread", Panel)
+                self.assertEqual(app.selected_workflow_run_id, first_run.id)
+                self.assertEqual(app.selected_thread_id, first_thread_id)
+                self.assertIn(first_thread_id, selected_thread.body)

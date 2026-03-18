@@ -539,8 +539,13 @@ class ErgonStudioApp(App[None]):
                 current_index = 0
 
         self.selected_workflow_run_id = run_ids[(current_index + direction) % len(run_ids)]
+        preferred_thread_id = self.runtime.preferred_thread_id_for_workflow_run(self.selected_workflow_run_id)
+        if preferred_thread_id is not None:
+            self.selected_thread_id = preferred_thread_id
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
+        self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
 
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)

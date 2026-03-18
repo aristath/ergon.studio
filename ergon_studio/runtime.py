@@ -203,6 +203,21 @@ class RuntimeContext:
             steps=steps,
         )
 
+    def preferred_thread_id_for_workflow_run(self, workflow_run_id: str) -> str | None:
+        workflow_run = self.get_workflow_run(workflow_run_id)
+        if workflow_run is None:
+            return None
+        if workflow_run.last_thread_id is not None and self.get_thread(workflow_run.last_thread_id) is not None:
+            return workflow_run.last_thread_id
+
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return None
+        for step in run_view.steps:
+            if step.threads:
+                return step.threads[0].id
+        return None
+
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
 

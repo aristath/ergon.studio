@@ -911,3 +911,60 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [step.threads[0].assigned_agent_id for step in tree.steps],
                 ["architect", "coder", "reviewer"],
             )
+
+    async def test_runtime_prefers_last_thread_for_workflow_run_selection(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Build the next feature.",
+                created_at=1_710_755_200,
+            )
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_210,
+            )
+            self.assertEqual(runtime.preferred_thread_id_for_workflow_run(workflow_run.id), threads[0].id)
+
+            fake_agents = {
+                "architect": FakeAgent("Architecture ready."),
+                "coder": FakeAgent("Implementation ready."),
+                "reviewer": FakeAgent("Review complete."),
+            }
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_220,
+                )
+                updated_run, _, _ = await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_230,
+                )
+
+            self.assertEqual(updated_run.last_thread_id, threads[1].id)
+            self.assertEqual(runtime.preferred_thread_id_for_workflow_run(workflow_run.id), threads[1].id)

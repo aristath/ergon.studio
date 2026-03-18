@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,12 @@ class ToolRegistryTests(unittest.TestCase):
                     "search_files",
                     "web_lookup",
                     "list_files",
+                    "list_agents",
+                    "describe_agent",
+                    "list_workflows",
+                    "describe_workflow",
+                    "delegate_to_agent",
+                    "run_workflow",
                 }.issubset(registry.keys())
             )
 
@@ -116,6 +123,56 @@ class ToolRegistryTests(unittest.TestCase):
                 [
                     ("write_file", ("notes.txt", "hello")),
                     ("patch_file", ("notes.txt", "hello", "team")),
+                ],
+            )
+
+    def test_orchestration_tools_can_delegate_to_custom_handlers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            observed: list[tuple[str, tuple[object, ...]]] = []
+
+            async def delegate_handler(agent_id: str, request: str, title: str | None = None) -> dict[str, object]:
+                observed.append(("delegate_to_agent", (agent_id, request, title)))
+                return {"status": "completed", "agent_id": agent_id, "result": "done"}
+
+            async def workflow_handler(workflow_id: str, goal: str) -> dict[str, object]:
+                observed.append(("run_workflow", (workflow_id, goal)))
+                return {"status": "completed", "workflow_id": workflow_id, "review_summary": "accepted"}
+
+            registry = build_workspace_tool_registry(
+                project_root,
+                list_agents_handler=lambda: [{"id": "coder", "role": "coder"}],
+                describe_agent_handler=lambda agent_id: {"id": agent_id, "role": agent_id},
+                list_workflows_handler=lambda: [{"id": "standard-build", "orchestration": "sequential"}],
+                describe_workflow_handler=lambda workflow_id: {"id": workflow_id, "orchestration": "sequential"},
+                delegate_to_agent_handler=delegate_handler,
+                run_workflow_handler=workflow_handler,
+            )
+
+            self.assertEqual(registry["list_agents"].func(), [{"id": "coder", "role": "coder"}])
+            self.assertEqual(registry["describe_agent"].func(agent_id="coder"), {"id": "coder", "role": "coder"})
+            self.assertEqual(
+                registry["list_workflows"].func(),
+                [{"id": "standard-build", "orchestration": "sequential"}],
+            )
+            self.assertEqual(
+                registry["describe_workflow"].func(workflow_id="standard-build"),
+                {"id": "standard-build", "orchestration": "sequential"},
+            )
+            delegate_result = asyncio.run(
+                registry["delegate_to_agent"].func(agent_id="coder", request="Implement this", title="Feature task")
+            )
+            workflow_result = asyncio.run(
+                registry["run_workflow"].func(workflow_id="standard-build", goal="Build the feature")
+            )
+
+            self.assertEqual(delegate_result["status"], "completed")
+            self.assertEqual(workflow_result["status"], "completed")
+            self.assertEqual(
+                observed,
+                [
+                    ("delegate_to_agent", ("coder", "Implement this", "Feature task")),
+                    ("run_workflow", ("standard-build", "Build the feature")),
                 ],
             )
 

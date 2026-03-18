@@ -735,7 +735,9 @@ Selected tasks show their whiteboard in the TUI.
                 team = app.query_one("#team", Panel)
                 self.assertIn("> orchestrator", team.body)
                 self.assertIn("Role: orchestrator", team.body)
-                self.assertIn("Tools: read_file, write_file, patch_file, run_command", team.body)
+                self.assertIn("Tools: list_files, search_files, read_file, write_file, patch_file, run_command", team.body)
+                self.assertIn("delegate_to_agent", team.body)
+                self.assertIn("run_workflow", team.body)
 
                 app.action_next_agent()
 

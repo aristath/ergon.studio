@@ -35,14 +35,21 @@ def build_agent(
     role = str(definition.metadata.get("role", definition.id))
     provider_name = _resolve_provider_name(registry.config, role, definition.id)
     provider_config = registry.config["providers"][provider_name]
+    provider_capabilities = provider_config.get("capabilities", {})
+    if not isinstance(provider_capabilities, dict):
+        provider_capabilities = {}
     client = _build_client(
         provider_config,
         event_store=event_store,
         tool_call_store=tool_call_store,
     )
-    tools = _resolve_tools(definition, tool_registry or {})
+    tool_calling_enabled = provider_capabilities.get("tool_calling", True) is not False
+    tools = _resolve_tools(definition, tool_registry or {}) if tool_calling_enabled else []
     context_providers = _build_context_providers(
+        registry=registry,
         definition=definition,
+        provider_name=provider_name,
+        provider_capabilities=provider_capabilities,
         conversation_store=conversation_store,
         memory_store=memory_store,
         artifact_store=artifact_store,
@@ -193,14 +200,24 @@ def _build_mcp_tool(config: dict[str, Any]) -> object:
 
 def _build_context_providers(
     *,
+    registry: RuntimeRegistry,
     definition: DefinitionDocument,
+    provider_name: str,
+    provider_capabilities: dict[str, object],
     conversation_store: ConversationStore | None,
     memory_store: MemoryStore | None,
     artifact_store: ArtifactStore | None,
     whiteboard_store: WhiteboardStore | None,
     event_store: EventStore | None,
 ) -> list[object]:
-    providers: list[object] = [AgentProfileContextProvider(definition)]
+    providers: list[object] = [
+        AgentProfileContextProvider(
+            definition,
+            registry=registry,
+            provider_name=provider_name,
+            provider_capabilities=provider_capabilities,
+        )
+    ]
     if conversation_store is not None and event_store is not None:
         providers.append(ConversationHistoryProvider(conversation_store, event_store))
     if whiteboard_store is not None and event_store is not None:

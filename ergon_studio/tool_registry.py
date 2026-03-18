@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from collections.abc import Awaitable
 from collections.abc import Callable
 from pathlib import Path
 import re
@@ -17,6 +18,12 @@ def build_workspace_tool_registry(
     run_command_handler: Callable[[str, int], dict[str, int | str]] | None = None,
     write_file_handler: Callable[[str, str], dict[str, str]] | None = None,
     patch_file_handler: Callable[[str, str, str], dict[str, int | str]] | None = None,
+    list_agents_handler: Callable[[], list[dict[str, object]]] | None = None,
+    describe_agent_handler: Callable[[str], dict[str, object]] | None = None,
+    list_workflows_handler: Callable[[], list[dict[str, object]]] | None = None,
+    describe_workflow_handler: Callable[[str], dict[str, object]] | None = None,
+    delegate_to_agent_handler: Callable[[str, str, str | None], Awaitable[dict[str, object]]] | None = None,
+    run_workflow_handler: Callable[[str, str], Awaitable[dict[str, object]]] | None = None,
 ) -> dict[str, FunctionTool]:
     workspace_root = project_root.resolve()
 
@@ -117,6 +124,48 @@ def build_workspace_tool_registry(
             "created_at": int(time.time()),
         }
 
+    @tool(name="list_agents", approval_mode="never_require")
+    def list_agents() -> list[dict[str, object]]:
+        """Return the available specialist agents and their roles."""
+        if list_agents_handler is None:
+            return []
+        return list_agents_handler()
+
+    @tool(name="describe_agent", approval_mode="never_require")
+    def describe_agent(agent_id: str) -> dict[str, object]:
+        """Return the editable definition details for a specific agent."""
+        if describe_agent_handler is None:
+            raise ValueError("agent descriptions are unavailable")
+        return describe_agent_handler(agent_id)
+
+    @tool(name="list_workflows", approval_mode="never_require")
+    def list_workflows() -> list[dict[str, object]]:
+        """Return the workflow catalog available to the orchestrator."""
+        if list_workflows_handler is None:
+            return []
+        return list_workflows_handler()
+
+    @tool(name="describe_workflow", approval_mode="never_require")
+    def describe_workflow(workflow_id: str) -> dict[str, object]:
+        """Return the editable definition details for a specific workflow."""
+        if describe_workflow_handler is None:
+            raise ValueError("workflow descriptions are unavailable")
+        return describe_workflow_handler(workflow_id)
+
+    @tool(name="delegate_to_agent", approval_mode="never_require")
+    async def delegate_to_agent(agent_id: str, request: str, title: str | None = None) -> dict[str, object]:
+        """Open a side thread with a specialist, send the request, and return the result."""
+        if delegate_to_agent_handler is None:
+            raise ValueError("agent delegation is unavailable")
+        return await delegate_to_agent_handler(agent_id, request, title)
+
+    @tool(name="run_workflow", approval_mode="never_require")
+    async def run_workflow(workflow_id: str, goal: str) -> dict[str, object]:
+        """Execute a workflow end to end and return the orchestrator review."""
+        if run_workflow_handler is None:
+            raise ValueError("workflow execution is unavailable")
+        return await run_workflow_handler(workflow_id, goal)
+
     return {
         "read_file": read_file,
         "write_file": write_file,
@@ -125,6 +174,12 @@ def build_workspace_tool_registry(
         "search_files": search_files,
         "web_lookup": web_lookup,
         "run_command": run_command,
+        "list_agents": list_agents,
+        "describe_agent": describe_agent,
+        "list_workflows": list_workflows,
+        "describe_workflow": describe_workflow,
+        "delegate_to_agent": delegate_to_agent,
+        "run_workflow": run_workflow,
     }
 
 

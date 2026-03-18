@@ -131,9 +131,19 @@ class MemoryFactRecord:
     kind: str
     content: str
     created_at: int
+    source: str | None = None
+    confidence: float | None = None
+    tags: tuple[str, ...] = ()
+    last_used_at: int | None = None
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
+        if self.confidence is not None and type(self.confidence) not in {int, float}:
+            raise TypeError("confidence must be a number or None")
+        if self.last_used_at is not None:
+            validate_unix_time(self.last_used_at, "last_used_at")
+        if not isinstance(self.tags, tuple):
+            raise TypeError("tags must be a tuple")
 
 
 @dataclass(frozen=True)

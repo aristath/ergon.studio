@@ -59,6 +59,10 @@ class StudioPaths:
         return self.project_data_dir / "memory"
 
     @property
+    def whiteboards_dir(self) -> Path:
+        return self.memory_dir / "whiteboards"
+
+    @property
     def artifacts_dir(self) -> Path:
         return self.project_data_dir / "artifacts"
 
@@ -98,6 +102,7 @@ class StudioPaths:
             self.threads_dir,
             self.tasks_dir,
             self.memory_dir,
+            self.whiteboards_dir,
             self.artifacts_dir,
             self.checkpoints_dir,
             self.indexes_dir,

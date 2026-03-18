@@ -102,7 +102,11 @@ SCHEMA_STATEMENTS = (
       scope TEXT NOT NULL,
       kind TEXT NOT NULL,
       content TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      source TEXT,
+      confidence REAL,
+      tags TEXT,
+      last_used_at INTEGER
     )
     """,
     """
@@ -149,6 +153,10 @@ def initialize_database(db_path: Path) -> None:
         _ensure_column(connection, table_name="approvals", column_name="thread_id", definition="TEXT")
         _ensure_column(connection, table_name="approvals", column_name="task_id", definition="TEXT")
         _ensure_column(connection, table_name="approvals", column_name="payload_path", definition="TEXT")
+        _ensure_column(connection, table_name="memory_facts", column_name="source", definition="TEXT")
+        _ensure_column(connection, table_name="memory_facts", column_name="confidence", definition="REAL")
+        _ensure_column(connection, table_name="memory_facts", column_name="tags", definition="TEXT")
+        _ensure_column(connection, table_name="memory_facts", column_name="last_used_at", definition="INTEGER")
         connection.commit()
 
 
@@ -655,8 +663,8 @@ class MetadataStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO memory_facts (id, scope, kind, content, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO memory_facts (id, scope, kind, content, created_at, source, confidence, tags, last_used_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -664,6 +672,10 @@ class MetadataStore:
                     record.kind,
                     record.content,
                     record.created_at,
+                    record.source,
+                    float(record.confidence) if record.confidence is not None else None,
+                    ",".join(record.tags) if record.tags else None,
+                    record.last_used_at,
                 ),
             )
             connection.commit()
@@ -672,7 +684,7 @@ class MetadataStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, scope, kind, content, created_at
+                SELECT id, scope, kind, content, created_at, source, confidence, tags, last_used_at
                 FROM memory_facts
                 ORDER BY created_at ASC, id ASC
                 """
@@ -684,9 +696,35 @@ class MetadataStore:
                 kind=row[2],
                 content=row[3],
                 created_at=row[4],
+                source=row[5],
+                confidence=row[6],
+                tags=tuple(tag for tag in str(row[7]).split(",") if tag) if row[7] is not None else (),
+                last_used_at=row[8],
             )
             for row in rows
         ]
+
+    def update_memory_fact(self, record: MemoryFactRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE memory_facts
+                SET scope = ?, kind = ?, content = ?, created_at = ?, source = ?, confidence = ?, tags = ?, last_used_at = ?
+                WHERE id = ?
+                """,
+                (
+                    record.scope,
+                    record.kind,
+                    record.content,
+                    record.created_at,
+                    record.source,
+                    float(record.confidence) if record.confidence is not None else None,
+                    ",".join(record.tags) if record.tags else None,
+                    record.last_used_at,
+                    record.id,
+                ),
+            )
+            connection.commit()
 
     def insert_artifact(self, record: ArtifactRecord) -> None:
         with self._connect() as connection:

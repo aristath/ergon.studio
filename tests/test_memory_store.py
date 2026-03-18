@@ -27,6 +27,9 @@ class MemoryStoreTests(unittest.TestCase):
                 kind="decision",
                 content="Use Textual for the TUI.",
                 created_at=10,
+                source="plan",
+                confidence=0.9,
+                tags=("ui", "decision"),
             )
             second = store.add_fact(
                 fact_id="fact-2",
@@ -38,7 +41,12 @@ class MemoryStoreTests(unittest.TestCase):
 
             self.assertEqual(first.id, "fact-1")
             self.assertEqual(second.kind, "preference")
+            self.assertEqual(first.source, "plan")
+            self.assertEqual(first.tags, ("ui", "decision"))
             self.assertEqual(
                 [fact.id for fact in store.list_facts()],
                 ["fact-1", "fact-2"],
             )
+            store.touch_facts(("fact-1",), last_used_at=30)
+            touched = store.list_facts()[0]
+            self.assertEqual(touched.last_used_at, 30)

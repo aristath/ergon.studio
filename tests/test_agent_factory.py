@@ -130,6 +130,11 @@ Lead engineer.
 
     def test_build_agent_can_resolve_seeded_researcher_tools(self) -> None:
         from ergon_studio.agent_factory import build_agent
+        from ergon_studio.artifact_store import ArtifactStore
+        from ergon_studio.conversation_store import ConversationStore
+        from ergon_studio.event_store import EventStore
+        from ergon_studio.memory_store import MemoryStore
+        from ergon_studio.whiteboard_store import WhiteboardStore
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -188,7 +193,13 @@ Research specialist.
                     "search_files": search_files,
                     "web_lookup": web_lookup,
                 },
+                conversation_store=ConversationStore(paths),
+                memory_store=MemoryStore(paths),
+                artifact_store=ArtifactStore(paths),
+                whiteboard_store=WhiteboardStore(paths),
+                event_store=EventStore(paths),
             )
 
             self.assertEqual(agent.id, "researcher")
             self.assertEqual(len(agent.default_options["tools"]), 2)
+            self.assertEqual(len(agent.context_providers), 5)

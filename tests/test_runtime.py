@@ -282,6 +282,86 @@ Return reviewed code and a clear summary.
                 ["message_created"],
             )
 
+    def test_runtime_creates_and_saves_task_whiteboards(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_task(
+                task_id="task-1",
+                title="Build memory system",
+                state="planned",
+                created_at=10,
+            )
+            whiteboard = runtime.get_task_whiteboard("task-1")
+
+            self.assertIsNotNone(whiteboard)
+            self.assertEqual(whiteboard.sections["Goal"], "Build memory system")
+
+            runtime.save_task_whiteboard_text(
+                task_id="task-1",
+                text="""---
+task_id: task-1
+title: Build memory system
+updated_at: 20
+---
+## Goal
+Build the framework-native memory system.
+
+## Constraints
+Use Agent Framework context providers.
+
+## Plan
+Add whiteboards, durable memory, and retrieval providers.
+
+## Decisions
+Use markdown whiteboards under ~/.ergon.studio.
+
+## Open Questions
+
+## Acceptance Criteria
+Agents receive whiteboard context before each run.
+""",
+                created_at=20,
+            )
+
+            updated = runtime.get_task_whiteboard("task-1")
+            self.assertIsNotNone(updated)
+            self.assertEqual(updated.sections["Decisions"], "Use markdown whiteboards under ~/.ergon.studio.")
+            self.assertIn("whiteboard_saved", [event.kind for event in runtime.list_events()])
+
+    def test_runtime_add_memory_fact_supports_metadata(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.add_memory_fact(
+                fact_id="fact-1",
+                scope="project",
+                kind="decision",
+                content="Use task whiteboards.",
+                created_at=10,
+                source="task-1",
+                confidence=0.8,
+                tags=("memory", "design"),
+            )
+
+            fact = runtime.list_memory_facts()[0]
+            self.assertEqual(fact.source, "task-1")
+            self.assertEqual(fact.tags, ("memory", "design"))
+
     def test_runtime_can_create_and_list_tasks(self) -> None:
         from ergon_studio.runtime import load_runtime
 

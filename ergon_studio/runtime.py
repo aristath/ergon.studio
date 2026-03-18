@@ -17,6 +17,7 @@ from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.command_store import CommandStore
 from ergon_studio.config import save_global_config_text
 from ergon_studio.conversation_store import ConversationStore
+from ergon_studio.context_providers import WORKSPACE_STATE_KEY
 from ergon_studio.definitions import DefinitionDocument, save_definition_text
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
@@ -26,6 +27,7 @@ from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandR
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
 from ergon_studio.tool_registry import build_workspace_tool_registry
+from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
 from ergon_studio.workflow_store import WorkflowStore
 
 
@@ -58,13 +60,23 @@ class RuntimeContext:
     event_store: EventStore
     approval_store: ApprovalStore
     memory_store: MemoryStore
+    whiteboard_store: WhiteboardStore
     artifact_store: ArtifactStore
     command_store: CommandStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
     def build_agent(self, agent_id: str):
-        return build_agent(self.registry, agent_id, tool_registry=self.tool_registry)
+        return build_agent(
+            self.registry,
+            agent_id,
+            tool_registry=self.tool_registry,
+            conversation_store=self.conversation_store,
+            memory_store=self.memory_store,
+            artifact_store=self.artifact_store,
+            whiteboard_store=self.whiteboard_store,
+            event_store=self.event_store,
+        )
 
     def reload_registry(self) -> None:
         object.__setattr__(self, "registry", load_registry(self.paths))
@@ -357,6 +369,24 @@ class RuntimeContext:
 
     def list_memory_facts(self) -> list[MemoryFactRecord]:
         return self.memory_store.list_facts()
+
+    def get_task_whiteboard(self, task_id: str) -> TaskWhiteboardRecord | None:
+        return self.whiteboard_store.read_task_whiteboard(task_id)
+
+    def read_task_whiteboard_text(self, task_id: str) -> str:
+        return self.whiteboard_store.read_task_whiteboard_text(task_id)
+
+    def save_task_whiteboard_text(self, *, task_id: str, text: str, created_at: int | None = None) -> TaskWhiteboardRecord:
+        record = self.whiteboard_store.save_task_whiteboard_text(task_id, text)
+        if created_at is None:
+            created_at = int(time.time())
+        self.append_event(
+            kind="whiteboard_saved",
+            summary=f"Saved task whiteboard {task_id}",
+            created_at=created_at,
+            task_id=task_id,
+        )
+        return record
 
     def list_artifacts(self) -> list[ArtifactRecord]:
         return self.artifact_store.list_artifacts(self.main_session_id)
@@ -696,6 +726,13 @@ class RuntimeContext:
             session_factory=lambda session_id: agent.create_session(session_id=session_id),
         )
         thread = self.get_thread(thread_id)
+        session.state[WORKSPACE_STATE_KEY] = {
+            "session_id": self.main_session_id,
+            "thread_id": thread_id,
+            "task_id": thread.parent_task_id if thread is not None else None,
+            "agent_id": agent_id,
+            "created_at": created_at,
+        }
         tool_context = ToolExecutionContext(
             session_id=self.main_session_id,
             thread_id=thread_id,
@@ -1000,6 +1037,13 @@ class RuntimeContext:
             created_at=created_at,
             parent_task_id=parent_task_id,
         )
+        self.whiteboard_store.ensure_task_whiteboard(
+            task_id=task_id,
+            title=title,
+            updated_at=created_at,
+            parent_task_id=parent_task_id,
+            template_task_id=parent_task_id,
+        )
         self.append_event(
             kind="task_created",
             summary=f"Created task {task_id}",
@@ -1026,12 +1070,18 @@ class RuntimeContext:
         return task
 
     def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        goal = self.latest_main_user_message_body()
         step_groups = self.workflow_step_groups(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
             title=f"Workflow: {workflow_id}",
             state="in_progress",
             created_at=created_at,
+        )
+        self.whiteboard_store.update_task_whiteboard(
+            task_id=root_task.id,
+            updated_at=created_at,
+            section_updates={"Goal": goal or f"Workflow: {workflow_id}"},
         )
         workflow_run = self.workflow_store.create_workflow_run(
             session_id=self.main_session_id,
@@ -1372,6 +1422,10 @@ class RuntimeContext:
         kind: str,
         content: str,
         created_at: int,
+        source: str | None = None,
+        confidence: float | None = None,
+        tags: tuple[str, ...] = (),
+        last_used_at: int | None = None,
     ) -> MemoryFactRecord:
         fact = self.memory_store.add_fact(
             fact_id=fact_id,
@@ -1379,6 +1433,10 @@ class RuntimeContext:
             kind=kind,
             content=content,
             created_at=created_at,
+            source=source,
+            confidence=confidence,
+            tags=tags,
+            last_used_at=last_used_at,
         )
         self.append_event(
             kind="memory_fact_added",
@@ -1513,6 +1571,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     event_store = EventStore(paths)
     approval_store = ApprovalStore(paths)
     memory_store = MemoryStore(paths)
+    whiteboard_store = WhiteboardStore(paths)
     artifact_store = ArtifactStore(paths)
     command_store = CommandStore(paths)
     runtime = RuntimeContext(
@@ -1526,6 +1585,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         event_store=event_store,
         approval_store=approval_store,
         memory_store=memory_store,
+        whiteboard_store=whiteboard_store,
         artifact_store=artifact_store,
         command_store=command_store,
     )

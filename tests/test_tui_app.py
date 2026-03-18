@@ -519,6 +519,9 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 kind="decision",
                 content="Use Textual for the TUI.",
                 created_at=1_710_755_200,
+                source="plan",
+                confidence=0.9,
+                tags=("ui",),
             )
             app = ErgonStudioApp(runtime)
 
@@ -526,6 +529,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 memory = app.query_one("#memory", Panel)
                 self.assertIn("> fact-1", memory.body)
                 self.assertIn("Scope: project", memory.body)
+                self.assertIn("Source: plan", memory.body)
                 self.assertIn("Use Textual for the TUI.", memory.body)
 
     async def test_app_can_switch_selected_memory_fact(self) -> None:
@@ -566,6 +570,57 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("> fact-2", memory.body)
                 self.assertIn("Scope: user", memory.body)
                 self.assertIn("Keep replies short.", memory.body)
+
+    async def test_app_renders_selected_task_whiteboard(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_task(
+                task_id="task-1",
+                title="Build memory system",
+                state="planned",
+                created_at=1_710_755_200,
+            )
+            runtime.save_task_whiteboard_text(
+                task_id="task-1",
+                text="""---
+task_id: task-1
+title: Build memory system
+updated_at: 1710755201
+---
+## Goal
+Build the framework-native memory layer.
+
+## Constraints
+Use Agent Framework context providers.
+
+## Plan
+Wire whiteboards into agent runs.
+
+## Decisions
+Persist whiteboards as markdown.
+
+## Open Questions
+
+## Acceptance Criteria
+Selected tasks show their whiteboard in the TUI.
+""",
+                created_at=1_710_755_201,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                memory = app.query_one("#memory", Panel)
+                self.assertIn("Whiteboard: task-1", memory.body)
+                self.assertIn("Build the framework-native memory layer.", memory.body)
+                self.assertIn("Persist whiteboards as markdown.", memory.body)
 
     async def test_app_renders_artifacts(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

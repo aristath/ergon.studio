@@ -38,6 +38,7 @@ class StudioPathsTests(unittest.TestCase):
             self.assertEqual(paths.threads_dir, paths.project_data_dir / "threads")
             self.assertEqual(paths.tasks_dir, paths.project_data_dir / "tasks")
             self.assertEqual(paths.memory_dir, paths.project_data_dir / "memory")
+            self.assertEqual(paths.whiteboards_dir, paths.project_data_dir / "memory" / "whiteboards")
             self.assertEqual(paths.artifacts_dir, paths.project_data_dir / "artifacts")
             self.assertEqual(paths.checkpoints_dir, paths.project_data_dir / "checkpoints")
             self.assertEqual(paths.indexes_dir, paths.project_data_dir / "indexes")

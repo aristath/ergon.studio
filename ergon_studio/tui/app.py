@@ -103,6 +103,7 @@ class ErgonStudioApp(App[None]):
         ("ctrl+p", "previous_agent", "Previous Agent"),
         ("ctrl+a", "open_selected_agent_thread", "Open Agent Thread"),
         ("ctrl+t", "edit_selected_agent_definition", "Edit Agent"),
+        ("ctrl+w", "edit_selected_task_whiteboard", "Edit Whiteboard"),
         ("ctrl+y", "approve_selected_approval", "Approve"),
         ("ctrl+r", "reject_selected_approval", "Reject"),
         ("f7", "previous_workflow", "Previous Workflow"),
@@ -381,9 +382,17 @@ class ErgonStudioApp(App[None]):
 
     def _render_memory_body(self) -> str:
         facts = self.runtime.list_memory_facts()
-        if not facts:
+        whiteboard_lines = self._task_whiteboard_lines()
+        if not facts and not whiteboard_lines:
             return "No memory facts yet."
-        return "\n".join(self._memory_lines(facts) + self._memory_preview_lines(facts))
+        body_lines: list[str] = []
+        body_lines.extend(whiteboard_lines)
+        if facts:
+            if body_lines:
+                body_lines.append("")
+            body_lines.extend(self._memory_lines(facts))
+            body_lines.extend(self._memory_preview_lines(facts))
+        return "\n".join(body_lines)
 
     def _render_artifacts_body(self) -> str:
         artifacts = self._visible_artifacts()
@@ -468,6 +477,7 @@ class ErgonStudioApp(App[None]):
             "Activity: Alt+H / Alt+L select\n"
             "Tasks: Alt+J / Alt+K select\n"
             "Memory: Alt+N / Alt+P select\n"
+            "Whiteboard: Ctrl+W edit selected task\n"
             f"Providers: {provider_text}\n"
             f"Provider Details: {'; '.join(provider_lines) if provider_lines else 'none'}\n"
             f"Assignments: {', '.join(assignment_lines) if assignment_lines else 'none'}\n"
@@ -652,6 +662,19 @@ class ErgonStudioApp(App[None]):
 
     def action_edit_selected_agent_definition(self) -> None:
         self._open_agent_definition_editor(self.selected_agent_id)
+
+    def action_edit_selected_task_whiteboard(self) -> None:
+        task_id = self.selected_task_id
+        if task_id is None:
+            return
+        initial_text = self.runtime.read_task_whiteboard_text(task_id)
+        self.push_screen(
+            DefinitionEditorScreen(
+                title=f"Edit Task Whiteboard: {task_id}",
+                initial_text=initial_text,
+                on_save=lambda text: self._save_task_whiteboard(task_id, text),
+            )
+        )
 
     def action_next_workflow(self) -> None:
         self._cycle_workflow(1)
@@ -1014,6 +1037,14 @@ class ErgonStudioApp(App[None]):
         )
         self._refresh_panels()
 
+    def _save_task_whiteboard(self, task_id: str, text: str) -> None:
+        self.runtime.save_task_whiteboard_text(
+            task_id=task_id,
+            text=text,
+            created_at=self._next_timestamp(),
+        )
+        self._refresh_panels()
+
     def _run_workspace_command_from_editor(self, text: str) -> None:
         command = text.strip()
         if not command:
@@ -1265,8 +1296,33 @@ class ErgonStudioApp(App[None]):
             "Preview:",
             f"Scope: {selected.scope}",
             f"Kind: {selected.kind}",
+            f"Source: {selected.source or 'n/a'}",
+            f"Confidence: {selected.confidence if selected.confidence is not None else 'n/a'}",
+            f"Tags: {', '.join(selected.tags) if selected.tags else 'none'}",
             selected.content,
         ]
+
+    def _task_whiteboard_lines(self) -> list[str]:
+        task_id = self.selected_task_id
+        if task_id is None:
+            return []
+        whiteboard = self.runtime.get_task_whiteboard(task_id)
+        if whiteboard is None:
+            return []
+        lines = [
+            f"Whiteboard: {whiteboard.task_id}",
+            f"Title: {whiteboard.title}",
+        ]
+        goal = whiteboard.sections.get("Goal", "").strip()
+        decisions = whiteboard.sections.get("Decisions", "").strip()
+        acceptance = whiteboard.sections.get("Acceptance Criteria", "").strip()
+        if goal:
+            lines.extend(["", "Goal:", goal])
+        if decisions:
+            lines.extend(["", "Decisions:", decisions])
+        if acceptance:
+            lines.extend(["", "Acceptance Criteria:", acceptance])
+        return lines
 
     def _task_preview_lines(self, selected_task) -> list[str]:
         if selected_task is None:

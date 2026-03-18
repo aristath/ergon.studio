@@ -450,10 +450,13 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test():
                 workflows = app.query_one("#workflows", Panel)
                 self.assertIn("> standard-build", workflows.body)
+                self.assertIn("Orchestration: sequential", workflows.body)
+                self.assertIn("Run the normal plan-build-review-fix loop.", workflows.body)
 
                 app.action_next_workflow()
 
                 self.assertIn("> test-driven-repair", workflows.body)
+                self.assertIn("Orchestration: sequential", workflows.body)
 
     async def test_app_can_start_selected_workflow(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

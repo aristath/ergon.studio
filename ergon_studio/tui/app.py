@@ -434,10 +434,24 @@ class ErgonStudioApp(App[None]):
         workflow_ids = self.runtime.list_workflow_ids()
         if not workflow_ids:
             return "No workflows defined."
-        return "\n".join(
+        lines = [
             f"{'> ' if workflow_id == self.selected_workflow_id else '  '}{workflow_id}"
             for workflow_id in workflow_ids
-        )
+        ]
+        definition = self.runtime.registry.workflow_definitions.get(self.selected_workflow_id)
+        if definition is None:
+            return "\n".join(lines)
+
+        orchestration = str(definition.metadata.get("orchestration", "unknown"))
+        purpose = definition.sections.get("Purpose", "")
+        exit_conditions = definition.sections.get("Exit Conditions", "")
+
+        lines.extend(["", f"Orchestration: {orchestration}"])
+        if purpose:
+            lines.extend(["", purpose])
+        if exit_conditions:
+            lines.extend(["", f"Exit: {exit_conditions}"])
+        return "\n".join(lines)
 
     def _render_workflow_runs_body(self) -> str:
         runs = self.runtime.list_workflow_runs()

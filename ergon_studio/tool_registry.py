@@ -15,6 +15,8 @@ def build_workspace_tool_registry(
     project_root: Path,
     *,
     run_command_handler: Callable[[str, int], dict[str, int | str]] | None = None,
+    write_file_handler: Callable[[str, str], dict[str, str]] | None = None,
+    patch_file_handler: Callable[[str, str, str], dict[str, int | str]] | None = None,
 ) -> dict[str, FunctionTool]:
     workspace_root = project_root.resolve()
 
@@ -31,6 +33,8 @@ def build_workspace_tool_registry(
 
     @tool(name="write_file", approval_mode="always_require")
     def write_file(path: str, content: str) -> dict[str, str]:
+        if write_file_handler is not None:
+            return write_file_handler(path, content)
         target = resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -38,6 +42,8 @@ def build_workspace_tool_registry(
 
     @tool(name="patch_file", approval_mode="always_require")
     def patch_file(path: str, old_text: str, new_text: str) -> dict[str, int | str]:
+        if patch_file_handler is not None:
+            return patch_file_handler(path, old_text, new_text)
         target = resolve_path(path)
         content = target.read_text(encoding="utf-8")
         replacements = content.count(old_text)

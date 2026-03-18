@@ -389,6 +389,116 @@ class RuntimeContext:
                 return self.artifact_store.read_artifact_body(artifact)
         raise ValueError(f"unknown artifact: {artifact_id}")
 
+    def write_workspace_file(
+        self,
+        path: str,
+        content: str,
+        *,
+        created_at: int | None = None,
+        thread_id: str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        require_approval: bool = True,
+    ) -> dict[str, str]:
+        if created_at is None:
+            created_at = int(time.time())
+
+        context = current_tool_execution_context()
+        resolved_thread_id = thread_id if thread_id is not None else (context.thread_id if context is not None else None)
+        resolved_task_id = task_id if task_id is not None else (context.task_id if context is not None else None)
+        resolved_agent_id = agent_id if agent_id is not None else (context.agent_id if context is not None else None)
+
+        if require_approval and self._approval_mode_for_action("write_file") in {"ask", "block"}:
+            approval = self.request_approval(
+                approval_id=f"approval-{uuid4().hex[:8]}",
+                requester=resolved_agent_id or "user",
+                action="write_file",
+                risk_class="moderate",
+                reason=f"Write file in workspace: {path}",
+                created_at=created_at,
+                thread_id=resolved_thread_id,
+                task_id=resolved_task_id,
+                payload={
+                    "path": path,
+                    "content": content,
+                    "thread_id": resolved_thread_id,
+                    "task_id": resolved_task_id,
+                    "agent_id": resolved_agent_id or "user",
+                },
+            )
+            return {"path": path, "status": "awaiting_approval", "approval_id": approval.id}
+
+        target = self._resolve_workspace_path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        relative_path = str(target.relative_to(self.paths.project_root.resolve()))
+        self.append_event(
+            kind="file_written",
+            summary=f"{resolved_agent_id or 'user'} wrote {relative_path}",
+            created_at=created_at,
+            thread_id=resolved_thread_id,
+            task_id=resolved_task_id,
+        )
+        return {"path": relative_path, "status": "written"}
+
+    def patch_workspace_file(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        *,
+        created_at: int | None = None,
+        thread_id: str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        require_approval: bool = True,
+    ) -> dict[str, int | str]:
+        if created_at is None:
+            created_at = int(time.time())
+
+        context = current_tool_execution_context()
+        resolved_thread_id = thread_id if thread_id is not None else (context.thread_id if context is not None else None)
+        resolved_task_id = task_id if task_id is not None else (context.task_id if context is not None else None)
+        resolved_agent_id = agent_id if agent_id is not None else (context.agent_id if context is not None else None)
+
+        if require_approval and self._approval_mode_for_action("patch_file") in {"ask", "block"}:
+            approval = self.request_approval(
+                approval_id=f"approval-{uuid4().hex[:8]}",
+                requester=resolved_agent_id or "user",
+                action="patch_file",
+                risk_class="moderate",
+                reason=f"Patch file in workspace: {path}",
+                created_at=created_at,
+                thread_id=resolved_thread_id,
+                task_id=resolved_task_id,
+                payload={
+                    "path": path,
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "thread_id": resolved_thread_id,
+                    "task_id": resolved_task_id,
+                    "agent_id": resolved_agent_id or "user",
+                },
+            )
+            return {"path": path, "replacements": 0, "status": "awaiting_approval", "approval_id": approval.id}
+
+        target = self._resolve_workspace_path(path)
+        file_content = target.read_text(encoding="utf-8")
+        replacements = file_content.count(old_text)
+        if replacements == 0:
+            raise ValueError("old_text was not found in the file")
+        updated = file_content.replace(old_text, new_text, 1)
+        target.write_text(updated, encoding="utf-8")
+        relative_path = str(target.relative_to(self.paths.project_root.resolve()))
+        self.append_event(
+            kind="file_patched",
+            summary=f"{resolved_agent_id or 'user'} patched {relative_path}",
+            created_at=created_at,
+            thread_id=resolved_thread_id,
+            task_id=resolved_task_id,
+        )
+        return {"path": relative_path, "replacements": 1, "status": "patched"}
+
     def create_thread(
         self,
         *,
@@ -1200,7 +1310,16 @@ class RuntimeContext:
             created_at=created_at,
         )
         if status == "approved":
-            self._execute_approved_action(approval=approval, created_at=created_at + 1)
+            try:
+                self._execute_approved_action(approval=approval, created_at=created_at + 1)
+            except Exception as exc:
+                self.append_event(
+                    kind="approved_action_failed",
+                    summary=f"Approved action {approval.action} failed: {type(exc).__name__}: {exc}",
+                    created_at=created_at + 1,
+                    thread_id=approval.thread_id,
+                    task_id=approval.task_id,
+                )
         return approval
 
     def add_memory_fact(
@@ -1276,29 +1395,70 @@ class RuntimeContext:
         return str(value)
 
     def _execute_approved_action(self, *, approval: ApprovalRecord, created_at: int) -> None:
-        if approval.action != "run_command":
-            return
         payload = self.approval_store.read_payload(approval)
         if payload is None:
             return
-        command = payload.get("command")
-        if not isinstance(command, str) or not command:
-            return
-        timeout = payload.get("timeout", 60)
-        if type(timeout) is not int:
-            timeout = 60
         thread_id = payload.get("thread_id") if isinstance(payload.get("thread_id"), str) else None
         task_id = payload.get("task_id") if isinstance(payload.get("task_id"), str) else None
         agent_id = payload.get("agent_id") if isinstance(payload.get("agent_id"), str) else None
-        self.run_workspace_command(
-            command,
-            timeout=timeout,
-            created_at=created_at,
-            thread_id=thread_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            require_approval=False,
-        )
+
+        if approval.action == "run_command":
+            command = payload.get("command")
+            if not isinstance(command, str) or not command:
+                return
+            timeout = payload.get("timeout", 60)
+            if type(timeout) is not int:
+                timeout = 60
+            self.run_workspace_command(
+                command,
+                timeout=timeout,
+                created_at=created_at,
+                thread_id=thread_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                require_approval=False,
+            )
+            return
+
+        if approval.action == "write_file":
+            path = payload.get("path")
+            content = payload.get("content")
+            if not isinstance(path, str) or not isinstance(content, str):
+                return
+            self.write_workspace_file(
+                path,
+                content,
+                created_at=created_at,
+                thread_id=thread_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                require_approval=False,
+            )
+            return
+
+        if approval.action == "patch_file":
+            path = payload.get("path")
+            old_text = payload.get("old_text")
+            new_text = payload.get("new_text")
+            if not isinstance(path, str) or not isinstance(old_text, str) or not isinstance(new_text, str):
+                return
+            self.patch_workspace_file(
+                path,
+                old_text,
+                new_text,
+                created_at=created_at,
+                thread_id=thread_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                require_approval=False,
+            )
+
+    def _resolve_workspace_path(self, path: str) -> Path:
+        workspace_root = self.paths.project_root.resolve()
+        candidate = (workspace_root / path).resolve()
+        if workspace_root not in (candidate, *candidate.parents):
+            raise ValueError("path is outside the project workspace")
+        return candidate
 
 
 def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
@@ -1333,6 +1493,8 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         build_workspace_tool_registry(
             paths.project_root,
             run_command_handler=runtime.run_workspace_command,
+            write_file_handler=runtime.write_workspace_file,
+            patch_file_handler=runtime.patch_workspace_file,
         ),
     )
     runtime.ensure_main_conversation()

@@ -662,6 +662,105 @@ Return reviewed and repaired work.
             self.assertEqual(runtime.list_approvals()[0].status, "approved")
             self.assertIn("command_run", [event.kind for event in runtime.list_events()])
 
+    def test_runtime_can_defer_and_execute_file_write_after_approval(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            save_global_config(
+                runtime.paths.config_path,
+                {
+                    "providers": {},
+                    "role_assignments": {},
+                    "approvals": {"write_file": "ask"},
+                    "ui": {},
+                },
+            )
+            runtime.reload_registry()
+
+            result = runtime.write_workspace_file(
+                "notes.txt",
+                "hello\n",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+
+            self.assertEqual(result["status"], "awaiting_approval")
+            self.assertFalse((project_root / "notes.txt").exists())
+
+            approval = runtime.list_approvals()[0]
+            self.assertEqual(
+                runtime.read_approval_payload(approval.id),
+                {
+                    "agent_id": "user",
+                    "content": "hello\n",
+                    "path": "notes.txt",
+                    "task_id": None,
+                    "thread_id": runtime.main_thread_id,
+                },
+            )
+
+            runtime.resolve_approval(
+                approval_id=approval.id,
+                status="approved",
+                created_at=1_710_755_201,
+            )
+
+            self.assertEqual((project_root / "notes.txt").read_text(encoding="utf-8"), "hello\n")
+            self.assertIn("file_written", [event.kind for event in runtime.list_events()])
+
+    def test_runtime_can_defer_and_execute_file_patch_after_approval(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            (project_root / "notes.txt").write_text("hello\nworld\n", encoding="utf-8")
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            save_global_config(
+                runtime.paths.config_path,
+                {
+                    "providers": {},
+                    "role_assignments": {},
+                    "approvals": {"patch_file": "ask"},
+                    "ui": {},
+                },
+            )
+            runtime.reload_registry()
+
+            result = runtime.patch_workspace_file(
+                "notes.txt",
+                "world",
+                "team",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+
+            self.assertEqual(result["status"], "awaiting_approval")
+            self.assertEqual((project_root / "notes.txt").read_text(encoding="utf-8"), "hello\nworld\n")
+
+            approval = runtime.list_approvals()[0]
+            runtime.resolve_approval(
+                approval_id=approval.id,
+                status="approved",
+                created_at=1_710_755_201,
+            )
+
+            self.assertEqual((project_root / "notes.txt").read_text(encoding="utf-8"), "hello\nteam\n")
+            self.assertIn("file_patched", [event.kind for event in runtime.list_events()])
+
     def test_runtime_can_list_approvals_for_workflow_run(self) -> None:
         from ergon_studio.runtime import load_runtime
 

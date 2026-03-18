@@ -87,6 +87,38 @@ class ToolRegistryTests(unittest.TestCase):
             self.assertEqual(observed, [("pwd", 5)])
             self.assertEqual(result["command_run_id"], "command-run-1")
 
+    def test_write_and_patch_tools_can_delegate_to_custom_handlers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            observed: list[tuple[str, tuple[str, ...]]] = []
+
+            def write_handler(path: str, content: str) -> dict[str, str]:
+                observed.append(("write_file", (path, content)))
+                return {"path": path, "status": "written"}
+
+            def patch_handler(path: str, old_text: str, new_text: str) -> dict[str, int | str]:
+                observed.append(("patch_file", (path, old_text, new_text)))
+                return {"path": path, "replacements": 1, "status": "patched"}
+
+            registry = build_workspace_tool_registry(
+                project_root,
+                write_file_handler=write_handler,
+                patch_file_handler=patch_handler,
+            )
+
+            write_result = registry["write_file"].func(path="notes.txt", content="hello")
+            patch_result = registry["patch_file"].func(path="notes.txt", old_text="hello", new_text="team")
+
+            self.assertEqual(write_result["status"], "written")
+            self.assertEqual(patch_result["status"], "patched")
+            self.assertEqual(
+                observed,
+                [
+                    ("write_file", ("notes.txt", "hello")),
+                    ("patch_file", ("notes.txt", "hello", "team")),
+                ],
+            )
+
     def test_web_lookup_parses_search_results(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)

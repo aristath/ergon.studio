@@ -1171,6 +1171,8 @@ class ErgonStudioApp(App[None]):
         payload = self.runtime.read_approval_payload(selected.id)
         if payload is not None and isinstance(payload.get("command"), str):
             lines.append(f"Command: {payload['command']}")
+        if payload is not None and isinstance(payload.get("path"), str):
+            lines.append(f"Path: {payload['path']}")
         if selected.task_id is not None:
             lines.append(f"Task: {selected.task_id}")
         if selected.thread_id is not None:

@@ -350,6 +350,47 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No approvals pending.", approvals.body)
                 self.assertIn("pwd", commands.body)
 
+    async def test_app_approving_file_write_approval_writes_the_file(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.request_approval(
+                approval_id="approval-1",
+                requester="user",
+                action="write_file",
+                risk_class="moderate",
+                reason="Write notes.txt",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                payload={
+                    "path": "notes.txt",
+                    "content": "hello\n",
+                    "thread_id": runtime.main_thread_id,
+                    "task_id": None,
+                    "agent_id": "user",
+                },
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                approvals = app.query_one("#approvals", Panel)
+                self.assertIn("Path: notes.txt", approvals.body)
+
+                app.action_approve_selected_approval()
+
+                approvals = app.query_one("#approvals", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("No approvals pending.", approvals.body)
+                self.assertEqual((project_root / "notes.txt").read_text(encoding="utf-8"), "hello\n")
+                self.assertIn("file_written", activity.body)
+
     async def test_selected_workflow_run_scopes_approvals_panel(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel

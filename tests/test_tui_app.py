@@ -34,8 +34,10 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#artifacts"))
                 self.assertIsNotNone(app.query_one("#approvals"))
                 self.assertIsNotNone(app.query_one("#memory"))
+                self.assertIsNotNone(app.query_one("#team"))
                 self.assertIsNotNone(app.query_one("#settings"))
                 self.assertIn("thread-main", app.query_one("#threads", Panel).body)
+                self.assertIn("> orchestrator", app.query_one("#team", Panel).body)
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
@@ -198,6 +200,27 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("artifact-1", artifacts.body)
                 self.assertIn("Architecture Notes", artifacts.body)
 
+    async def test_app_can_switch_selected_agent(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                team = app.query_one("#team", Panel)
+                self.assertIn("> orchestrator", team.body)
+
+                app.action_next_agent()
+
+                self.assertIn("> researcher", team.body)
+
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel
@@ -339,6 +362,57 @@ Be extremely concise.
                 self.assertEqual(
                     runtime.registry.agent_definitions["orchestrator"].sections["Output Style"],
                     "Be extremely concise.",
+                )
+
+    async def test_app_can_edit_selected_agent_definition(self) -> None:
+        from textual.widgets import TextArea
+
+        from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_agent_id = "architect"
+
+            async with app.run_test() as pilot:
+                app.action_edit_selected_agent_definition()
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, DefinitionEditorScreen)
+                editor = app.screen.query_one("#definition-editor", TextArea)
+                editor.load_text(
+                    """---
+id: architect
+name: Architect
+role: architect
+temperature: 0.2
+tools:
+  - read_file
+  - search_files
+---
+## Identity
+You are the architect for the AI firm.
+
+## Output Style
+Be concise and structural.
+"""
+                )
+                app.screen.action_save()
+                await pilot.pause()
+
+                team = app.query_one("#team", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("> architect", team.body)
+                self.assertIn("definition_saved", activity.body)
+                self.assertEqual(
+                    runtime.registry.agent_definitions["architect"].sections["Output Style"],
+                    "Be concise and structural.",
                 )
 
     async def test_app_can_edit_global_config(self) -> None:

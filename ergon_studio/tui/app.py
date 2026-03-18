@@ -82,6 +82,9 @@ class ErgonStudioApp(App[None]):
     BINDINGS = [
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
+        ("ctrl+n", "next_agent", "Next Agent"),
+        ("ctrl+p", "previous_agent", "Previous Agent"),
+        ("ctrl+t", "edit_selected_agent_definition", "Edit Agent"),
         ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
@@ -135,6 +138,7 @@ class ErgonStudioApp(App[None]):
         super().__init__()
         self.runtime = runtime
         self.selected_thread_id = runtime.main_thread_id
+        self.selected_agent_id = "orchestrator"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -158,6 +162,7 @@ class ErgonStudioApp(App[None]):
                 )
                 yield Panel("Artifacts", self._render_artifacts_body(), panel_id="artifacts", classes="panel")
             with Vertical(id="right-sidebar"):
+                yield Panel("Team", self._render_team_body(), panel_id="team", classes="panel")
                 yield Panel("Approvals", self._render_approvals_body(), panel_id="approvals", classes="panel")
                 yield Panel(
                     "Memory",
@@ -269,10 +274,19 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: Ctrl+G config, Ctrl+E orchestrator\n"
+            "Shortcuts: Ctrl+N/P team, Ctrl+T agent, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
+        )
+
+    def _render_team_body(self) -> str:
+        agent_ids = self.runtime.list_agent_ids()
+        if not agent_ids:
+            return "No agents defined."
+        return "\n".join(
+            f"{'> ' if agent_id == self.selected_agent_id else '  '}{agent_id} [{self.runtime.agent_status_summary(agent_id)}]"
+            for agent_id in agent_ids
         )
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -298,15 +312,17 @@ class ErgonStudioApp(App[None]):
     def action_previous_thread(self) -> None:
         self._cycle_thread(-1)
 
+    def action_next_agent(self) -> None:
+        self._cycle_agent(1)
+
+    def action_previous_agent(self) -> None:
+        self._cycle_agent(-1)
+
+    def action_edit_selected_agent_definition(self) -> None:
+        self._open_agent_definition_editor(self.selected_agent_id)
+
     def action_edit_orchestrator_definition(self) -> None:
-        initial_text = self.runtime.read_agent_definition_text("orchestrator")
-        self.push_screen(
-            DefinitionEditorScreen(
-                title="Edit Orchestrator Definition",
-                initial_text=initial_text,
-                on_save=self._save_orchestrator_definition,
-            )
-        )
+        self._open_agent_definition_editor("orchestrator")
 
     def action_edit_global_config(self) -> None:
         initial_text = self.runtime.read_global_config_text()
@@ -334,12 +350,39 @@ class ErgonStudioApp(App[None]):
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
 
+    def _cycle_agent(self, direction: int) -> None:
+        agent_ids = self.runtime.list_agent_ids()
+        if not agent_ids:
+            return
+
+        try:
+            current_index = agent_ids.index(self.selected_agent_id)
+        except ValueError:
+            current_index = 0
+
+        self.selected_agent_id = agent_ids[(current_index + direction) % len(agent_ids)]
+        self.query_one("#team", Panel).set_body(self._render_team_body())
+
+    def _open_agent_definition_editor(self, agent_id: str) -> None:
+        initial_text = self.runtime.read_agent_definition_text(agent_id)
+        self.push_screen(
+            DefinitionEditorScreen(
+                title=f"Edit Agent Definition: {agent_id}",
+                initial_text=initial_text,
+                on_save=lambda text: self._save_agent_definition(agent_id, text),
+            )
+        )
+
     def _save_orchestrator_definition(self, text: str) -> None:
+        self._save_agent_definition("orchestrator", text)
+
+    def _save_agent_definition(self, agent_id: str, text: str) -> None:
         self.runtime.save_agent_definition_text(
-            agent_id="orchestrator",
+            agent_id=agent_id,
             text=text,
             created_at=int(time.time()),
         )
+        self.selected_agent_id = agent_id
         self._refresh_panels()
 
     def _save_global_config(self, text: str) -> None:
@@ -352,6 +395,7 @@ class ErgonStudioApp(App[None]):
     def _refresh_panels(self) -> None:
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#team", Panel).set_body(self._render_team_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
         self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())

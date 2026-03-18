@@ -109,3 +109,20 @@ class MemoryFactRecord:
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    id: str
+    session_id: str
+    kind: str
+    title: str
+    file_path: Path
+    created_at: int
+    thread_id: str | None = None
+    task_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.file_path, Path):
+            raise TypeError("file_path must be a Path")
+        validate_unix_time(self.created_at, "created_at")

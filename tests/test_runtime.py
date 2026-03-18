@@ -31,6 +31,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_events(), [])
             self.assertEqual(runtime.list_approvals(), [])
             self.assertEqual(runtime.list_memory_facts(), [])
+            self.assertEqual(runtime.list_artifacts(), [])
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -234,3 +235,27 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([fact.id for fact in facts], ["fact-1"])
             self.assertEqual(facts[0].content, "Use Textual for the TUI.")
+
+    def test_runtime_can_create_and_list_artifacts(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_artifact(
+                artifact_id="artifact-1",
+                kind="design-note",
+                title="Architecture Notes",
+                content="Use Textual with a runtime-first architecture.",
+                created_at=1_710_755_200,
+            )
+
+            artifacts = runtime.list_artifacts()
+
+            self.assertEqual([artifact.id for artifact in artifacts], ["artifact-1"])
+            self.assertEqual(artifacts[0].title, "Architecture Notes")

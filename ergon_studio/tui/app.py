@@ -102,7 +102,7 @@ class ErgonStudioApp(App[None]):
                     panel_id="selected-thread",
                     classes="panel",
                 )
-                yield Panel("Artifacts", "Diffs and generated artifacts will appear here.", panel_id="artifacts", classes="panel")
+                yield Panel("Artifacts", self._render_artifacts_body(), panel_id="artifacts", classes="panel")
             with Vertical(id="right-sidebar"):
                 yield Panel("Approvals", self._render_approvals_body(), panel_id="approvals", classes="panel")
                 yield Panel(
@@ -189,6 +189,15 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{fact.id} [{fact.kind}] {fact.content}"
             for fact in facts[-8:]
+        )
+
+    def _render_artifacts_body(self) -> str:
+        artifacts = self.runtime.list_artifacts()
+        if not artifacts:
+            return "No artifacts yet."
+        return "\n".join(
+            f"{artifact.id} [{artifact.kind}] {artifact.title}"
+            for artifact in artifacts[-8:]
         )
 
     def _render_settings_body(self) -> str:

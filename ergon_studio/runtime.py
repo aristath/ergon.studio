@@ -6,13 +6,14 @@ from uuid import uuid4
 
 from ergon_studio.approval_store import ApprovalStore
 from ergon_studio.agent_factory import build_agent
+from ergon_studio.artifact_store import ArtifactStore
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
@@ -31,6 +32,7 @@ class RuntimeContext:
     event_store: EventStore
     approval_store: ApprovalStore
     memory_store: MemoryStore
+    artifact_store: ArtifactStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -60,6 +62,9 @@ class RuntimeContext:
 
     def list_memory_facts(self) -> list[MemoryFactRecord]:
         return self.memory_store.list_facts()
+
+    def list_artifacts(self) -> list[ArtifactRecord]:
+        return self.artifact_store.list_artifacts(self.main_session_id)
 
     def create_thread(
         self,
@@ -224,6 +229,36 @@ class RuntimeContext:
             created_at=created_at,
         )
 
+    def create_artifact(
+        self,
+        *,
+        artifact_id: str,
+        kind: str,
+        title: str,
+        content: str,
+        created_at: int,
+        thread_id: str | None = None,
+        task_id: str | None = None,
+    ) -> ArtifactRecord:
+        artifact = self.artifact_store.create_artifact(
+            session_id=self.main_session_id,
+            artifact_id=artifact_id,
+            kind=kind,
+            title=title,
+            content=content,
+            created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
+        )
+        self.append_event(
+            kind="artifact_created",
+            summary=f"Created artifact {artifact_id}",
+            created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
+        )
+        return artifact
+
     def ensure_main_conversation(self) -> None:
         self.conversation_store.ensure_session(self.main_session_id, created_at=0)
         self.conversation_store.ensure_thread(
@@ -243,6 +278,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     event_store = EventStore(paths)
     approval_store = ApprovalStore(paths)
     memory_store = MemoryStore(paths)
+    artifact_store = ArtifactStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
@@ -252,6 +288,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         event_store=event_store,
         approval_store=approval_store,
         memory_store=memory_store,
+        artifact_store=artifact_store,
     )
     runtime.ensure_main_conversation()
     return runtime

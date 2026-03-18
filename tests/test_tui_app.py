@@ -36,6 +36,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
                 self.assertIn("No memory facts yet.", app.query_one("#memory", Panel).body)
+                self.assertIn("No artifacts yet.", app.query_one("#artifacts", Panel).body)
                 self.assertIn("orchestrator", app.query_one("#settings", Panel).body)
                 self.assertIn("standard-build", app.query_one("#settings", Panel).body)
 
@@ -166,6 +167,31 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 memory = app.query_one("#memory", Panel)
                 self.assertIn("fact-1", memory.body)
                 self.assertIn("Use Textual for the TUI.", memory.body)
+
+    async def test_app_renders_artifacts(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_artifact(
+                artifact_id="artifact-1",
+                kind="design-note",
+                title="Architecture Notes",
+                content="Use Textual with a runtime-first architecture.",
+                created_at=1_710_755_200,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                artifacts = app.query_one("#artifacts", Panel)
+                self.assertIn("artifact-1", artifacts.body)
+                self.assertIn("Architecture Notes", artifacts.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

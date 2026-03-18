@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import ApprovalRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -85,6 +85,19 @@ SCHEMA_STATEMENTS = (
       kind TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      thread_id TEXT,
+      task_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
 )
@@ -463,6 +476,53 @@ class MetadataStore:
                 kind=row[2],
                 content=row[3],
                 created_at=row[4],
+            )
+            for row in rows
+        ]
+
+    def insert_artifact(self, record: ArtifactRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO artifacts (
+                  id, session_id, kind, title, file_path, created_at, thread_id, task_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.kind,
+                    record.title,
+                    str(record.file_path),
+                    record.created_at,
+                    record.thread_id,
+                    record.task_id,
+                ),
+            )
+            connection.commit()
+
+    def list_artifacts(self, session_id: str) -> list[ArtifactRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, kind, title, file_path, created_at, thread_id, task_id
+                FROM artifacts
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            ArtifactRecord(
+                id=row[0],
+                session_id=row[1],
+                kind=row[2],
+                title=row[3],
+                file_path=Path(row[4]),
+                created_at=row[5],
+                thread_id=row[6],
+                task_id=row[7],
             )
             for row in rows
         ]

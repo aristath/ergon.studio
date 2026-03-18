@@ -32,6 +32,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#memory"))
                 self.assertIsNotNone(app.query_one("#settings"))
                 self.assertIn("thread-main", app.query_one("#threads", Panel).body)
+                self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
 
     async def test_app_renders_persisted_main_thread_messages(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -58,6 +59,30 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 threads = app.query_one("#threads", Panel)
                 self.assertIn("Hello from the persisted main thread.", main_chat.body)
                 self.assertIn("thread-main", threads.body)
+
+    async def test_app_renders_persisted_tasks(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_task(
+                task_id="task-1",
+                title="Build task sidebar",
+                state="in_progress",
+                created_at=1_710_755_200,
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                tasks = app.query_one("#tasks", Panel)
+                self.assertIn("task-1", tasks.body)
+                self.assertIn("Build task sidebar", tasks.body)
 
     async def test_submitting_input_persists_a_user_message(self) -> None:
         from textual.widgets import Input

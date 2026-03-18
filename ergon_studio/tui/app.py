@@ -81,7 +81,7 @@ class ErgonStudioApp(App[None]):
         yield Header(show_clock=True)
         with Horizontal(id="workspace"):
             with Vertical(id="left-sidebar"):
-                yield Panel("Tasks", "Task tree will appear here.", panel_id="tasks", classes="panel")
+                yield Panel("Tasks", self._render_tasks_body(), panel_id="tasks", classes="panel")
                 yield Panel("Threads", self._render_threads_body(), panel_id="threads", classes="panel")
                 yield Panel("Activity", "Workflow activity will appear here.", panel_id="activity", classes="panel")
             with Vertical(id="center-column"):
@@ -121,6 +121,15 @@ class ErgonStudioApp(App[None]):
             for thread in threads
         )
 
+    def _render_tasks_body(self) -> str:
+        tasks = self.runtime.list_tasks()
+        if not tasks:
+            return "No tasks yet."
+        return "\n".join(
+            f"{task.id} [{task.state}] {task.title}"
+            for task in tasks
+        )
+
     def _render_main_chat_body(self) -> str:
         messages = self.runtime.list_main_messages()
         if not messages:
@@ -149,6 +158,7 @@ class ErgonStudioApp(App[None]):
             body=message_body,
             created_at=int(time.time()),
         )
+        self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         event.input.value = ""

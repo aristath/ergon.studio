@@ -25,6 +25,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertIn("read_file", runtime.tool_registry)
             self.assertEqual(runtime.main_session_id, "session-main")
             self.assertEqual(runtime.main_thread_id, "thread-main")
+            self.assertEqual(runtime.list_tasks(), [])
             self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
             self.assertEqual(runtime.list_main_messages(), [])
 
@@ -88,3 +89,26 @@ class RuntimeTests(unittest.TestCase):
                 runtime.conversation_store.read_message_body(messages[0]),
                 "Hello from runtime.\n",
             )
+
+    def test_runtime_can_create_and_list_tasks(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_task(
+                task_id="task-1",
+                title="Build real task panel",
+                state="in_progress",
+                created_at=1_710_755_200,
+            )
+
+            tasks = runtime.list_tasks()
+
+            self.assertEqual([task.id for task in tasks], ["task-1"])
+            self.assertEqual(tasks[0].title, "Build real task panel")

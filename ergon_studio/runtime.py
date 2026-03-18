@@ -8,7 +8,8 @@ from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import MessageRecord, ThreadRecord
+from ergon_studio.storage.models import MessageRecord, TaskRecord, ThreadRecord
+from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
 
 
@@ -22,6 +23,7 @@ class RuntimeContext:
     registry: RuntimeRegistry
     tool_registry: dict[str, object]
     conversation_store: ConversationStore
+    task_store: TaskStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -30,6 +32,9 @@ class RuntimeContext:
 
     def list_threads(self) -> list[ThreadRecord]:
         return self.conversation_store.list_threads(self.main_session_id)
+
+    def list_tasks(self) -> list[TaskRecord]:
+        return self.task_store.list_tasks(self.main_session_id)
 
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
@@ -53,6 +58,25 @@ class RuntimeContext:
             created_at=created_at,
         )
 
+    def create_task(
+        self,
+        *,
+        task_id: str,
+        title: str,
+        state: str,
+        created_at: int,
+        parent_task_id: str | None = None,
+    ) -> TaskRecord:
+        self.ensure_main_conversation()
+        return self.task_store.create_task(
+            session_id=self.main_session_id,
+            task_id=task_id,
+            title=title,
+            state=state,
+            created_at=created_at,
+            parent_task_id=parent_task_id,
+        )
+
     def ensure_main_conversation(self) -> None:
         self.conversation_store.ensure_session(self.main_session_id)
         self.conversation_store.ensure_thread(
@@ -67,11 +91,13 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     registry = load_registry(paths)
     tool_registry = build_workspace_tool_registry(paths.project_root)
     conversation_store = ConversationStore(paths)
+    task_store = TaskStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
         tool_registry=tool_registry,
         conversation_store=conversation_store,
+        task_store=task_store,
     )
     runtime.ensure_main_conversation()
     return runtime

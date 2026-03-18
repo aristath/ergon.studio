@@ -207,6 +207,30 @@ class MetadataStore:
             parent_task_id=row[6],
         )
 
+    def list_tasks(self, session_id: str) -> list[TaskRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, title, state, created_at, updated_at, parent_task_id
+                FROM tasks
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            TaskRecord(
+                id=row[0],
+                session_id=row[1],
+                title=row[2],
+                state=row[3],
+                created_at=row[4],
+                updated_at=row[5],
+                parent_task_id=row[6],
+            )
+            for row in rows
+        ]
+
     def insert_message(self, record: MessageRecord) -> None:
         with self._connect() as connection:
             connection.execute(

@@ -274,6 +274,25 @@ class ErgonStudioApp(App[None]):
         return "\n\n".join(rendered_messages)
 
     def _render_activity_body(self) -> str:
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                events = self.runtime.list_events_for_workflow_run(self.selected_workflow_run_id)
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not events:
+                    lines.append("No activity for selected run.")
+                    return "\n".join(lines)
+                lines.extend(
+                    f"{event.kind}: {event.summary}"
+                    for event in events[-8:]
+                )
+                return "\n".join(lines)
+
         events = self.runtime.list_events()
         if not events:
             return "No activity yet."
@@ -601,6 +620,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
+        self.query_one("#activity", Panel).set_body(self._render_activity_body())
 
     def _cycle_approval(self, direction: int) -> None:
         approvals = self.runtime.list_pending_approvals()

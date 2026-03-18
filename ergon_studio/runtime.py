@@ -239,6 +239,27 @@ class RuntimeContext:
         ]
         return sorted(artifacts, key=lambda artifact: (artifact.created_at, artifact.id))
 
+    def list_events_for_workflow_run(self, workflow_run_id: str) -> list[EventRecord]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+
+        task_ids: set[str] = set()
+        thread_ids: set[str] = set()
+        if run_view.root_task is not None:
+            task_ids.add(run_view.root_task.id)
+        for step in run_view.steps:
+            task_ids.add(step.task.id)
+            for thread in step.threads:
+                thread_ids.add(thread.id)
+
+        events = [
+            event
+            for event in self.list_events()
+            if event.task_id in task_ids or event.thread_id in thread_ids
+        ]
+        return sorted(events, key=lambda event: (event.created_at, event.id))
+
     def list_events(self) -> list[EventRecord]:
         return self.event_store.list_events(self.main_session_id)
 

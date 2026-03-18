@@ -1018,3 +1018,64 @@ Return reviewed code and a clear summary.
                     self.assertIn(first_run.id, artifacts.body)
                     self.assertIn(first_artifact_id, artifacts.body)
                     self.assertNotIn(second_artifact_id, artifacts.body)
+
+    async def test_selected_workflow_run_scopes_activity_panel(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        responses = iter(["First run done.", "Second run done."])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Ship the feature.",
+                created_at=1_710_755_200,
+            )
+            runtime.append_event(
+                kind="unrelated_event",
+                summary="Unrelated activity",
+                created_at=1_710_755_201,
+            )
+            app = ErgonStudioApp(runtime)
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: FakeAgent(next(responses)),
+            ):
+                async with app.run_test():
+                    app.selected_workflow_id = "single-agent-execution"
+                    await app.action_start_selected_workflow()
+                    first_run = runtime.list_workflow_runs()[0]
+
+                    await app.action_start_selected_workflow()
+                    second_run = runtime.list_workflow_runs()[1]
+
+                    activity = app.query_one("#activity", Panel)
+                    self.assertIn(second_run.id, activity.body)
+                    self.assertNotIn("unrelated_event", activity.body)
+
+                    app.action_previous_workflow_run()
+
+                    activity = app.query_one("#activity", Panel)
+                    self.assertIn(first_run.id, activity.body)
+                    self.assertNotIn("unrelated_event", activity.body)

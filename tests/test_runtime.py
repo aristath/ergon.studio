@@ -921,6 +921,62 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(related_artifacts[0].kind, "workflow-report")
             self.assertEqual(related_artifacts[0].task_id, workflow_run.root_task_id)
 
+    async def test_runtime_can_list_events_for_workflow_run(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Ship the feature.",
+                created_at=1_710_755_200,
+            )
+            workflow_run, _ = runtime.start_workflow_run(
+                workflow_id="single-agent-execution",
+                created_at=1_710_755_210,
+            )
+            runtime.append_event(
+                kind="unrelated_event",
+                summary="Unrelated activity",
+                created_at=1_710_755_211,
+            )
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: FakeAgent(f"{agent_id} done."),
+            ):
+                await runtime.advance_workflow_run(
+                    workflow_run_id=workflow_run.id,
+                    created_at=1_710_755_220,
+                )
+
+            events = runtime.list_events_for_workflow_run(workflow_run.id)
+
+            self.assertIn("workflow_started", [event.kind for event in events])
+            self.assertIn("workflow_advanced", [event.kind for event in events])
+            self.assertIn("workflow_completed", [event.kind for event in events])
+            self.assertNotIn("unrelated_event", [event.kind for event in events])
+
     async def test_runtime_can_request_workflow_fix_cycle(self) -> None:
         from ergon_studio.runtime import load_runtime
 

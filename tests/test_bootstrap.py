@@ -22,6 +22,10 @@ class BootstrapWorkspaceTests(unittest.TestCase):
             self.assertTrue(paths.config_path.exists())
             self.assertTrue(paths.agents_dir.exists())
             self.assertTrue(paths.workflows_dir.exists())
+            self.assertTrue((paths.agents_dir / "orchestrator.md").exists())
+            self.assertTrue((paths.agents_dir / "coder.md").exists())
+            self.assertTrue((paths.workflows_dir / "standard-build.md").exists())
+            self.assertTrue((paths.workflows_dir / "best-of-n.md").exists())
             self.assertTrue(paths.project_data_dir.exists())
             self.assertTrue(paths.state_db_path.exists())
             self.assertTrue(paths.sessions_dir.exists())
@@ -48,3 +52,22 @@ class BootstrapWorkspaceTests(unittest.TestCase):
 
             self.assertEqual(first.project_uuid, second.project_uuid)
             self.assertEqual(first.project_data_dir, second.project_data_dir)
+
+    def test_bootstrap_workspace_does_not_overwrite_existing_definition_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            agents_dir = home_dir / ".ergon.studio" / "agents"
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            orchestrator_path = agents_dir / "orchestrator.md"
+            orchestrator_path.write_text("custom orchestrator\n", encoding="utf-8")
+
+            bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+
+            self.assertEqual(
+                orchestrator_path.read_text(encoding="utf-8"),
+                "custom orchestrator\n",
+            )

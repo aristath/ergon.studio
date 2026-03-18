@@ -549,6 +549,49 @@ class MetadataStore:
             )
             connection.commit()
 
+    def get_approval(self, approval_id: str) -> ApprovalRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at
+                FROM approvals
+                WHERE id = ?
+                """,
+                (approval_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ApprovalRecord(
+            id=row[0],
+            session_id=row[1],
+            requester=row[2],
+            action=row[3],
+            risk_class=row[4],
+            reason=row[5],
+            status=row[6],
+            created_at=row[7],
+        )
+
+    def update_approval(self, record: ApprovalRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE approvals
+                SET requester = ?, action = ?, risk_class = ?, reason = ?, status = ?, created_at = ?
+                WHERE id = ?
+                """,
+                (
+                    record.requester,
+                    record.action,
+                    record.risk_class,
+                    record.reason,
+                    record.status,
+                    record.created_at,
+                    record.id,
+                ),
+            )
+            connection.commit()
+
     def list_approvals(self, session_id: str) -> list[ApprovalRecord]:
         with self._connect() as connection:
             rows = connection.execute(

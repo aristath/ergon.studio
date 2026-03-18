@@ -46,3 +46,35 @@ class ApprovalStoreTests(unittest.TestCase):
                 [approval.id for approval in store.list_approvals("session-main")],
                 ["approval-1", "approval-2"],
             )
+
+    def test_store_can_update_approval_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            initialize_database(paths.state_db_path)
+            store = ApprovalStore(paths)
+
+            store.request_approval(
+                session_id="session-main",
+                approval_id="approval-1",
+                requester="coder",
+                action="write_file",
+                risk_class="moderate",
+                reason="Update project scaffold",
+                created_at=10,
+            )
+
+            approved = store.update_approval_status(
+                approval_id="approval-1",
+                status="approved",
+            )
+
+            self.assertEqual(approved.status, "approved")
+            self.assertEqual(
+                [approval.status for approval in store.list_approvals("session-main")],
+                ["approved"],
+            )

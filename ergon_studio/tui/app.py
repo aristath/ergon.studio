@@ -81,6 +81,8 @@ class DefinitionEditorScreen(ModalScreen[None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("f1", "previous_approval", "Previous Approval"),
+        ("f2", "next_approval", "Next Approval"),
         ("f3", "previous_workflow_run", "Previous Run"),
         ("f4", "next_workflow_run", "Next Run"),
         ("f5", "start_selected_workflow", "Start Workflow"),
@@ -92,6 +94,8 @@ class ErgonStudioApp(App[None]):
         ("ctrl+p", "previous_agent", "Previous Agent"),
         ("ctrl+a", "open_selected_agent_thread", "Open Agent Thread"),
         ("ctrl+t", "edit_selected_agent_definition", "Edit Agent"),
+        ("ctrl+y", "approve_selected_approval", "Approve"),
+        ("ctrl+r", "reject_selected_approval", "Reject"),
         ("f7", "previous_workflow", "Previous Workflow"),
         ("f8", "next_workflow", "Next Workflow"),
         ("f9", "edit_selected_workflow_definition", "Edit Workflow"),
@@ -151,7 +155,9 @@ class ErgonStudioApp(App[None]):
         self.selected_agent_id = "orchestrator"
         self.selected_workflow_id = "standard-build"
         self.selected_workflow_run_id: str | None = None
+        self.selected_approval_id: str | None = None
         self._time_cursor = int(time.time())
+        self._normalize_selected_approval()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -277,11 +283,11 @@ class ErgonStudioApp(App[None]):
         )
 
     def _render_approvals_body(self) -> str:
-        approvals = self.runtime.list_approvals()
+        approvals = self.runtime.list_pending_approvals()
         if not approvals:
             return "No approvals pending."
         return "\n".join(
-            f"{approval.id} [{approval.risk_class}] {approval.action}"
+            f"{'> ' if approval.id == self.selected_approval_id else '  '}{approval.id} [{approval.risk_class}] {approval.action}"
             for approval in approvals
         )
 
@@ -338,6 +344,7 @@ class ErgonStudioApp(App[None]):
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
             "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -482,6 +489,34 @@ class ErgonStudioApp(App[None]):
     def action_previous_workflow_run(self) -> None:
         self._cycle_workflow_run(-1)
 
+    def action_next_approval(self) -> None:
+        self._cycle_approval(1)
+
+    def action_previous_approval(self) -> None:
+        self._cycle_approval(-1)
+
+    def action_approve_selected_approval(self) -> None:
+        if self.selected_approval_id is None:
+            return
+        self.runtime.resolve_approval(
+            approval_id=self.selected_approval_id,
+            status="approved",
+            created_at=self._next_timestamp(),
+        )
+        self._normalize_selected_approval()
+        self._refresh_panels()
+
+    def action_reject_selected_approval(self) -> None:
+        if self.selected_approval_id is None:
+            return
+        self.runtime.resolve_approval(
+            approval_id=self.selected_approval_id,
+            status="rejected",
+            created_at=self._next_timestamp(),
+        )
+        self._normalize_selected_approval()
+        self._refresh_panels()
+
     def action_edit_orchestrator_definition(self) -> None:
         self._open_agent_definition_editor("orchestrator")
 
@@ -567,6 +602,25 @@ class ErgonStudioApp(App[None]):
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
 
+    def _cycle_approval(self, direction: int) -> None:
+        approvals = self.runtime.list_pending_approvals()
+        if not approvals:
+            self.selected_approval_id = None
+            self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+            return
+
+        approval_ids = [approval.id for approval in approvals]
+        if self.selected_approval_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = approval_ids.index(self.selected_approval_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_approval_id = approval_ids[(current_index + direction) % len(approval_ids)]
+        self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
         self.push_screen(
@@ -616,6 +670,7 @@ class ErgonStudioApp(App[None]):
         self._refresh_panels()
 
     def _refresh_panels(self) -> None:
+        self._normalize_selected_approval()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
@@ -632,3 +687,11 @@ class ErgonStudioApp(App[None]):
     def _next_timestamp(self) -> int:
         self._time_cursor += 1
         return self._time_cursor
+
+    def _normalize_selected_approval(self) -> None:
+        approval_ids = [approval.id for approval in self.runtime.list_pending_approvals()]
+        if not approval_ids:
+            self.selected_approval_id = None
+            return
+        if self.selected_approval_id not in approval_ids:
+            self.selected_approval_id = approval_ids[0]

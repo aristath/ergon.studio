@@ -485,6 +485,56 @@ Return reviewed code and a clear summary.
                 ["approval_requested"],
             )
 
+    def test_runtime_can_approve_and_reject_approvals(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.request_approval(
+                approval_id="approval-1",
+                requester="coder",
+                action="write_file",
+                risk_class="moderate",
+                reason="Update README",
+                created_at=1_710_755_200,
+            )
+            runtime.request_approval(
+                approval_id="approval-2",
+                requester="orchestrator",
+                action="run_command",
+                risk_class="high",
+                reason="Install dependencies",
+                created_at=1_710_755_201,
+            )
+
+            approved = runtime.resolve_approval(
+                approval_id="approval-1",
+                status="approved",
+                created_at=1_710_755_202,
+            )
+            rejected = runtime.resolve_approval(
+                approval_id="approval-2",
+                status="rejected",
+                created_at=1_710_755_203,
+            )
+
+            self.assertEqual(approved.status, "approved")
+            self.assertEqual(rejected.status, "rejected")
+            self.assertEqual(
+                [approval.status for approval in runtime.list_approvals()],
+                ["approved", "rejected"],
+            )
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["approval_requested", "approval_requested", "approval_approved", "approval_rejected"],
+            )
+
     def test_runtime_can_add_and_list_memory_facts(self) -> None:
         from ergon_studio.runtime import load_runtime
 

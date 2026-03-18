@@ -245,6 +245,13 @@ class RuntimeContext:
     def list_approvals(self) -> list[ApprovalRecord]:
         return self.approval_store.list_approvals(self.main_session_id)
 
+    def list_pending_approvals(self) -> list[ApprovalRecord]:
+        return [
+            approval
+            for approval in self.list_approvals()
+            if approval.status == "pending"
+        ]
+
     def list_agent_ids(self) -> list[str]:
         return sorted(self.registry.agent_definitions.keys())
 
@@ -920,6 +927,24 @@ class RuntimeContext:
         self.append_event(
             kind="approval_requested",
             summary=f"{requester} requested approval for {action}",
+            created_at=created_at,
+        )
+        return approval
+
+    def resolve_approval(
+        self,
+        *,
+        approval_id: str,
+        status: str,
+        created_at: int,
+    ) -> ApprovalRecord:
+        approval = self.approval_store.update_approval_status(
+            approval_id=approval_id,
+            status=status,
+        )
+        self.append_event(
+            kind=f"approval_{status}",
+            summary=f"{status.capitalize()} approval {approval_id} for {approval.action}",
             created_at=created_at,
         )
         return approval

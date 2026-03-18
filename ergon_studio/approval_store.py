@@ -44,3 +44,22 @@ class ApprovalStore:
 
     def list_approvals(self, session_id: str) -> list[ApprovalRecord]:
         return self.metadata.list_approvals(session_id)
+
+    def update_approval_status(self, *, approval_id: str, status: str) -> ApprovalRecord:
+        if status not in {"approved", "rejected"}:
+            raise ValueError(f"unsupported approval status: {status}")
+        approval = self.metadata.get_approval(approval_id)
+        if approval is None:
+            raise ValueError(f"unknown approval: {approval_id}")
+        updated = ApprovalRecord(
+            id=approval.id,
+            session_id=approval.session_id,
+            requester=approval.requester,
+            action=approval.action,
+            risk_class=approval.risk_class,
+            reason=approval.reason,
+            status=status,
+            created_at=approval.created_at,
+        )
+        self.metadata.update_approval(updated)
+        return updated

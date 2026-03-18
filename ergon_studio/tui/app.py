@@ -291,11 +291,20 @@ class ErgonStudioApp(App[None]):
         return "\n\n".join(rendered_messages)
 
     def _render_selected_thread_body(self) -> str:
+        thread = self.runtime.get_thread(self.selected_thread_id)
+        header_lines = [self.selected_thread_id]
+        if thread is not None:
+            header_lines.append(f"Kind: {thread.kind}")
+            if thread.assigned_agent_id is not None:
+                header_lines.append(f"Agent: {thread.assigned_agent_id}")
+            if thread.parent_task_id is not None:
+                header_lines.append(f"Task: {thread.parent_task_id}")
+
         messages = self.runtime.list_thread_messages(self.selected_thread_id)
         if not messages:
-            return f"{self.selected_thread_id}\nNo messages yet."
+            return "\n".join(header_lines + ["No messages yet."])
 
-        rendered_messages = [self.selected_thread_id]
+        rendered_messages = header_lines + [""]
         for message in messages:
             body = self.runtime.conversation_store.read_message_body(message).rstrip("\n")
             rendered_messages.append(f"[{message.sender}] {body}")

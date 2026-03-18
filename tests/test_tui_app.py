@@ -150,6 +150,9 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 selected_thread = app.query_one("#selected-thread", Panel)
                 self.assertIn("Agent thread: architect", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
+                self.assertIn("Kind: agent_direct", selected_thread.body)
+                self.assertIn("Agent: architect", selected_thread.body)
+                self.assertIn("Task: task-", selected_thread.body)
                 self.assertIn("No messages yet.", selected_thread.body)
 
     async def test_app_renders_pending_approvals(self) -> None:

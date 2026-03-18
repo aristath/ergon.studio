@@ -393,10 +393,26 @@ class ErgonStudioApp(App[None]):
         agents = self.runtime.list_agent_ids()
         workflows = self.runtime.list_workflow_ids()
         orchestrator_status = self.runtime.agent_status_summary("orchestrator")
+        provider_map = self.runtime.registry.config.get("providers", {})
+        role_assignments = self.runtime.registry.config.get("role_assignments", {})
 
         provider_text = ", ".join(providers) if providers else "none"
         agent_text = ", ".join(agents)
         workflow_text = ", ".join(workflows)
+        assignment_lines = [
+            f"{role}->{provider}"
+            for role, provider in sorted(role_assignments.items())
+        ]
+        provider_lines = []
+        for provider_id in providers:
+            provider = provider_map.get(provider_id, {})
+            provider_type = str(provider.get("type", "unknown"))
+            model = str(provider.get("model", "unknown-model"))
+            base_url = str(provider.get("base_url", ""))
+            if base_url:
+                provider_lines.append(f"{provider_id}: {provider_type} {model} @ {base_url}")
+            else:
+                provider_lines.append(f"{provider_id}: {provider_type} {model}")
 
         return (
             f"Config: {self.runtime.paths.config_path}\n"
@@ -408,6 +424,8 @@ class ErgonStudioApp(App[None]):
             "Artifacts: F11/F12 select\n"
             "Memory: Alt+N / Alt+P select\n"
             f"Providers: {provider_text}\n"
+            f"Provider Details: {'; '.join(provider_lines) if provider_lines else 'none'}\n"
+            f"Assignments: {', '.join(assignment_lines) if assignment_lines else 'none'}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
         )

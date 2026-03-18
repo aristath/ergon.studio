@@ -992,6 +992,8 @@ Be concise and structural.
                 settings = app.query_one("#settings", Panel)
                 activity = app.query_one("#activity", Panel)
                 self.assertIn("Orchestrator: ready via local (qwen2.5-coder)", settings.body)
+                self.assertIn("local: openai_chat qwen2.5-coder @ http://localhost:8080/v1", settings.body)
+                self.assertIn("Assignments: orchestrator->local", settings.body)
                 self.assertIn("config_saved", activity.body)
 
     async def test_app_can_edit_selected_workflow_definition(self) -> None:

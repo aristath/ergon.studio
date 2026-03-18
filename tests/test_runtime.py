@@ -1305,12 +1305,16 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]),
             )
             artifacts = runtime.list_artifacts()
-            self.assertEqual(len(artifacts), 1)
-            self.assertEqual(artifacts[0].kind, "workflow-report")
-            self.assertEqual(artifacts[0].task_id, completed_run.root_task_id)
+            self.assertEqual(len(artifacts), 2)
+            self.assertEqual(
+                {artifact.kind for artifact in artifacts},
+                {"workflow-report", "workflow-graph"},
+            )
+            report_artifact = next(artifact for artifact in artifacts if artifact.kind == "workflow-report")
+            self.assertEqual(report_artifact.task_id, completed_run.root_task_id)
             self.assertIn(
                 "coder done.",
-                artifacts[0].file_path.read_text(encoding="utf-8"),
+                report_artifact.file_path.read_text(encoding="utf-8"),
             )
 
     async def test_runtime_can_list_artifacts_for_workflow_run(self) -> None:
@@ -1367,8 +1371,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             related_artifacts = runtime.list_artifacts_for_workflow_run(workflow_run.id)
 
-            self.assertEqual(len(related_artifacts), 1)
-            self.assertEqual(related_artifacts[0].kind, "workflow-report")
+            self.assertEqual(len(related_artifacts), 2)
+            self.assertEqual([artifact.kind for artifact in related_artifacts], ["workflow-report", "workflow-graph"])
             self.assertEqual(related_artifacts[0].task_id, workflow_run.root_task_id)
 
     async def test_runtime_can_list_events_for_workflow_run(self) -> None:

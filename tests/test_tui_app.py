@@ -1560,11 +1560,11 @@ Return reviewed code and a clear summary.
                     app.selected_workflow_id = "single-agent-execution"
                     await app.action_start_selected_workflow()
                     first_run = runtime.list_workflow_runs()[0]
-                    first_artifact_id = runtime.list_artifacts()[0].id
+                    first_artifact_id = runtime.list_artifacts_for_workflow_run(first_run.id)[0].id
 
                     await app.action_start_selected_workflow()
                     second_run = runtime.list_workflow_runs()[1]
-                    second_artifact_id = runtime.list_artifacts()[1].id
+                    second_artifact_id = runtime.list_artifacts_for_workflow_run(second_run.id)[0].id
 
                     artifacts = app.query_one("#artifacts", Panel)
                     self.assertIn(second_run.id, artifacts.body)

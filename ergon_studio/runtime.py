@@ -18,7 +18,7 @@ from ergon_studio.command_store import CommandStore
 from ergon_studio.config import save_global_config_text
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.context_providers import WORKSPACE_STATE_KEY
-from ergon_studio.definitions import DefinitionDocument, save_definition_text
+from ergon_studio.definitions import DefinitionDocument, parse_definition_text, save_definition_text
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
@@ -29,6 +29,7 @@ from ergon_studio.tool_call_store import ToolCallStore
 from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
+from ergon_studio.workflow_compiler import compile_workflow_definition
 from ergon_studio.workflow_store import WorkflowStore
 
 
@@ -164,6 +165,8 @@ class RuntimeContext:
         created_at: int | None = None,
     ) -> DefinitionDocument:
         definition = self.registry.workflow_definitions[workflow_id]
+        saved_preview = parse_definition_text(text, path=definition.path)
+        compile_workflow_definition(saved_preview)
         saved = save_definition_text(definition.path, text)
         self.reload_registry()
         if created_at is None:
@@ -275,7 +278,10 @@ class RuntimeContext:
             for artifact in self.list_artifacts()
             if artifact.task_id in task_ids or artifact.thread_id in thread_ids
         ]
-        return sorted(artifacts, key=lambda artifact: (artifact.created_at, artifact.id))
+        return sorted(
+            artifacts,
+            key=lambda artifact: (_workflow_artifact_priority(artifact.kind), artifact.created_at, artifact.id),
+        )
 
     def list_threads_for_workflow_run(self, workflow_run_id: str) -> list[ThreadRecord]:
         run_view = self.describe_workflow_run(workflow_run_id)
@@ -1128,6 +1134,7 @@ class RuntimeContext:
 
     def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
         goal = self.latest_main_user_message_body()
+        compiled = compile_workflow_definition(self.registry.workflow_definitions[workflow_id])
         step_groups = self.workflow_step_groups(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
@@ -1147,6 +1154,14 @@ class RuntimeContext:
             state="running",
             created_at=created_at + 1,
             root_task_id=root_task.id,
+        )
+        self.create_artifact(
+            artifact_id=f"artifact-{uuid4().hex[:8]}",
+            kind="workflow-graph",
+            title=f"Workflow Graph: {workflow_id}",
+            content=compiled.to_mermaid(),
+            created_at=created_at + 1,
+            task_id=root_task.id,
         )
         self.append_event(
             kind="workflow_started",
@@ -1698,6 +1713,14 @@ def _workflow_group_label(group: tuple[str, ...]) -> str:
     if len(set(group)) == 1 and len(group) > 1:
         return f"{group[0]} x{len(group)}"
     return ", ".join(group)
+
+
+def _workflow_artifact_priority(kind: str) -> int:
+    if kind == "workflow-report":
+        return 0
+    if kind == "workflow-graph":
+        return 1
+    return 2
 
 
 def _render_command_output(

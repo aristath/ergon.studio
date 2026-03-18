@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import ErgonStudioApp
 
@@ -35,6 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path.home(),
     )
+
+    eval_parser = subparsers.add_parser("eval")
+    eval_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+    )
+    eval_parser.add_argument(
+        "--home-dir",
+        type=Path,
+        default=Path.home(),
+    )
     return parser
 
 
@@ -58,6 +71,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         app = ErgonStudioApp(runtime)
         app.run()
+        return 0
+
+    if args.command == "eval":
+        runtime = load_runtime(
+            project_root=args.project_root,
+            home_dir=args.home_dir,
+        )
+        results = run_builtin_evals(runtime)
+        report_path = write_eval_report(runtime, results)
+        print(summarize_results(results))
+        print(f"report={report_path}")
+        for result in results:
+            print(f"{result.name}:{result.status}:{result.details}")
         return 0
 
     parser.error(f"unknown command: {args.command}")

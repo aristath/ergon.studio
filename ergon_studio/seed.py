@@ -384,9 +384,9 @@ id: best-of-n
 name: Best of N
 kind: workflow
 orchestration: concurrent
-steps:
-  - coder
-  - reviewer
+step_groups:
+  - [coder, coder, coder]
+  - [reviewer]
 ---
 ## Purpose
 Improve quality through parallel candidate generation.

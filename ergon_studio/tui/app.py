@@ -518,9 +518,18 @@ class ErgonStudioApp(App[None]):
             return "\n".join(lines)
 
         orchestration = str(definition.metadata.get("orchestration", "unknown"))
-        workflow_steps = definition.metadata.get("steps", [])
         step_text = "none"
-        if isinstance(workflow_steps, list) and workflow_steps:
+        workflow_step_groups = definition.metadata.get("step_groups")
+        workflow_steps = definition.metadata.get("steps", [])
+        if isinstance(workflow_step_groups, list) and workflow_step_groups:
+            rendered_groups: list[str] = []
+            for group in workflow_step_groups:
+                if isinstance(group, list):
+                    rendered_groups.append(" + ".join(str(step) for step in group))
+                else:
+                    rendered_groups.append(str(group))
+            step_text = " -> ".join(rendered_groups)
+        elif isinstance(workflow_steps, list) and workflow_steps:
             step_text = " -> ".join(str(step) for step in workflow_steps)
         purpose = definition.sections.get("Purpose", "")
         exit_conditions = definition.sections.get("Exit Conditions", "")
@@ -557,7 +566,7 @@ class ErgonStudioApp(App[None]):
             lines.append(f"Last thread: {run_view.workflow_run.last_thread_id}")
         if run_view.workflow_run.current_step_index < len(run_view.steps):
             next_step = run_view.steps[run_view.workflow_run.current_step_index]
-            next_agent = next_step.threads[0].assigned_agent_id if next_step.threads else "unknown"
+            next_agent = " + ".join(thread.assigned_agent_id or "unknown" for thread in next_step.threads) if next_step.threads else "unknown"
             lines.append(f"Next agent: {next_agent}")
         else:
             lines.append("Next agent: none")

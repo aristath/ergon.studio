@@ -709,6 +709,36 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Root: task-", runs.body)
                 self.assertIn("Next agent: architect", runs.body)
 
+    async def test_app_shows_parallel_workflow_group_details(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_workflow_id = "best-of-n"
+
+            async with app.run_test():
+                workflows = app.query_one("#workflows", Panel)
+                self.assertIn("Steps: coder + coder + coder -> reviewer", workflows.body)
+
+                workflow_run, _ = runtime.start_workflow_run(
+                    workflow_id="best-of-n",
+                    created_at=1_710_755_200,
+                )
+                app.selected_workflow_run_id = workflow_run.id
+                app._refresh_panels()
+
+                runs = app.query_one("#workflow-runs", Panel)
+                tasks = app.query_one("#tasks", Panel)
+                self.assertIn("Next agent: coder + coder + coder", runs.body)
+                self.assertIn("best-of-n: coder x3", tasks.body)
+
     async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel

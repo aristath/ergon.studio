@@ -431,6 +431,99 @@ Return reviewed and repaired work.
                 ["standard-build: reviewer", "standard-build: fixer"],
             )
 
+    def test_runtime_can_expand_parallel_workflow_groups(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="best-of-n",
+                created_at=1_710_755_200,
+            )
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+
+            self.assertEqual(len(threads), 4)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 2)
+            self.assertEqual(len(run_view.steps[0].threads), 3)
+            self.assertEqual(len(run_view.steps[1].threads), 1)
+            self.assertEqual(run_view.steps[0].task.title, "best-of-n: coder x3")
+
+    def test_runtime_advances_parallel_workflow_groups_as_single_step(self) -> None:
+        import asyncio
+
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text=self.response_text)
+
+        responses = iter(
+            [
+                "Candidate A",
+                "Candidate B",
+                "Candidate C",
+                "Review result",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Implement the feature.",
+                created_at=1_710_755_190,
+            )
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: FakeAgent(next(responses)),
+            ):
+                workflow_run, _ = runtime.start_workflow_run(
+                    workflow_id="best-of-n",
+                    created_at=1_710_755_200,
+                )
+
+                advanced_run, thread, reply = asyncio.run(
+                    runtime.advance_workflow_run(
+                        workflow_run_id=workflow_run.id,
+                        created_at=1_710_755_201,
+                    )
+                )
+
+                self.assertEqual(advanced_run.current_step_index, 1)
+                self.assertIsNotNone(thread)
+                self.assertIsNotNone(reply)
+                first_step_outputs = [
+                    runtime.conversation_store.read_message_body(message)
+                    for candidate_thread in runtime.describe_workflow_run(workflow_run.id).steps[0].threads
+                    for message in runtime.list_thread_messages(candidate_thread.id)
+                    if message.sender == "coder"
+                ]
+                self.assertEqual(len(first_step_outputs), 3)
+
     def test_runtime_can_update_task_state(self) -> None:
         from ergon_studio.runtime import load_runtime
 

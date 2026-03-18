@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 import subprocess
 import time
 from pathlib import Path
@@ -327,22 +328,29 @@ class RuntimeContext:
         return sorted(self.registry.workflow_definitions.keys())
 
     def workflow_steps(self, workflow_id: str) -> tuple[str, ...]:
+        groups = self.workflow_step_groups(workflow_id)
+        if any(len(group) != 1 for group in groups):
+            raise ValueError(f"workflow '{workflow_id}' includes grouped steps")
+        return tuple(group[0] for group in groups)
+
+    def workflow_step_groups(self, workflow_id: str) -> tuple[tuple[str, ...], ...]:
         definition = self.registry.workflow_definitions.get(workflow_id)
         if definition is None:
             raise ValueError(f"unknown workflow: {workflow_id}")
 
+        configured_step_groups = definition.metadata.get("step_groups")
+        if configured_step_groups is not None:
+            if not isinstance(configured_step_groups, list):
+                raise ValueError(f"workflow '{workflow_id}' step_groups must be a list")
+            return tuple(_validate_workflow_group(workflow_id, group) for group in configured_step_groups)
+
         configured_steps = definition.metadata.get("steps")
         if configured_steps is None:
-            return _legacy_workflow_steps(workflow_id)
+            legacy_steps = _legacy_workflow_steps(workflow_id)
+            return tuple((step,) for step in legacy_steps)
         if not isinstance(configured_steps, list):
             raise ValueError(f"workflow '{workflow_id}' steps must be a list")
-
-        steps: list[str] = []
-        for step in configured_steps:
-            if not isinstance(step, str) or not step:
-                raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
-            steps.append(step)
-        return tuple(steps)
+        return tuple((step,) for step in _validate_workflow_group(workflow_id, configured_steps))
 
     def list_provider_ids(self) -> list[str]:
         return sorted(self.registry.config.get("providers", {}).keys())
@@ -881,7 +889,7 @@ class RuntimeContext:
         self,
         *,
         workflow_run: WorkflowRunRecord,
-        threads: list[ThreadRecord],
+        steps: list[WorkflowRunStepView],
         next_index: int,
     ) -> str:
         if next_index == 0:
@@ -890,13 +898,20 @@ class RuntimeContext:
                 return f"Workflow kickoff: {workflow_run.workflow_id}\n\nGoal:\n{goal}"
             return f"Workflow kickoff: {workflow_run.workflow_id}"
 
-        previous_thread = threads[next_index - 1]
-        previous_output = self._latest_agent_message_body(previous_thread.id)
-        if previous_output:
+        previous_step = steps[next_index - 1]
+        previous_outputs: list[str] = []
+        for thread in previous_step.threads:
+            previous_output = self._latest_agent_message_body(thread.id)
+            if not previous_output:
+                continue
+            previous_outputs.append(
+                f"{thread.assigned_agent_id or 'unknown'}:\n{previous_output}"
+            )
+        if previous_outputs:
             return (
                 f"Continue workflow: {workflow_run.workflow_id}\n\n"
-                f"Previous step output from {previous_thread.assigned_agent_id}:\n"
-                f"{previous_output}"
+                "Previous step outputs:\n"
+                + "\n\n".join(previous_outputs)
             )
         return f"Continue workflow: {workflow_run.workflow_id}"
 
@@ -1011,7 +1026,7 @@ class RuntimeContext:
         return task
 
     def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
-        participants = self.workflow_steps(workflow_id)
+        step_groups = self.workflow_step_groups(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
             title=f"Workflow: {workflow_id}",
@@ -1035,7 +1050,7 @@ class RuntimeContext:
         threads = self._append_workflow_steps(
             workflow_id=workflow_id,
             root_task_id=root_task.id,
-            participants=participants,
+            step_groups=step_groups,
             created_at=created_at + 2,
         )
         return workflow_run, threads
@@ -1050,8 +1065,10 @@ class RuntimeContext:
         if workflow_run is None:
             raise ValueError(f"unknown workflow run: {workflow_run_id}")
 
-        existing_threads = self._workflow_threads_for_run(workflow_run)
-        if workflow_run.current_step_index < len(existing_threads):
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            raise ValueError(f"unknown workflow run: {workflow_run_id}")
+        if workflow_run.current_step_index < len(run_view.steps):
             raise ValueError("workflow run still has pending steps")
         if workflow_run.root_task_id is None:
             raise ValueError("workflow run has no root task")
@@ -1059,7 +1076,7 @@ class RuntimeContext:
         threads = self._append_workflow_steps(
             workflow_id=workflow_run.workflow_id,
             root_task_id=workflow_run.root_task_id,
-            participants=("fixer", "reviewer"),
+            step_groups=(("fixer",), ("reviewer",)),
             created_at=created_at,
         )
         updated = WorkflowRunRecord(
@@ -1070,7 +1087,7 @@ class RuntimeContext:
             created_at=workflow_run.created_at,
             updated_at=created_at + 1,
             root_task_id=workflow_run.root_task_id,
-            current_step_index=len(existing_threads),
+            current_step_index=len(run_view.steps),
             last_thread_id=workflow_run.last_thread_id,
         )
         self.workflow_store.update_workflow_run(updated)
@@ -1097,9 +1114,12 @@ class RuntimeContext:
         if workflow_run is None:
             raise ValueError(f"unknown workflow run: {workflow_run_id}")
 
-        threads = self._workflow_threads_for_run(workflow_run)
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            raise ValueError(f"unknown workflow run: {workflow_run_id}")
+        steps = list(run_view.steps)
         next_index = workflow_run.current_step_index
-        if next_index >= len(threads):
+        if next_index >= len(steps):
             completed = WorkflowRunRecord(
                 id=workflow_run.id,
                 session_id=workflow_run.session_id,
@@ -1120,24 +1140,34 @@ class RuntimeContext:
             )
             return completed, None, None
 
-        thread = threads[next_index]
-        if thread.parent_task_id is not None:
+        step = steps[next_index]
+        if step.task.id is not None:
             self.update_task_state(
-                task_id=thread.parent_task_id,
+                task_id=step.task.id,
                 state="in_progress",
                 updated_at=created_at,
             )
         prompt = self._workflow_prompt_for_step(
             workflow_run=workflow_run,
-            threads=threads,
+            steps=steps,
             next_index=next_index,
         )
-        _, reply = await self.send_message_to_agent_thread(
-            thread_id=thread.id,
-            body=prompt,
-            created_at=created_at,
+        results = await asyncio.gather(
+            *[
+                self.send_message_to_agent_thread(
+                    thread_id=thread.id,
+                    body=prompt,
+                    created_at=created_at + offset,
+                )
+                for offset, thread in enumerate(step.threads)
+            ]
         )
-        if reply is None:
+        blocked_thread = None
+        for thread, (_, reply) in zip(step.threads, results):
+            if reply is None:
+                blocked_thread = thread
+                break
+        if blocked_thread is not None:
             blocked = WorkflowRunRecord(
                 id=workflow_run.id,
                 session_id=workflow_run.session_id,
@@ -1147,47 +1177,52 @@ class RuntimeContext:
                 updated_at=created_at + 1,
                 root_task_id=workflow_run.root_task_id,
                 current_step_index=workflow_run.current_step_index,
-                last_thread_id=thread.id,
+                last_thread_id=blocked_thread.id,
             )
             self.workflow_store.update_workflow_run(blocked)
-            if thread.parent_task_id is not None:
-                self.update_task_state(
-                    task_id=thread.parent_task_id,
-                    state="blocked",
-                    updated_at=created_at + 1,
-                )
+            self.update_task_state(
+                task_id=step.task.id,
+                state="blocked",
+                updated_at=created_at + 1,
+            )
             self.append_event(
                 kind="workflow_blocked",
-                summary=f"Workflow {workflow_run.workflow_id} blocked at {thread.assigned_agent_id}",
+                summary=f"Workflow {workflow_run.workflow_id} blocked at {blocked_thread.assigned_agent_id}",
                 created_at=created_at + 1,
-                thread_id=thread.id,
+                thread_id=blocked_thread.id,
                 task_id=workflow_run.root_task_id,
             )
-            return blocked, thread, None
+            return blocked, blocked_thread, None
+
+        reply_message = None
+        for _, reply in reversed(results):
+            if reply is not None:
+                reply_message = reply
+                break
 
         updated = WorkflowRunRecord(
             id=workflow_run.id,
             session_id=workflow_run.session_id,
             workflow_id=workflow_run.workflow_id,
-            state="completed" if next_index + 1 >= len(threads) else "running",
+            state="completed" if next_index + 1 >= len(steps) else "running",
             created_at=workflow_run.created_at,
             updated_at=created_at + 1,
             root_task_id=workflow_run.root_task_id,
             current_step_index=next_index + 1,
-            last_thread_id=thread.id,
+            last_thread_id=step.threads[-1].id if step.threads else workflow_run.last_thread_id,
         )
         self.workflow_store.update_workflow_run(updated)
-        if thread.parent_task_id is not None:
-            self.update_task_state(
-                task_id=thread.parent_task_id,
-                state="completed",
-                updated_at=created_at + 1,
-            )
+        self.update_task_state(
+            task_id=step.task.id,
+            state="completed",
+            updated_at=created_at + 1,
+        )
+        participant_text = ", ".join(thread.assigned_agent_id or "unknown" for thread in step.threads)
         self.append_event(
             kind="workflow_advanced",
-            summary=f"Advanced workflow {workflow_run.workflow_id} to {thread.assigned_agent_id}",
+            summary=f"Advanced workflow {workflow_run.workflow_id} through {participant_text}",
             created_at=created_at + 1,
-            thread_id=thread.id,
+            thread_id=step.threads[-1].id if step.threads else None,
             task_id=workflow_run.root_task_id,
         )
         if updated.state == "completed":
@@ -1197,14 +1232,17 @@ class RuntimeContext:
                     state="completed",
                     updated_at=created_at + 2,
                 )
+            final_thread = step.threads[-1] if step.threads else None
+            if final_thread is None:
+                return updated, None, reply_message
             self._create_workflow_completion_artifact(
                 workflow_run=updated,
-                thread=thread,
+                thread=final_thread,
                 created_at=created_at + 2,
             )
             self._append_workflow_completion_summary(
                 workflow_run=updated,
-                thread=thread,
+                thread=final_thread,
                 created_at=created_at + 3,
             )
             self.append_event(
@@ -1213,31 +1251,35 @@ class RuntimeContext:
                 created_at=created_at + 4,
                 task_id=workflow_run.root_task_id,
             )
-        return updated, thread, reply
+        return updated, (step.threads[-1] if step.threads else None), reply_message
 
     def _append_workflow_steps(
         self,
         *,
         workflow_id: str,
         root_task_id: str,
-        participants: tuple[str, ...],
+        step_groups: tuple[tuple[str, ...], ...],
         created_at: int,
     ) -> list[ThreadRecord]:
         threads: list[ThreadRecord] = []
-        for offset, agent_id in enumerate(participants):
+        thread_offset = 0
+        for offset, group in enumerate(step_groups):
+            group_label = _workflow_group_label(group)
             child_task = self.create_task(
                 task_id=f"task-{uuid4().hex[:8]}",
-                title=f"{workflow_id}: {agent_id}",
+                title=f"{workflow_id}: {group_label}",
                 state="planned",
                 created_at=created_at + offset,
                 parent_task_id=root_task_id,
             )
-            thread = self.create_agent_thread(
-                agent_id=agent_id,
-                created_at=created_at + len(participants) + offset,
-                parent_task_id=child_task.id,
-            )
-            threads.append(thread)
+            for agent_id in group:
+                thread = self.create_agent_thread(
+                    agent_id=agent_id,
+                    created_at=created_at + len(step_groups) + thread_offset,
+                    parent_task_id=child_task.id,
+                )
+                threads.append(thread)
+                thread_offset += 1
         return threads
 
     def append_event(
@@ -1516,6 +1558,27 @@ def _legacy_workflow_steps(workflow_id: str) -> tuple[str, ...]:
         "replanning": ("architect",),
     }
     return workflow_map.get(workflow_id, ())
+
+
+def _validate_workflow_group(workflow_id: str, group: object) -> tuple[str, ...]:
+    if isinstance(group, str):
+        if not group:
+            raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
+        return (group,)
+    if not isinstance(group, list) or not group:
+        raise ValueError(f"workflow '{workflow_id}' step groups must be non-empty lists of strings")
+    steps: list[str] = []
+    for step in group:
+        if not isinstance(step, str) or not step:
+            raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
+        steps.append(step)
+    return tuple(steps)
+
+
+def _workflow_group_label(group: tuple[str, ...]) -> str:
+    if len(set(group)) == 1 and len(group) > 1:
+        return f"{group[0]} x{len(group)}"
+    return ", ".join(group)
 
 
 def _render_command_output(

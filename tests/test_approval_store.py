@@ -38,10 +38,12 @@ class ApprovalStoreTests(unittest.TestCase):
                 risk_class="high",
                 reason="Install dependencies",
                 created_at=20,
+                task_id="task-2",
             )
 
             self.assertEqual(first.status, "pending")
             self.assertEqual(second.action, "run_command")
+            self.assertEqual(second.task_id, "task-2")
             self.assertEqual(
                 [approval.id for approval in store.list_approvals("session-main")],
                 ["approval-1", "approval-2"],

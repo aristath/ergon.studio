@@ -20,6 +20,8 @@ class ApprovalStore:
         risk_class: str,
         reason: str,
         created_at: int,
+        thread_id: str | None = None,
+        task_id: str | None = None,
     ) -> ApprovalRecord:
         if self.metadata.get_session(session_id) is None:
             self.metadata.insert_session(
@@ -38,6 +40,8 @@ class ApprovalStore:
             reason=reason,
             status="pending",
             created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
         )
         self.metadata.insert_approval(record)
         return record
@@ -60,6 +64,8 @@ class ApprovalStore:
             reason=approval.reason,
             status=status,
             created_at=approval.created_at,
+            thread_id=approval.thread_id,
+            task_id=approval.task_id,
         )
         self.metadata.update_approval(updated)
         return updated

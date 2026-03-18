@@ -321,7 +321,25 @@ class ErgonStudioApp(App[None]):
         )
 
     def _render_approvals_body(self) -> str:
-        approvals = self.runtime.list_pending_approvals()
+        approvals = self._visible_approvals()
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not approvals:
+                    lines.append("No approvals for selected run.")
+                    return "\n".join(lines)
+                lines.extend(
+                    f"{'> ' if approval.id == self.selected_approval_id else '  '}{approval.id} [{approval.risk_class}] {approval.action}"
+                    for approval in approvals
+                )
+                return "\n".join(lines)
+
         if not approvals:
             return "No approvals pending."
         return "\n".join(
@@ -642,7 +660,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#activity", Panel).set_body(self._render_activity_body())
 
     def _cycle_approval(self, direction: int) -> None:
-        approvals = self.runtime.list_pending_approvals()
+        approvals = self._visible_approvals()
         if not approvals:
             self.selected_approval_id = None
             self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
@@ -729,7 +747,7 @@ class ErgonStudioApp(App[None]):
         return self._time_cursor
 
     def _normalize_selected_approval(self) -> None:
-        approval_ids = [approval.id for approval in self.runtime.list_pending_approvals()]
+        approval_ids = [approval.id for approval in self._visible_approvals()]
         if not approval_ids:
             self.selected_approval_id = None
             return
@@ -750,3 +768,10 @@ class ErgonStudioApp(App[None]):
             if run_view is not None:
                 return self.runtime.list_threads_for_workflow_run(self.selected_workflow_run_id)
         return self.runtime.list_threads()
+
+    def _visible_approvals(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_pending_approvals_for_workflow_run(self.selected_workflow_run_id)
+        return self.runtime.list_pending_approvals()

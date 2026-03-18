@@ -114,6 +114,8 @@ class ApprovalRecord:
     reason: str
     status: str
     created_at: int
+    thread_id: str | None = None
+    task_id: str | None = None
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")

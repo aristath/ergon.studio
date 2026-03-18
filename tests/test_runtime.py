@@ -535,6 +535,44 @@ Return reviewed code and a clear summary.
                 ["approval_requested", "approval_requested", "approval_approved", "approval_rejected"],
             )
 
+    def test_runtime_can_list_approvals_for_workflow_run(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_200,
+            )
+            runtime.request_approval(
+                approval_id="approval-1",
+                requester="coder",
+                action="write_file",
+                risk_class="moderate",
+                reason="Update workflow file",
+                created_at=1_710_755_210,
+                task_id=threads[0].parent_task_id,
+                thread_id=threads[0].id,
+            )
+            runtime.request_approval(
+                approval_id="approval-2",
+                requester="orchestrator",
+                action="run_command",
+                risk_class="high",
+                reason="Install dependencies",
+                created_at=1_710_755_211,
+            )
+
+            approvals = runtime.list_pending_approvals_for_workflow_run(workflow_run.id)
+
+            self.assertEqual([approval.id for approval in approvals], ["approval-1"])
+
     def test_runtime_can_add_and_list_memory_facts(self) -> None:
         from ergon_studio.runtime import load_runtime
 

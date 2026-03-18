@@ -282,6 +282,34 @@ class RuntimeContext:
             if approval.status == "pending"
         ]
 
+    def list_approvals_for_workflow_run(self, workflow_run_id: str) -> list[ApprovalRecord]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+
+        task_ids: set[str] = set()
+        thread_ids: set[str] = set()
+        if run_view.root_task is not None:
+            task_ids.add(run_view.root_task.id)
+        for step in run_view.steps:
+            task_ids.add(step.task.id)
+            for thread in step.threads:
+                thread_ids.add(thread.id)
+
+        approvals = [
+            approval
+            for approval in self.list_approvals()
+            if approval.task_id in task_ids or approval.thread_id in thread_ids
+        ]
+        return sorted(approvals, key=lambda approval: (approval.created_at, approval.id))
+
+    def list_pending_approvals_for_workflow_run(self, workflow_run_id: str) -> list[ApprovalRecord]:
+        return [
+            approval
+            for approval in self.list_approvals_for_workflow_run(workflow_run_id)
+            if approval.status == "pending"
+        ]
+
     def list_agent_ids(self) -> list[str]:
         return sorted(self.registry.agent_definitions.keys())
 
@@ -944,6 +972,8 @@ class RuntimeContext:
         risk_class: str,
         reason: str,
         created_at: int,
+        thread_id: str | None = None,
+        task_id: str | None = None,
     ) -> ApprovalRecord:
         approval = self.approval_store.request_approval(
             session_id=self.main_session_id,
@@ -953,11 +983,15 @@ class RuntimeContext:
             risk_class=risk_class,
             reason=reason,
             created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
         )
         self.append_event(
             kind="approval_requested",
             summary=f"{requester} requested approval for {action}",
             created_at=created_at,
+            thread_id=thread_id,
+            task_id=task_id,
         )
         return approval
 

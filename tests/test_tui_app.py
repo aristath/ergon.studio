@@ -208,6 +208,48 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("approval_approved", activity.body)
                 self.assertEqual(runtime.list_approvals()[0].status, "approved")
 
+    async def test_selected_workflow_run_scopes_approvals_panel(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                await app.action_start_selected_workflow()
+                workflow_run = runtime.list_workflow_runs()[0]
+                workflow_threads = runtime.list_threads_for_workflow_run(workflow_run.id)
+                runtime.request_approval(
+                    approval_id="approval-1",
+                    requester="coder",
+                    action="write_file",
+                    risk_class="moderate",
+                    reason="Update workflow file",
+                    created_at=1_710_755_210,
+                    task_id=workflow_threads[0].parent_task_id,
+                    thread_id=workflow_threads[0].id,
+                )
+                runtime.request_approval(
+                    approval_id="approval-2",
+                    requester="orchestrator",
+                    action="run_command",
+                    risk_class="high",
+                    reason="Install dependencies",
+                    created_at=1_710_755_211,
+                )
+                app._refresh_panels()
+
+                approvals = app.query_one("#approvals", Panel)
+                self.assertIn("Run: workflow-run-", approvals.body)
+                self.assertIn("approval-1", approvals.body)
+                self.assertNotIn("approval-2", approvals.body)
+
     async def test_app_can_reject_selected_approval(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel

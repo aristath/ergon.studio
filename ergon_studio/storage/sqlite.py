@@ -90,6 +90,8 @@ SCHEMA_STATEMENTS = (
       reason TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL,
+      thread_id TEXT,
+      task_id TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -127,6 +129,8 @@ def initialize_database(db_path: Path) -> None:
         _ensure_column(connection, table_name="threads", column_name="assigned_agent_id", definition="TEXT")
         _ensure_column(connection, table_name="workflow_runs", column_name="current_step_index", definition="INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, table_name="workflow_runs", column_name="last_thread_id", definition="TEXT")
+        _ensure_column(connection, table_name="approvals", column_name="thread_id", definition="TEXT")
+        _ensure_column(connection, table_name="approvals", column_name="task_id", definition="TEXT")
         connection.commit()
 
 
@@ -532,9 +536,9 @@ class MetadataStore:
             connection.execute(
                 """
                 INSERT INTO approvals (
-                  id, session_id, requester, action, risk_class, reason, status, created_at
+                  id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -545,6 +549,8 @@ class MetadataStore:
                     record.reason,
                     record.status,
                     record.created_at,
+                    record.thread_id,
+                    record.task_id,
                 ),
             )
             connection.commit()
@@ -553,7 +559,7 @@ class MetadataStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, session_id, requester, action, risk_class, reason, status, created_at
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
                 FROM approvals
                 WHERE id = ?
                 """,
@@ -570,6 +576,8 @@ class MetadataStore:
             reason=row[5],
             status=row[6],
             created_at=row[7],
+            thread_id=row[8],
+            task_id=row[9],
         )
 
     def update_approval(self, record: ApprovalRecord) -> None:
@@ -577,7 +585,7 @@ class MetadataStore:
             connection.execute(
                 """
                 UPDATE approvals
-                SET requester = ?, action = ?, risk_class = ?, reason = ?, status = ?, created_at = ?
+                SET requester = ?, action = ?, risk_class = ?, reason = ?, status = ?, created_at = ?, thread_id = ?, task_id = ?
                 WHERE id = ?
                 """,
                 (
@@ -587,6 +595,8 @@ class MetadataStore:
                     record.reason,
                     record.status,
                     record.created_at,
+                    record.thread_id,
+                    record.task_id,
                     record.id,
                 ),
             )
@@ -596,7 +606,7 @@ class MetadataStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, session_id, requester, action, risk_class, reason, status, created_at
+                SELECT id, session_id, requester, action, risk_class, reason, status, created_at, thread_id, task_id
                 FROM approvals
                 WHERE session_id = ?
                 ORDER BY created_at ASC, id ASC
@@ -613,6 +623,8 @@ class MetadataStore:
                 reason=row[5],
                 status=row[6],
                 created_at=row[7],
+                thread_id=row[8],
+                task_id=row[9],
             )
             for row in rows
         ]

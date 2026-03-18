@@ -40,5 +40,24 @@ class TaskStore:
         self.metadata.insert_task(record)
         return record
 
+    def get_task(self, task_id: str) -> TaskRecord | None:
+        return self.metadata.get_task(task_id)
+
+    def update_task_state(self, *, task_id: str, state: str, updated_at: int) -> TaskRecord:
+        task = self.metadata.get_task(task_id)
+        if task is None:
+            raise ValueError(f"unknown task: {task_id}")
+        updated = TaskRecord(
+            id=task.id,
+            session_id=task.session_id,
+            title=task.title,
+            state=state,
+            created_at=task.created_at,
+            updated_at=updated_at,
+            parent_task_id=task.parent_task_id,
+        )
+        self.metadata.update_task(updated)
+        return updated
+
     def list_tasks(self, session_id: str) -> list[TaskRecord]:
         return self.metadata.list_tasks(session_id)

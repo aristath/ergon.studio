@@ -72,3 +72,31 @@ class TaskStoreTests(unittest.TestCase):
             tasks = store.list_tasks("session-main")
 
             self.assertEqual([task.id for task in tasks], ["task-1", "task-2"])
+
+    def test_update_task_state_persists_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            initialize_database(paths.state_db_path)
+            store = TaskStore(paths)
+
+            store.create_task(
+                session_id="session-main",
+                task_id="task-1",
+                title="Build shell",
+                state="planned",
+                created_at=10,
+            )
+
+            updated = store.update_task_state(
+                task_id="task-1",
+                state="completed",
+                updated_at=20,
+            )
+
+            self.assertEqual(updated.state, "completed")
+            self.assertEqual(store.get_task("task-1"), updated)

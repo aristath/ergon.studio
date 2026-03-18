@@ -483,6 +483,23 @@ class RuntimeContext:
         )
         return task
 
+    def get_task(self, task_id: str) -> TaskRecord | None:
+        return self.task_store.get_task(task_id)
+
+    def update_task_state(self, *, task_id: str, state: str, updated_at: int) -> TaskRecord:
+        task = self.task_store.update_task_state(
+            task_id=task_id,
+            state=state,
+            updated_at=updated_at,
+        )
+        self.append_event(
+            kind="task_updated",
+            summary=f"Updated task {task_id} to {state}",
+            created_at=updated_at,
+            task_id=task_id,
+        )
+        return task
+
     def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
         participants = _workflow_participants(workflow_id)
         root_task = self.create_task(
@@ -558,6 +575,12 @@ class RuntimeContext:
             return completed, None, None
 
         thread = threads[next_index]
+        if thread.parent_task_id is not None:
+            self.update_task_state(
+                task_id=thread.parent_task_id,
+                state="in_progress",
+                updated_at=created_at,
+            )
         prompt = self._workflow_prompt_for_step(
             workflow_run=workflow_run,
             threads=threads,
@@ -581,6 +604,12 @@ class RuntimeContext:
             last_thread_id=thread.id,
         )
         self.workflow_store.update_workflow_run(updated)
+        if thread.parent_task_id is not None:
+            self.update_task_state(
+                task_id=thread.parent_task_id,
+                state="completed",
+                updated_at=created_at + 1,
+            )
         self.append_event(
             kind="workflow_advanced",
             summary=f"Advanced workflow {workflow_run.workflow_id} to {thread.assigned_agent_id}",
@@ -589,10 +618,16 @@ class RuntimeContext:
             task_id=workflow_run.root_task_id,
         )
         if updated.state == "completed":
+            if workflow_run.root_task_id is not None:
+                self.update_task_state(
+                    task_id=workflow_run.root_task_id,
+                    state="completed",
+                    updated_at=created_at + 2,
+                )
             self.append_event(
                 kind="workflow_completed",
                 summary=f"Completed workflow {workflow_run.workflow_id}",
-                created_at=created_at + 2,
+                created_at=created_at + 3,
                 task_id=workflow_run.root_task_id,
             )
         return updated, thread, reply

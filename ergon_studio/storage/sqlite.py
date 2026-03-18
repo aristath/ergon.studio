@@ -275,6 +275,24 @@ class MetadataStore:
             parent_task_id=row[6],
         )
 
+    def update_task(self, record: TaskRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE tasks
+                SET title = ?, state = ?, updated_at = ?, parent_task_id = ?
+                WHERE id = ?
+                """,
+                (
+                    record.title,
+                    record.state,
+                    record.updated_at,
+                    record.parent_task_id,
+                    record.id,
+                ),
+            )
+            connection.commit()
+
     def insert_workflow_run(self, record: WorkflowRunRecord) -> None:
         with self._connect() as connection:
             connection.execute(

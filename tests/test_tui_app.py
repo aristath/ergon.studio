@@ -293,8 +293,9 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("standard-build", runs.body)
                 self.assertIn("> workflow-run-", runs.body)
                 self.assertIn("Workflow: standard-build", tasks.body)
+                self.assertIn("[completed] standard-build: architect", tasks.body)
                 self.assertIn("agent_direct:architect", threads.body)
-                self.assertIn("workflow_started", activity.body)
+                self.assertIn("workflow_advanced", activity.body)
 
     async def test_app_starting_workflow_can_kick_off_first_agent_thread(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -382,6 +383,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("step=2 standard-build", runs.body)
                     self.assertIn("[orchestrator] Continue workflow: standard-build", selected_thread.body)
                     self.assertIn("[coder] Implementation underway.", selected_thread.body)
+                    self.assertIn("[completed] standard-build: coder", app.query_one("#tasks", Panel).body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

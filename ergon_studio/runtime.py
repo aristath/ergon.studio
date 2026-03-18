@@ -239,6 +239,15 @@ class RuntimeContext:
         ]
         return sorted(artifacts, key=lambda artifact: (artifact.created_at, artifact.id))
 
+    def list_threads_for_workflow_run(self, workflow_run_id: str) -> list[ThreadRecord]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+        threads: list[ThreadRecord] = []
+        for step in run_view.steps:
+            threads.extend(step.threads)
+        return sorted(threads, key=lambda thread: (thread.created_at, thread.id))
+
     def list_events_for_workflow_run(self, workflow_run_id: str) -> list[EventRecord]:
         run_view = self.describe_workflow_run(workflow_run_id)
         if run_view is None:

@@ -959,6 +959,57 @@ Return reviewed code and a clear summary.
                 self.assertEqual(app.selected_thread_id, first_thread_id)
                 self.assertIn(first_thread_id, selected_thread.body)
 
+    async def test_selected_workflow_run_scopes_threads_panel(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.create_thread(
+                thread_id="thread-review-1",
+                kind="review",
+                created_at=1_710_755_200,
+                summary="Unrelated review",
+            )
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                await app.action_start_selected_workflow()
+
+                threads = app.query_one("#threads", Panel)
+                self.assertIn("Run: workflow-run-", threads.body)
+                self.assertIn("thread-agent-architect-", threads.body)
+                self.assertNotIn("thread-review-1", threads.body)
+
+    async def test_thread_navigation_uses_selected_workflow_run_threads(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                await app.action_start_selected_workflow()
+
+                first_thread_id = app.selected_thread_id
+                app.action_next_thread()
+                second_thread_id = app.selected_thread_id
+
+                self.assertNotEqual(first_thread_id, second_thread_id)
+                self.assertNotEqual(second_thread_id, runtime.main_thread_id)
+                self.assertIn(second_thread_id, app.query_one("#selected-thread", Panel).body)
+
     async def test_switching_workflow_runs_updates_artifacts_panel(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel

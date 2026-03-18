@@ -977,6 +977,32 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("workflow_completed", [event.kind for event in events])
             self.assertNotIn("unrelated_event", [event.kind for event in events])
 
+    def test_runtime_can_list_threads_for_workflow_run(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="standard-build",
+                created_at=1_710_755_200,
+            )
+            runtime.create_thread(
+                thread_id="thread-review-1",
+                kind="review",
+                created_at=1_710_755_210,
+                summary="Unrelated review",
+            )
+
+            related_threads = runtime.list_threads_for_workflow_run(workflow_run.id)
+
+            self.assertEqual([thread.id for thread in related_threads], [thread.id for thread in threads])
+
     async def test_runtime_can_request_workflow_fix_cycle(self) -> None:
         from ergon_studio.runtime import load_runtime
 

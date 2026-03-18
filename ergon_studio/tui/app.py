@@ -201,6 +201,25 @@ class ErgonStudioApp(App[None]):
         yield Footer()
 
     def _render_threads_body(self) -> str:
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                threads = self.runtime.list_threads_for_workflow_run(self.selected_workflow_run_id)
+                lines = [
+                    (
+                        f"Run: {run_view.workflow_run.id} "
+                        f"[{run_view.workflow_run.state}] {run_view.workflow_run.workflow_id}"
+                    )
+                ]
+                if not threads:
+                    lines.append("No threads for selected run.")
+                    return "\n".join(lines)
+                lines.extend(
+                    f"{'> ' if thread.id == self.selected_thread_id else '  '}{thread.id} ({self._thread_label(thread)})"
+                    for thread in threads
+                )
+                return "\n".join(lines)
+
         threads = self.runtime.list_threads()
         if not threads:
             return "No threads yet."
@@ -551,7 +570,7 @@ class ErgonStudioApp(App[None]):
         )
 
     def _cycle_thread(self, direction: int) -> None:
-        threads = self.runtime.list_threads()
+        threads = self._visible_threads()
         if not threads:
             return
 
@@ -691,6 +710,7 @@ class ErgonStudioApp(App[None]):
 
     def _refresh_panels(self) -> None:
         self._normalize_selected_approval()
+        self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
         self.query_one("#workflow-runs", Panel).set_body(self._render_workflow_runs_body())
@@ -715,3 +735,18 @@ class ErgonStudioApp(App[None]):
             return
         if self.selected_approval_id not in approval_ids:
             self.selected_approval_id = approval_ids[0]
+
+    def _normalize_selected_thread(self) -> None:
+        thread_ids = [thread.id for thread in self._visible_threads()]
+        if not thread_ids:
+            self.selected_thread_id = self.runtime.main_thread_id
+            return
+        if self.selected_thread_id not in thread_ids:
+            self.selected_thread_id = thread_ids[0]
+
+    def _visible_threads(self):
+        if self.selected_workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
+            if run_view is not None:
+                return self.runtime.list_threads_for_workflow_run(self.selected_workflow_run_id)
+        return self.runtime.list_threads()

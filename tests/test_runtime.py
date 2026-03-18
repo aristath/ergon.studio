@@ -804,6 +804,14 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "Workflow complete: single-agent-execution",
                 runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]),
             )
+            artifacts = runtime.list_artifacts()
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(artifacts[0].kind, "workflow-report")
+            self.assertEqual(artifacts[0].task_id, completed_run.root_task_id)
+            self.assertIn(
+                "coder done.",
+                artifacts[0].file_path.read_text(encoding="utf-8"),
+            )
 
     async def test_runtime_can_request_workflow_fix_cycle(self) -> None:
         from ergon_studio.runtime import load_runtime

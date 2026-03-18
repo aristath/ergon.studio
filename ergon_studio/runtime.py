@@ -552,6 +552,39 @@ class RuntimeContext:
             created_at=created_at,
         )
 
+    def _create_workflow_completion_artifact(
+        self,
+        *,
+        workflow_run: WorkflowRunRecord,
+        thread: ThreadRecord,
+        created_at: int,
+    ) -> ArtifactRecord:
+        final_output = self._latest_agent_message_body(thread.id) or "No final output captured."
+        lines = [
+            f"# Workflow Report: {workflow_run.workflow_id}",
+            "",
+            f"- Run ID: {workflow_run.id}",
+            f"- Status: {workflow_run.state}",
+        ]
+        if thread.assigned_agent_id is not None:
+            lines.append(f"- Final Agent: {thread.assigned_agent_id}")
+        lines.extend(
+            [
+                "",
+                "## Final Output",
+                final_output,
+            ]
+        )
+        return self.create_artifact(
+            artifact_id=f"artifact-{uuid4().hex[:8]}",
+            kind="workflow-report",
+            title=f"Workflow Report: {workflow_run.workflow_id}",
+            content="\n".join(lines),
+            created_at=created_at,
+            thread_id=thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+
     def create_task(
         self,
         *,
@@ -782,15 +815,20 @@ class RuntimeContext:
                     state="completed",
                     updated_at=created_at + 2,
                 )
-            self._append_workflow_completion_summary(
+            self._create_workflow_completion_artifact(
                 workflow_run=updated,
                 thread=thread,
                 created_at=created_at + 2,
             )
+            self._append_workflow_completion_summary(
+                workflow_run=updated,
+                thread=thread,
+                created_at=created_at + 3,
+            )
             self.append_event(
                 kind="workflow_completed",
                 summary=f"Completed workflow {workflow_run.workflow_id}",
-                created_at=created_at + 3,
+                created_at=created_at + 4,
                 task_id=workflow_run.root_task_id,
             )
         return updated, thread, reply

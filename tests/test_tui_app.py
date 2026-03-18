@@ -425,8 +425,11 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     await app.action_start_selected_workflow()
 
                     main_chat = app.query_one("#main-chat", Panel)
+                    artifacts = app.query_one("#artifacts", Panel)
                     self.assertIn("Workflow complete: single-agent-execution", main_chat.body)
                     self.assertIn("Final output from coder:", main_chat.body)
+                    self.assertIn("workflow-report", artifacts.body)
+                    self.assertIn("Workflow Report: single-agent-execution", artifacts.body)
 
     async def test_app_can_request_fix_cycle_for_selected_workflow_run(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

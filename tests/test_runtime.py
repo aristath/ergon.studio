@@ -3,6 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from agent_framework import AgentSession
 
 from ergon_studio.config import save_global_config
 
@@ -32,6 +36,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_approvals(), [])
             self.assertEqual(runtime.list_memory_facts(), [])
             self.assertEqual(runtime.list_artifacts(), [])
+            self.assertIsNotNone(runtime.agent_session_store)
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -267,3 +272,86 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual([artifact.id for artifact in artifacts], ["artifact-1"])
             self.assertEqual(artifacts[0].title, "Architecture Notes")
+
+
+class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_can_send_user_message_and_persist_orchestrator_session(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+                self.created_session_ids: list[str] = []
+                self.seen_session_ids: list[str] = []
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                self.created_session_ids.append(session_id or "")
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                self.seen_session_ids.append(session.session_id if session is not None else "")
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            first_agent = FakeAgent("I can take this on.")
+            with patch.object(type(runtime), "build_agent", return_value=first_agent):
+                await runtime.send_user_message_to_orchestrator(
+                    body="Build the next slice.",
+                    created_at=1_710_755_200,
+                )
+
+            session_path = runtime.paths.sessions_dir / "thread-main" / "orchestrator.json"
+            self.assertTrue(session_path.exists())
+            self.assertEqual(first_agent.created_session_ids, ["thread-main:orchestrator"])
+            self.assertEqual(first_agent.seen_session_ids, ["thread-main:orchestrator"])
+            self.assertEqual(
+                [message.sender for message in runtime.list_main_messages()],
+                ["user", "orchestrator"],
+            )
+
+            reloaded_runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            second_agent = FakeAgent("Continuing from the same thread.")
+            with patch.object(type(reloaded_runtime), "build_agent", return_value=second_agent):
+                await reloaded_runtime.send_user_message_to_orchestrator(
+                    body="Keep going.",
+                    created_at=1_710_755_210,
+                )
+
+            self.assertEqual(second_agent.created_session_ids, [])
+            self.assertEqual(second_agent.seen_session_ids, ["thread-main:orchestrator"])
+            self.assertEqual(
+                [message.sender for message in reloaded_runtime.list_main_messages()],
+                ["user", "orchestrator", "user", "orchestrator"],
+            )
+
+    async def test_runtime_logs_unavailable_orchestrator_without_crashing(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            user_message, orchestrator_message = await runtime.send_user_message_to_orchestrator(
+                body="Ship it.",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(user_message.sender, "user")
+            self.assertIsNone(orchestrator_message)
+            self.assertEqual(len(runtime.list_main_messages()), 1)
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["message_created", "agent_unavailable"],
+            )

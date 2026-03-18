@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from agent_framework import Message
+
+from ergon_studio.agent_session_store import AgentSessionStore
 from ergon_studio.approval_store import ApprovalStore
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.artifact_store import ArtifactStore
@@ -27,6 +30,7 @@ class RuntimeContext:
     paths: StudioPaths
     registry: RuntimeRegistry
     tool_registry: dict[str, object]
+    agent_session_store: AgentSessionStore
     conversation_store: ConversationStore
     task_store: TaskStore
     event_store: EventStore
@@ -38,6 +42,13 @@ class RuntimeContext:
 
     def build_agent(self, agent_id: str):
         return build_agent(self.registry, agent_id, tool_registry=self.tool_registry)
+
+    def can_build_agent(self, agent_id: str) -> bool:
+        try:
+            self.build_agent(agent_id)
+        except (KeyError, ValueError):
+            return False
+        return True
 
     def list_threads(self) -> list[ThreadRecord]:
         return self.conversation_store.list_threads(self.main_session_id)
@@ -119,6 +130,80 @@ class RuntimeContext:
             body=body,
             created_at=created_at,
         )
+
+    async def send_user_message_to_orchestrator(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> tuple[MessageRecord, MessageRecord | None]:
+        user_message = self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="user",
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+
+        try:
+            agent = self.build_agent("orchestrator")
+        except (KeyError, ValueError) as exc:
+            self.append_event(
+                kind="agent_unavailable",
+                summary=f"Orchestrator unavailable: {exc}",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+            return user_message, None
+
+        session = self.agent_session_store.load_or_create_session(
+            thread_id=self.main_thread_id,
+            agent_id="orchestrator",
+            session_factory=lambda session_id: agent.create_session(session_id=session_id),
+        )
+
+        try:
+            response = await agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=body,
+                        author_name="user",
+                    )
+                ],
+                session=session,
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="agent_failed",
+                summary=f"Orchestrator run failed: {type(exc).__name__}: {exc}",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+            self.agent_session_store.save_session(
+                thread_id=self.main_thread_id,
+                agent_id="orchestrator",
+                session=session,
+            )
+            return user_message, None
+
+        self.agent_session_store.save_session(
+            thread_id=self.main_thread_id,
+            agent_id="orchestrator",
+            session=session,
+        )
+        response_text = response.text.strip()
+        if not response_text:
+            return user_message, None
+
+        reply_message = self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="orchestrator",
+            kind="chat",
+            body=response_text,
+            created_at=created_at + 1,
+        )
+        return user_message, reply_message
 
     def append_message_to_thread(
         self,
@@ -285,6 +370,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
     registry = load_registry(paths)
     tool_registry = build_workspace_tool_registry(paths.project_root)
+    agent_session_store = AgentSessionStore(paths)
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
     event_store = EventStore(paths)
@@ -295,6 +381,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         paths=paths,
         registry=registry,
         tool_registry=tool_registry,
+        agent_session_store=agent_session_store,
         conversation_store=conversation_store,
         task_store=task_store,
         event_store=event_store,

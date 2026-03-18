@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from uuid import uuid4
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -215,25 +214,22 @@ class ErgonStudioApp(App[None]):
             f"Workflows: {workflow_text}"
         )
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
         message_body = event.value.strip()
         if not message_body:
             event.input.value = ""
             return
 
-        self.runtime.append_message_to_main_thread(
-            message_id=f"message-{uuid4().hex}",
-            sender="user",
-            kind="chat",
-            body=message_body,
-            created_at=int(time.time()),
-        )
-        self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
-        self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
-        self.query_one("#threads", Panel).set_body(self._render_threads_body())
-        self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
-        self.query_one("#activity", Panel).set_body(self._render_activity_body())
-        event.input.value = ""
+        event.input.disabled = True
+        try:
+            await self.runtime.send_user_message_to_orchestrator(
+                body=message_body,
+                created_at=int(time.time()),
+            )
+            self._refresh_panels()
+            event.input.value = ""
+        finally:
+            event.input.disabled = False
 
     def action_next_thread(self) -> None:
         self._cycle_thread(1)
@@ -255,3 +251,13 @@ class ErgonStudioApp(App[None]):
         self.selected_thread_id = thread_ids[(current_index + direction) % len(thread_ids)]
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+
+    def _refresh_panels(self) -> None:
+        self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
+        self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        self.query_one("#activity", Panel).set_body(self._render_activity_body())
+        self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
+        self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+        self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
+        self.query_one("#approvals", Panel).set_body(self._render_approvals_body())
+        self.query_one("#memory", Panel).set_body(self._render_memory_body())

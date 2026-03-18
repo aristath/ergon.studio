@@ -3,6 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from agent_framework import AgentSession
 
 from ergon_studio.runtime import load_runtime
 
@@ -257,3 +261,35 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Ship the next slice.", main_chat.body)
                 self.assertIn("message_created", activity.body)
                 self.assertEqual(len(runtime.list_main_messages()), 1)
+
+    async def test_submitting_input_can_render_an_orchestrator_reply(self) -> None:
+        from textual.widgets import Input
+
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text="I’m on it.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                async with app.run_test() as pilot:
+                    composer = app.query_one("#composer-input", Input)
+                    composer.value = "Ship the next slice."
+                    await pilot.press("enter")
+
+                    main_chat = app.query_one("#main-chat", Panel)
+                    self.assertIn("Ship the next slice.", main_chat.body)
+                    self.assertIn("I’m on it.", main_chat.body)

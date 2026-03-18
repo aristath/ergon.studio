@@ -85,6 +85,9 @@ class ErgonStudioApp(App[None]):
         ("ctrl+n", "next_agent", "Next Agent"),
         ("ctrl+p", "previous_agent", "Previous Agent"),
         ("ctrl+t", "edit_selected_agent_definition", "Edit Agent"),
+        ("f7", "previous_workflow", "Previous Workflow"),
+        ("f8", "next_workflow", "Next Workflow"),
+        ("f9", "edit_selected_workflow_definition", "Edit Workflow"),
         ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
@@ -139,12 +142,14 @@ class ErgonStudioApp(App[None]):
         self.runtime = runtime
         self.selected_thread_id = runtime.main_thread_id
         self.selected_agent_id = "orchestrator"
+        self.selected_workflow_id = "standard-build"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="workspace"):
             with Vertical(id="left-sidebar"):
                 yield Panel("Tasks", self._render_tasks_body(), panel_id="tasks", classes="panel")
+                yield Panel("Workflows", self._render_workflows_body(), panel_id="workflows", classes="panel")
                 yield Panel("Threads", self._render_threads_body(), panel_id="threads", classes="panel")
                 yield Panel("Activity", self._render_activity_body(), panel_id="activity", classes="panel")
             with Vertical(id="center-column"):
@@ -274,7 +279,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: Ctrl+N/P team, Ctrl+T agent, Ctrl+G config\n"
+            "Shortcuts: Ctrl+N/P team, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -287,6 +292,15 @@ class ErgonStudioApp(App[None]):
         return "\n".join(
             f"{'> ' if agent_id == self.selected_agent_id else '  '}{agent_id} [{self.runtime.agent_status_summary(agent_id)}]"
             for agent_id in agent_ids
+        )
+
+    def _render_workflows_body(self) -> str:
+        workflow_ids = self.runtime.list_workflow_ids()
+        if not workflow_ids:
+            return "No workflows defined."
+        return "\n".join(
+            f"{'> ' if workflow_id == self.selected_workflow_id else '  '}{workflow_id}"
+            for workflow_id in workflow_ids
         )
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -320,6 +334,15 @@ class ErgonStudioApp(App[None]):
 
     def action_edit_selected_agent_definition(self) -> None:
         self._open_agent_definition_editor(self.selected_agent_id)
+
+    def action_next_workflow(self) -> None:
+        self._cycle_workflow(1)
+
+    def action_previous_workflow(self) -> None:
+        self._cycle_workflow(-1)
+
+    def action_edit_selected_workflow_definition(self) -> None:
+        self._open_workflow_definition_editor(self.selected_workflow_id)
 
     def action_edit_orchestrator_definition(self) -> None:
         self._open_agent_definition_editor("orchestrator")
@@ -363,6 +386,19 @@ class ErgonStudioApp(App[None]):
         self.selected_agent_id = agent_ids[(current_index + direction) % len(agent_ids)]
         self.query_one("#team", Panel).set_body(self._render_team_body())
 
+    def _cycle_workflow(self, direction: int) -> None:
+        workflow_ids = self.runtime.list_workflow_ids()
+        if not workflow_ids:
+            return
+
+        try:
+            current_index = workflow_ids.index(self.selected_workflow_id)
+        except ValueError:
+            current_index = 0
+
+        self.selected_workflow_id = workflow_ids[(current_index + direction) % len(workflow_ids)]
+        self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
+
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
         self.push_screen(
@@ -370,6 +406,16 @@ class ErgonStudioApp(App[None]):
                 title=f"Edit Agent Definition: {agent_id}",
                 initial_text=initial_text,
                 on_save=lambda text: self._save_agent_definition(agent_id, text),
+            )
+        )
+
+    def _open_workflow_definition_editor(self, workflow_id: str) -> None:
+        initial_text = self.runtime.read_workflow_definition_text(workflow_id)
+        self.push_screen(
+            DefinitionEditorScreen(
+                title=f"Edit Workflow Definition: {workflow_id}",
+                initial_text=initial_text,
+                on_save=lambda text: self._save_workflow_definition(workflow_id, text),
             )
         )
 
@@ -385,6 +431,15 @@ class ErgonStudioApp(App[None]):
         self.selected_agent_id = agent_id
         self._refresh_panels()
 
+    def _save_workflow_definition(self, workflow_id: str, text: str) -> None:
+        self.runtime.save_workflow_definition_text(
+            workflow_id=workflow_id,
+            text=text,
+            created_at=int(time.time()),
+        )
+        self.selected_workflow_id = workflow_id
+        self._refresh_panels()
+
     def _save_global_config(self, text: str) -> None:
         self.runtime.save_global_config_text(
             text=text,
@@ -394,6 +449,7 @@ class ErgonStudioApp(App[None]):
 
     def _refresh_panels(self) -> None:
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
+        self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#team", Panel).set_body(self._render_team_body())
         self.query_one("#activity", Panel).set_body(self._render_activity_body())

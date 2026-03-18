@@ -184,6 +184,44 @@ Be extremely concise.
                 ["config_saved"],
             )
 
+    def test_runtime_can_save_workflow_definition_text_and_reload_registry(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            runtime.save_workflow_definition_text(
+                workflow_id="standard-build",
+                text="""---
+id: standard-build
+name: Standard Build
+kind: workflow
+orchestration: sequential
+---
+## Purpose
+Ship standard implementation work.
+
+## Exit Conditions
+Return reviewed code and a clear summary.
+""",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(
+                runtime.registry.workflow_definitions["standard-build"].sections["Exit Conditions"],
+                "Return reviewed code and a clear summary.",
+            )
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["definition_saved"],
+            )
+
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime
 

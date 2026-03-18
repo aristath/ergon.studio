@@ -29,6 +29,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(app.title, "ergon.studio")
                 self.assertIsNotNone(app.query_one("#main-chat"))
                 self.assertIsNotNone(app.query_one("#tasks"))
+                self.assertIsNotNone(app.query_one("#workflows"))
                 self.assertIsNotNone(app.query_one("#threads"))
                 self.assertIsNotNone(app.query_one("#activity"))
                 self.assertIsNotNone(app.query_one("#artifacts"))
@@ -38,6 +39,7 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#settings"))
                 self.assertIn("thread-main", app.query_one("#threads", Panel).body)
                 self.assertIn("> orchestrator", app.query_one("#team", Panel).body)
+                self.assertIn("> standard-build", app.query_one("#workflows", Panel).body)
                 self.assertIn("No tasks yet.", app.query_one("#tasks", Panel).body)
                 self.assertIn("No activity yet.", app.query_one("#activity", Panel).body)
                 self.assertIn("No approvals pending.", app.query_one("#approvals", Panel).body)
@@ -220,6 +222,27 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 app.action_next_agent()
 
                 self.assertIn("> researcher", team.body)
+
+    async def test_app_can_switch_selected_workflow(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test():
+                workflows = app.query_one("#workflows", Panel)
+                self.assertIn("> standard-build", workflows.body)
+
+                app.action_next_workflow()
+
+                self.assertIn("> test-driven-repair", workflows.body)
 
     async def test_app_can_switch_selected_thread_view(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
@@ -461,3 +484,51 @@ Be concise and structural.
                 activity = app.query_one("#activity", Panel)
                 self.assertIn("Orchestrator: ready via local (qwen2.5-coder)", settings.body)
                 self.assertIn("config_saved", activity.body)
+
+    async def test_app_can_edit_selected_workflow_definition(self) -> None:
+        from textual.widgets import TextArea
+
+        from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_workflow_id = "standard-build"
+
+            async with app.run_test() as pilot:
+                app.action_edit_selected_workflow_definition()
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, DefinitionEditorScreen)
+                editor = app.screen.query_one("#definition-editor", TextArea)
+                editor.load_text(
+                    """---
+id: standard-build
+name: Standard Build
+kind: workflow
+orchestration: sequential
+---
+## Purpose
+Ship standard implementation work.
+
+## Exit Conditions
+Return reviewed code and a clear summary.
+"""
+                )
+                app.screen.action_save()
+                await pilot.pause()
+
+                workflows = app.query_one("#workflows", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("> standard-build", workflows.body)
+                self.assertIn("definition_saved", activity.body)
+                self.assertEqual(
+                    runtime.registry.workflow_definitions["standard-build"].sections["Exit Conditions"],
+                    "Return reviewed code and a clear summary.",
+                )

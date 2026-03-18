@@ -83,6 +83,10 @@ class RuntimeContext:
         definition = self.registry.agent_definitions[agent_id]
         return definition.path.read_text(encoding="utf-8")
 
+    def read_workflow_definition_text(self, workflow_id: str) -> str:
+        definition = self.registry.workflow_definitions[workflow_id]
+        return definition.path.read_text(encoding="utf-8")
+
     def read_global_config_text(self) -> str:
         return self.paths.config_path.read_text(encoding="utf-8")
 
@@ -95,6 +99,25 @@ class RuntimeContext:
         self.append_event(
             kind="definition_saved",
             summary=f"Saved agent definition {agent_id}",
+            created_at=created_at,
+        )
+        return saved
+
+    def save_workflow_definition_text(
+        self,
+        *,
+        workflow_id: str,
+        text: str,
+        created_at: int | None = None,
+    ) -> DefinitionDocument:
+        definition = self.registry.workflow_definitions[workflow_id]
+        saved = save_definition_text(definition.path, text)
+        self.reload_registry()
+        if created_at is None:
+            created_at = int(time.time())
+        self.append_event(
+            kind="definition_saved",
+            summary=f"Saved workflow definition {workflow_id}",
             created_at=created_at,
         )
         return saved

@@ -340,3 +340,50 @@ Be extremely concise.
                     runtime.registry.agent_definitions["orchestrator"].sections["Output Style"],
                     "Be extremely concise.",
                 )
+
+    async def test_app_can_edit_global_config(self) -> None:
+        from textual.widgets import TextArea
+
+        from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test() as pilot:
+                app.action_edit_global_config()
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, DefinitionEditorScreen)
+                editor = app.screen.query_one("#definition-editor", TextArea)
+                editor.load_text(
+                    """{
+  "providers": {
+    "local": {
+      "type": "openai_chat",
+      "base_url": "http://localhost:8080/v1",
+      "api_key": "not-needed",
+      "model": "qwen2.5-coder"
+    }
+  },
+  "role_assignments": {
+    "orchestrator": "local"
+  },
+  "approvals": {},
+  "ui": {}
+}
+"""
+                )
+                app.screen.action_save()
+                await pilot.pause()
+
+                settings = app.query_one("#settings", Panel)
+                activity = app.query_one("#activity", Panel)
+                self.assertIn("Orchestrator: ready via local (qwen2.5-coder)", settings.body)
+                self.assertIn("config_saved", activity.body)

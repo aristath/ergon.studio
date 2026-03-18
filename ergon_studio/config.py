@@ -19,10 +19,7 @@ def load_or_create_global_config(config_path: Path) -> dict[str, Any]:
         save_global_config(config_path, DEFAULT_GLOBAL_CONFIG)
         return deepcopy(DEFAULT_GLOBAL_CONFIG)
 
-    loaded = json.loads(config_path.read_text(encoding="utf-8"))
-    if not isinstance(loaded, dict):
-        raise ValueError("config.json must contain a JSON object")
-    return loaded
+    return parse_global_config_text(config_path.read_text(encoding="utf-8"))
 
 
 def save_global_config(config_path: Path, config: dict[str, Any]) -> None:
@@ -31,3 +28,16 @@ def save_global_config(config_path: Path, config: dict[str, Any]) -> None:
         json.dumps(config, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def save_global_config_text(config_path: Path, text: str) -> dict[str, Any]:
+    config = parse_global_config_text(text)
+    save_global_config(config_path, config)
+    return config
+
+
+def parse_global_config_text(text: str) -> dict[str, Any]:
+    loaded = json.loads(text)
+    if not isinstance(loaded, dict):
+        raise ValueError("config.json must contain a JSON object")
+    return loaded

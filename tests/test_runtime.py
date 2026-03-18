@@ -147,6 +147,43 @@ Be extremely concise.
                 ["definition_saved"],
             )
 
+    def test_runtime_can_save_global_config_text_and_reload_registry(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.save_global_config_text(
+                text="""{
+  "providers": {
+    "local": {
+      "type": "openai_chat",
+      "base_url": "http://localhost:8080/v1",
+      "api_key": "not-needed",
+      "model": "qwen2.5-coder"
+    }
+  },
+  "role_assignments": {
+    "orchestrator": "local"
+  },
+  "approvals": {},
+  "ui": {}
+}
+""",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(runtime.agent_status_summary("orchestrator"), "ready via local (qwen2.5-coder)")
+            self.assertEqual(
+                [event.kind for event in runtime.list_events()],
+                ["config_saved"],
+            )
+
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime
 

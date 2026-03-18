@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import time
+from pathlib import Path
 from uuid import uuid4
 
 from agent_framework import Message
@@ -12,12 +12,13 @@ from ergon_studio.approval_store import ApprovalStore
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.artifact_store import ArtifactStore
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.config import save_global_config_text
 from ergon_studio.conversation_store import ConversationStore
+from ergon_studio.definitions import DefinitionDocument, save_definition_text
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.definitions import DefinitionDocument, save_definition_text
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_registry import build_workspace_tool_registry
@@ -82,6 +83,9 @@ class RuntimeContext:
         definition = self.registry.agent_definitions[agent_id]
         return definition.path.read_text(encoding="utf-8")
 
+    def read_global_config_text(self) -> str:
+        return self.paths.config_path.read_text(encoding="utf-8")
+
     def save_agent_definition_text(self, *, agent_id: str, text: str, created_at: int | None = None) -> DefinitionDocument:
         definition = self.registry.agent_definitions[agent_id]
         saved = save_definition_text(definition.path, text)
@@ -91,6 +95,18 @@ class RuntimeContext:
         self.append_event(
             kind="definition_saved",
             summary=f"Saved agent definition {agent_id}",
+            created_at=created_at,
+        )
+        return saved
+
+    def save_global_config_text(self, *, text: str, created_at: int | None = None) -> dict[str, object]:
+        saved = save_global_config_text(self.paths.config_path, text)
+        self.reload_registry()
+        if created_at is None:
+            created_at = int(time.time())
+        self.append_event(
+            kind="config_saved",
+            summary="Saved global config",
             created_at=created_at,
         )
         return saved

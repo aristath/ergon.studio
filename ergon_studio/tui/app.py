@@ -50,16 +50,17 @@ class DefinitionEditorScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(self, *, title: str, initial_text: str, on_save) -> None:
+    def __init__(self, *, title: str, initial_text: str, on_save, language: str = "markdown") -> None:
         super().__init__()
         self.title = title
         self.initial_text = initial_text
         self.on_save = on_save
+        self.language = language
 
     def compose(self) -> ComposeResult:
         with Vertical(id="definition-editor-container"):
             yield Static(f"[b]{self.title}[/b]\n`Ctrl+S` to save, `Esc` to cancel.")
-            yield TextArea(self.initial_text, id="definition-editor", language="markdown")
+            yield TextArea(self.initial_text, id="definition-editor", language=self.language)
             yield Static("", id="definition-error")
 
     def action_cancel(self) -> None:
@@ -81,6 +82,7 @@ class ErgonStudioApp(App[None]):
     BINDINGS = [
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
+        ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
     ]
     CSS = """
@@ -267,6 +269,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
+            "Shortcuts: Ctrl+G config, Ctrl+E orchestrator\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -305,6 +308,17 @@ class ErgonStudioApp(App[None]):
             )
         )
 
+    def action_edit_global_config(self) -> None:
+        initial_text = self.runtime.read_global_config_text()
+        self.push_screen(
+            DefinitionEditorScreen(
+                title="Edit Global Config",
+                initial_text=initial_text,
+                on_save=self._save_global_config,
+                language="json",
+            )
+        )
+
     def _cycle_thread(self, direction: int) -> None:
         threads = self.runtime.list_threads()
         if not threads:
@@ -323,6 +337,13 @@ class ErgonStudioApp(App[None]):
     def _save_orchestrator_definition(self, text: str) -> None:
         self.runtime.save_agent_definition_text(
             agent_id="orchestrator",
+            text=text,
+            created_at=int(time.time()),
+        )
+        self._refresh_panels()
+
+    def _save_global_config(self, text: str) -> None:
+        self.runtime.save_global_config_text(
             text=text,
             created_at=int(time.time()),
         )

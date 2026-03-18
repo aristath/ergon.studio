@@ -58,3 +58,27 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 threads = app.query_one("#threads", Panel)
                 self.assertIn("Hello from the persisted main thread.", main_chat.body)
                 self.assertIn("thread-main", threads.body)
+
+    async def test_submitting_input_persists_a_user_message(self) -> None:
+        from textual.widgets import Input
+
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+
+            async with app.run_test() as pilot:
+                composer = app.query_one("#composer-input", Input)
+                composer.value = "Ship the next slice."
+                await pilot.press("enter")
+
+                main_chat = app.query_one("#main-chat", Panel)
+                self.assertIn("Ship the next slice.", main_chat.body)
+                self.assertEqual(len(runtime.list_main_messages()), 1)

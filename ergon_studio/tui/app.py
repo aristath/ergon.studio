@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+from uuid import uuid4
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Input, Static
 
 from ergon_studio.runtime import RuntimeContext
 
@@ -63,6 +66,11 @@ class ErgonStudioApp(App[None]):
     #activity {
       height: 1fr;
     }
+
+    #composer-input {
+      dock: bottom;
+      margin: 0 1 1 0;
+    }
     """
 
     def __init__(self, runtime: RuntimeContext) -> None:
@@ -101,6 +109,7 @@ class ErgonStudioApp(App[None]):
                     panel_id="settings",
                     classes="panel",
                 )
+        yield Input(placeholder="Message the orchestrator...", id="composer-input")
         yield Footer()
 
     def _render_threads_body(self) -> str:
@@ -126,3 +135,20 @@ class ErgonStudioApp(App[None]):
             body = self.runtime.conversation_store.read_message_body(message).rstrip("\n")
             rendered_messages.append(f"[{message.sender}] {body}")
         return "\n\n".join(rendered_messages)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        message_body = event.value.strip()
+        if not message_body:
+            event.input.value = ""
+            return
+
+        self.runtime.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="user",
+            kind="chat",
+            body=message_body,
+            created_at=int(time.time()),
+        )
+        self.query_one("#main-chat", Panel).set_body(self._render_main_chat_body())
+        self.query_one("#threads", Panel).set_body(self._render_threads_body())
+        event.input.value = ""

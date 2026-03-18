@@ -45,6 +45,7 @@ class MetadataStoreTests(unittest.TestCase):
                 kind="main",
                 created_at=1_710_755_200,
                 updated_at=1_710_755_260,
+                assigned_agent_id="orchestrator",
                 summary="Main thread",
             )
             task = TaskRecord(
@@ -92,6 +93,7 @@ class MetadataStoreTests(unittest.TestCase):
                 kind="main",
                 created_at=1,
                 updated_at=1,
+                assigned_agent_id=None,
             )
             message = MessageRecord(
                 id="message-1",

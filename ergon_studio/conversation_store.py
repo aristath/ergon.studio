@@ -38,6 +38,7 @@ class ConversationStore:
         thread_id: str,
         kind: str,
         created_at: int,
+        assigned_agent_id: str | None = None,
         summary: str | None = None,
         parent_task_id: str | None = None,
         parent_thread_id: str | None = None,
@@ -50,6 +51,7 @@ class ConversationStore:
             kind=kind,
             created_at=created_at,
             updated_at=created_at,
+            assigned_agent_id=assigned_agent_id,
             summary=summary,
             parent_task_id=parent_task_id,
             parent_thread_id=parent_thread_id,
@@ -64,6 +66,7 @@ class ConversationStore:
         thread_id: str,
         kind: str,
         created_at: int | None = None,
+        assigned_agent_id: str | None = None,
         summary: str | None = None,
         parent_task_id: str | None = None,
         parent_thread_id: str | None = None,
@@ -76,10 +79,14 @@ class ConversationStore:
             thread_id=thread_id,
             kind=kind,
             created_at=created_at if created_at is not None else _now(),
+            assigned_agent_id=assigned_agent_id,
             summary=summary,
             parent_task_id=parent_task_id,
             parent_thread_id=parent_thread_id,
         )
+
+    def get_thread(self, thread_id: str) -> ThreadRecord | None:
+        return self.metadata.get_thread(thread_id)
 
     def append_message(
         self,

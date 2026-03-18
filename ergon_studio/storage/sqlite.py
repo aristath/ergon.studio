@@ -21,6 +21,7 @@ SCHEMA_STATEMENTS = (
       kind TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
+      assigned_agent_id TEXT,
       summary TEXT,
       parent_task_id TEXT,
       parent_thread_id TEXT,
@@ -109,6 +110,7 @@ def initialize_database(db_path: Path) -> None:
         connection.execute("PRAGMA foreign_keys = ON")
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        _ensure_column(connection, table_name="threads", column_name="assigned_agent_id", definition="TEXT")
         connection.commit()
 
 
@@ -146,9 +148,9 @@ class MetadataStore:
             connection.execute(
                 """
                 INSERT INTO threads (
-                  id, session_id, kind, created_at, updated_at, summary, parent_task_id, parent_thread_id
+                  id, session_id, kind, created_at, updated_at, assigned_agent_id, summary, parent_task_id, parent_thread_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -156,6 +158,7 @@ class MetadataStore:
                     record.kind,
                     record.created_at,
                     record.updated_at,
+                    record.assigned_agent_id,
                     record.summary,
                     record.parent_task_id,
                     record.parent_thread_id,
@@ -167,7 +170,7 @@ class MetadataStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, session_id, kind, created_at, updated_at, summary, parent_task_id, parent_thread_id
+                SELECT id, session_id, kind, created_at, updated_at, assigned_agent_id, summary, parent_task_id, parent_thread_id
                 FROM threads
                 WHERE id = ?
                 """,
@@ -181,16 +184,17 @@ class MetadataStore:
             kind=row[2],
             created_at=row[3],
             updated_at=row[4],
-            summary=row[5],
-            parent_task_id=row[6],
-            parent_thread_id=row[7],
+            assigned_agent_id=row[5],
+            summary=row[6],
+            parent_task_id=row[7],
+            parent_thread_id=row[8],
         )
 
     def list_threads(self, session_id: str) -> list[ThreadRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, session_id, kind, created_at, updated_at, summary, parent_task_id, parent_thread_id
+                SELECT id, session_id, kind, created_at, updated_at, assigned_agent_id, summary, parent_task_id, parent_thread_id
                 FROM threads
                 WHERE session_id = ?
                 ORDER BY created_at ASC, id ASC
@@ -204,9 +208,10 @@ class MetadataStore:
                 kind=row[2],
                 created_at=row[3],
                 updated_at=row[4],
-                summary=row[5],
-                parent_task_id=row[6],
-                parent_thread_id=row[7],
+                assigned_agent_id=row[5],
+                summary=row[6],
+                parent_task_id=row[7],
+                parent_thread_id=row[8],
             )
             for row in rows
         ]
@@ -531,3 +536,17 @@ class MetadataStore:
         connection = sqlite3.connect(self.db_path)
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    column_names = {row[1] for row in rows}
+    if column_name in column_names:
+        return
+    connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")

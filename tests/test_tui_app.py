@@ -126,6 +126,28 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("thread-review-1", threads.body)
                 self.assertIn("thread_created", activity.body)
 
+    async def test_app_can_open_selected_agent_thread(self) -> None:
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_agent_id = "architect"
+
+            async with app.run_test():
+                app.action_open_selected_agent_thread()
+
+                threads = app.query_one("#threads", Panel)
+                selected_thread = app.query_one("#selected-thread", Panel)
+                self.assertIn("agent_direct:architect", threads.body)
+                self.assertIn("No messages yet.", selected_thread.body)
+
     async def test_app_renders_pending_approvals(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
         from ergon_studio.tui.app import Panel
@@ -340,6 +362,40 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
                     main_chat = app.query_one("#main-chat", Panel)
                     self.assertIn("Ship the next slice.", main_chat.body)
                     self.assertIn("I’m on it.", main_chat.body)
+
+    async def test_submitting_input_in_agent_thread_renders_agent_reply(self) -> None:
+        from textual.widgets import Input
+
+        from ergon_studio.tui.app import ErgonStudioApp
+        from ergon_studio.tui.app import Panel
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text="Architecture outline ready.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_agent_id = "architect"
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                async with app.run_test() as pilot:
+                    app.action_open_selected_agent_thread()
+                    composer = app.query_one("#composer-input", Input)
+                    composer.value = "Design the next component."
+                    await pilot.press("enter")
+
+                    selected_thread = app.query_one("#selected-thread", Panel)
+                    self.assertIn("[orchestrator] Design the next component.", selected_thread.body)
+                    self.assertIn("[architect] Architecture outline ready.", selected_thread.body)
 
     async def test_app_can_edit_orchestrator_definition(self) -> None:
         from textual.widgets import TextArea

@@ -304,10 +304,31 @@ Return reviewed code and a clear summary.
                 [thread.id for thread in threads],
                 ["thread-main", "thread-review-1"],
             )
+            self.assertIsNone(threads[0].assigned_agent_id)
             self.assertEqual(
                 [event.kind for event in runtime.list_events()],
                 ["thread_created"],
             )
+
+    def test_runtime_can_create_agent_thread(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            thread = runtime.create_agent_thread(
+                agent_id="architect",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(thread.kind, "agent_direct")
+            self.assertEqual(thread.assigned_agent_id, "architect")
+            self.assertEqual(runtime.get_thread(thread.id), thread)
 
     def test_runtime_can_append_messages_to_additional_threads(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -504,4 +525,46 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [event.kind for event in runtime.list_events()],
                 ["message_created", "agent_unavailable"],
+            )
+
+    async def test_runtime_can_send_message_to_agent_thread(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+                self.created_session_ids: list[str] = []
+                self.seen_session_ids: list[str] = []
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                self.created_session_ids.append(session_id or "")
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                self.seen_session_ids.append(session.session_id if session is not None else "")
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            thread = runtime.create_agent_thread(agent_id="architect", created_at=1_710_755_200)
+            agent = FakeAgent("Here is the architecture sketch.")
+
+            with patch.object(type(runtime), "build_agent", return_value=agent):
+                await runtime.send_message_to_agent_thread(
+                    thread_id=thread.id,
+                    body="Design the next component.",
+                    created_at=1_710_755_201,
+                )
+
+            self.assertEqual(agent.created_session_ids, [f"{thread.id}:architect"])
+            self.assertEqual(agent.seen_session_ids, [f"{thread.id}:architect"])
+            self.assertEqual(
+                [message.sender for message in runtime.list_thread_messages(thread.id)],
+                ["orchestrator", "architect"],
             )

@@ -167,6 +167,7 @@ class RuntimeContext:
         thread_id: str,
         kind: str,
         created_at: int,
+        assigned_agent_id: str | None = None,
         summary: str | None = None,
         parent_task_id: str | None = None,
         parent_thread_id: str | None = None,
@@ -177,6 +178,7 @@ class RuntimeContext:
             thread_id=thread_id,
             kind=kind,
             created_at=created_at,
+            assigned_agent_id=assigned_agent_id,
             summary=summary,
             parent_task_id=parent_task_id,
             parent_thread_id=parent_thread_id,
@@ -189,6 +191,18 @@ class RuntimeContext:
             task_id=parent_task_id,
         )
         return thread
+
+    def create_agent_thread(self, *, agent_id: str, created_at: int) -> ThreadRecord:
+        return self.create_thread(
+            thread_id=f"thread-agent-{agent_id}-{uuid4().hex[:8]}",
+            kind="agent_direct",
+            created_at=created_at,
+            assigned_agent_id=agent_id,
+            summary=f"Direct thread with {agent_id}",
+        )
+
+    def get_thread(self, thread_id: str) -> ThreadRecord | None:
+        return self.conversation_store.get_thread(thread_id)
 
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
@@ -221,73 +235,43 @@ class RuntimeContext:
         body: str,
         created_at: int,
     ) -> tuple[MessageRecord, MessageRecord | None]:
-        user_message = self.append_message_to_main_thread(
-            message_id=f"message-{uuid4().hex}",
-            sender="user",
-            kind="chat",
+        return await self._run_agent_turn(
+            thread_id=self.main_thread_id,
+            agent_id="orchestrator",
+            prompt_sender="user",
+            reply_sender="orchestrator",
             body=body,
             created_at=created_at,
         )
 
-        try:
-            agent = self.build_agent("orchestrator")
-        except (KeyError, ValueError) as exc:
-            self.append_event(
-                kind="agent_unavailable",
-                summary=f"Orchestrator unavailable: {exc}",
-                created_at=created_at + 1,
-                thread_id=self.main_thread_id,
+    async def send_message_to_agent_thread(
+        self,
+        *,
+        thread_id: str,
+        body: str,
+        created_at: int,
+    ) -> tuple[MessageRecord, MessageRecord | None]:
+        thread = self.get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"unknown thread: {thread_id}")
+        if thread.assigned_agent_id is None:
+            note = self.append_message_to_thread(
+                thread_id=thread_id,
+                message_id=f"message-{uuid4().hex}",
+                sender="orchestrator",
+                kind="chat",
+                body=body,
+                created_at=created_at,
             )
-            return user_message, None
-
-        session = self.agent_session_store.load_or_create_session(
-            thread_id=self.main_thread_id,
-            agent_id="orchestrator",
-            session_factory=lambda session_id: agent.create_session(session_id=session_id),
+            return note, None
+        return await self._run_agent_turn(
+            thread_id=thread_id,
+            agent_id=thread.assigned_agent_id,
+            prompt_sender="orchestrator",
+            reply_sender=thread.assigned_agent_id,
+            body=body,
+            created_at=created_at,
         )
-
-        try:
-            response = await agent.run(
-                [
-                    Message(
-                        role="user",
-                        text=body,
-                        author_name="user",
-                    )
-                ],
-                session=session,
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="agent_failed",
-                summary=f"Orchestrator run failed: {type(exc).__name__}: {exc}",
-                created_at=created_at + 1,
-                thread_id=self.main_thread_id,
-            )
-            self.agent_session_store.save_session(
-                thread_id=self.main_thread_id,
-                agent_id="orchestrator",
-                session=session,
-            )
-            return user_message, None
-
-        self.agent_session_store.save_session(
-            thread_id=self.main_thread_id,
-            agent_id="orchestrator",
-            session=session,
-        )
-        response_text = response.text.strip()
-        if not response_text:
-            return user_message, None
-
-        reply_message = self.append_message_to_main_thread(
-            message_id=f"message-{uuid4().hex}",
-            sender="orchestrator",
-            kind="chat",
-            body=response_text,
-            created_at=created_at + 1,
-        )
-        return user_message, reply_message
 
     def append_message_to_thread(
         self,
@@ -315,6 +299,86 @@ class RuntimeContext:
             thread_id=thread_id,
         )
         return message
+
+    async def _run_agent_turn(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        prompt_sender: str,
+        reply_sender: str,
+        body: str,
+        created_at: int,
+    ) -> tuple[MessageRecord, MessageRecord | None]:
+        prompt_message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender=prompt_sender,
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+
+        try:
+            agent = self.build_agent(agent_id)
+        except (KeyError, ValueError) as exc:
+            self.append_event(
+                kind="agent_unavailable",
+                summary=f"{agent_id} unavailable: {exc}",
+                created_at=created_at + 1,
+                thread_id=thread_id,
+            )
+            return prompt_message, None
+
+        session = self.agent_session_store.load_or_create_session(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            session_factory=lambda session_id: agent.create_session(session_id=session_id),
+        )
+
+        try:
+            response = await agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=body,
+                        author_name=prompt_sender,
+                    )
+                ],
+                session=session,
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="agent_failed",
+                summary=f"{agent_id} run failed: {type(exc).__name__}: {exc}",
+                created_at=created_at + 1,
+                thread_id=thread_id,
+            )
+            self.agent_session_store.save_session(
+                thread_id=thread_id,
+                agent_id=agent_id,
+                session=session,
+            )
+            return prompt_message, None
+
+        self.agent_session_store.save_session(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            session=session,
+        )
+        response_text = response.text.strip()
+        if not response_text:
+            return prompt_message, None
+
+        reply_message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender=reply_sender,
+            kind="chat",
+            body=response_text,
+            created_at=created_at + 1,
+        )
+        return prompt_message, reply_message
 
     def create_task(
         self,
@@ -447,6 +511,7 @@ class RuntimeContext:
             thread_id=self.main_thread_id,
             kind="main",
             created_at=0,
+            assigned_agent_id=None,
         )
 
 

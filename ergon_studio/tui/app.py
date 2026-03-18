@@ -84,6 +84,7 @@ class ErgonStudioApp(App[None]):
         ("ctrl+k", "previous_thread", "Previous Thread"),
         ("ctrl+n", "next_agent", "Next Agent"),
         ("ctrl+p", "previous_agent", "Previous Agent"),
+        ("ctrl+a", "open_selected_agent_thread", "Open Agent Thread"),
         ("ctrl+t", "edit_selected_agent_definition", "Edit Agent"),
         ("f7", "previous_workflow", "Previous Workflow"),
         ("f8", "next_workflow", "Next Workflow"),
@@ -189,7 +190,7 @@ class ErgonStudioApp(App[None]):
         if not threads:
             return "No threads yet."
         return "\n".join(
-            f"{'> ' if thread.id == self.selected_thread_id else '  '}{thread.id} ({thread.kind})"
+            f"{'> ' if thread.id == self.selected_thread_id else '  '}{thread.id} ({self._thread_label(thread)})"
             for thread in threads
         )
 
@@ -279,7 +280,7 @@ class ErgonStudioApp(App[None]):
             f"Agents Dir: {self.runtime.paths.agents_dir}\n"
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
-            "Shortcuts: Ctrl+N/P team, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
+            "Shortcuts: Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -311,10 +312,19 @@ class ErgonStudioApp(App[None]):
 
         event.input.disabled = True
         try:
-            await self.runtime.send_user_message_to_orchestrator(
-                body=message_body,
-                created_at=int(time.time()),
-            )
+            created_at = int(time.time())
+            selected_thread = self.runtime.get_thread(self.selected_thread_id)
+            if selected_thread is not None and selected_thread.id != self.runtime.main_thread_id:
+                await self.runtime.send_message_to_agent_thread(
+                    thread_id=selected_thread.id,
+                    body=message_body,
+                    created_at=created_at,
+                )
+            else:
+                await self.runtime.send_user_message_to_orchestrator(
+                    body=message_body,
+                    created_at=created_at,
+                )
             self._refresh_panels()
             event.input.value = ""
         finally:
@@ -331,6 +341,14 @@ class ErgonStudioApp(App[None]):
 
     def action_previous_agent(self) -> None:
         self._cycle_agent(-1)
+
+    def action_open_selected_agent_thread(self) -> None:
+        thread = self.runtime.create_agent_thread(
+            agent_id=self.selected_agent_id,
+            created_at=int(time.time()),
+        )
+        self.selected_thread_id = thread.id
+        self._refresh_panels()
 
     def action_edit_selected_agent_definition(self) -> None:
         self._open_agent_definition_editor(self.selected_agent_id)
@@ -372,6 +390,12 @@ class ErgonStudioApp(App[None]):
         self.selected_thread_id = thread_ids[(current_index + direction) % len(thread_ids)]
         self.query_one("#threads", Panel).set_body(self._render_threads_body())
         self.query_one("#selected-thread", Panel).set_body(self._render_selected_thread_body())
+
+    @staticmethod
+    def _thread_label(thread) -> str:
+        if getattr(thread, "assigned_agent_id", None):
+            return f"{thread.kind}:{thread.assigned_agent_id}"
+        return thread.kind
 
     def _cycle_agent(self, direction: int) -> None:
         agent_ids = self.runtime.list_agent_ids()

@@ -30,6 +30,7 @@ class ConversationStoreTests(unittest.TestCase):
                 thread_id="thread-1",
                 kind="main",
                 created_at=1_710_755_201,
+                assigned_agent_id="orchestrator",
             )
             message = store.append_message(
                 thread_id=thread.id,
@@ -41,6 +42,7 @@ class ConversationStoreTests(unittest.TestCase):
             )
 
             self.assertEqual(message.id, "message-1")
+            self.assertEqual(thread.assigned_agent_id, "orchestrator")
             self.assertTrue(message.body_path.exists())
             self.assertEqual(
                 message.body_path.read_text(encoding="utf-8"),

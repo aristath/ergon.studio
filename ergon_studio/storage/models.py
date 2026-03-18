@@ -28,6 +28,7 @@ class ThreadRecord:
     kind: str
     created_at: int
     updated_at: int
+    assigned_agent_id: str | None = None
     summary: str | None = None
     parent_task_id: str | None = None
     parent_thread_id: str | None = None

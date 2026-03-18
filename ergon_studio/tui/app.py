@@ -90,6 +90,8 @@ class ErgonStudioApp(App[None]):
         ("f10", "request_fix_cycle_for_selected_workflow_run", "Request Fix Cycle"),
         ("ctrl+j", "next_thread", "Next Thread"),
         ("ctrl+k", "previous_thread", "Previous Thread"),
+        ("alt+n", "next_memory_fact", "Next Memory"),
+        ("alt+p", "previous_memory_fact", "Previous Memory"),
         ("ctrl+n", "next_agent", "Next Agent"),
         ("ctrl+p", "previous_agent", "Previous Agent"),
         ("ctrl+a", "open_selected_agent_thread", "Open Agent Thread"),
@@ -159,9 +161,11 @@ class ErgonStudioApp(App[None]):
         self.selected_workflow_run_id: str | None = None
         self.selected_approval_id: str | None = None
         self.selected_artifact_id: str | None = None
+        self.selected_memory_fact_id: str | None = None
         self._time_cursor = int(time.time())
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
+        self._normalize_selected_memory_fact()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -350,10 +354,7 @@ class ErgonStudioApp(App[None]):
         facts = self.runtime.list_memory_facts()
         if not facts:
             return "No memory facts yet."
-        return "\n".join(
-            f"{fact.id} [{fact.kind}] {fact.content}"
-            for fact in facts[-8:]
-        )
+        return "\n".join(self._memory_lines(facts) + self._memory_preview_lines(facts))
 
     def _render_artifacts_body(self) -> str:
         artifacts = self._visible_artifacts()
@@ -395,6 +396,7 @@ class ErgonStudioApp(App[None]):
             "Shortcuts: F3/F4 runs, F5 start workflow, F6 advance workflow, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
             "Artifacts: F11/F12 select\n"
+            "Memory: Alt+N / Alt+P select\n"
             f"Providers: {provider_text}\n"
             f"Agents: {agent_text}\n"
             f"Workflows: {workflow_text}"
@@ -521,6 +523,12 @@ class ErgonStudioApp(App[None]):
 
     def action_previous_agent(self) -> None:
         self._cycle_agent(-1)
+
+    def action_next_memory_fact(self) -> None:
+        self._cycle_memory_fact(1)
+
+    def action_previous_memory_fact(self) -> None:
+        self._cycle_memory_fact(-1)
 
     def action_open_selected_agent_thread(self) -> None:
         created_at = self._next_timestamp()
@@ -758,6 +766,25 @@ class ErgonStudioApp(App[None]):
         self.selected_artifact_id = artifact_ids[(current_index + direction) % len(artifact_ids)]
         self.query_one("#artifacts", Panel).set_body(self._render_artifacts_body())
 
+    def _cycle_memory_fact(self, direction: int) -> None:
+        facts = self.runtime.list_memory_facts()
+        if not facts:
+            self.selected_memory_fact_id = None
+            self.query_one("#memory", Panel).set_body(self._render_memory_body())
+            return
+
+        fact_ids = [fact.id for fact in facts]
+        if self.selected_memory_fact_id is None:
+            current_index = 0
+        else:
+            try:
+                current_index = fact_ids.index(self.selected_memory_fact_id)
+            except ValueError:
+                current_index = 0
+
+        self.selected_memory_fact_id = fact_ids[(current_index + direction) % len(fact_ids)]
+        self.query_one("#memory", Panel).set_body(self._render_memory_body())
+
     def _open_agent_definition_editor(self, agent_id: str) -> None:
         initial_text = self.runtime.read_agent_definition_text(agent_id)
         self.push_screen(
@@ -809,6 +836,7 @@ class ErgonStudioApp(App[None]):
     def _refresh_panels(self) -> None:
         self._normalize_selected_approval()
         self._normalize_selected_artifact()
+        self._normalize_selected_memory_fact()
         self._normalize_selected_thread()
         self.query_one("#tasks", Panel).set_body(self._render_tasks_body())
         self.query_one("#workflows", Panel).set_body(self._render_workflows_body())
@@ -842,6 +870,14 @@ class ErgonStudioApp(App[None]):
             return
         if self.selected_artifact_id not in artifact_ids:
             self.selected_artifact_id = artifact_ids[0]
+
+    def _normalize_selected_memory_fact(self) -> None:
+        fact_ids = [fact.id for fact in self.runtime.list_memory_facts()]
+        if not fact_ids:
+            self.selected_memory_fact_id = None
+            return
+        if self.selected_memory_fact_id not in fact_ids:
+            self.selected_memory_fact_id = fact_ids[0]
 
     def _normalize_selected_thread(self) -> None:
         thread_ids = [thread.id for thread in self._visible_threads()]
@@ -911,3 +947,25 @@ class ErgonStudioApp(App[None]):
         if not body:
             return ["", "Preview:", "(empty)"]
         return ["", "Preview:", body]
+
+    def _memory_lines(self, facts) -> list[str]:
+        return [
+            f"{'> ' if fact.id == self.selected_memory_fact_id else '  '}{fact.id} [{fact.kind}] {fact.content}"
+            for fact in facts[-8:]
+        ]
+
+    def _memory_preview_lines(self, facts) -> list[str]:
+        selected = None
+        for fact in facts:
+            if fact.id == self.selected_memory_fact_id:
+                selected = fact
+                break
+        if selected is None:
+            return []
+        return [
+            "",
+            "Preview:",
+            f"Scope: {selected.scope}",
+            f"Kind: {selected.kind}",
+            selected.content,
+        ]

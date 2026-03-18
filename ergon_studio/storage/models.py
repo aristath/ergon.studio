@@ -148,3 +148,25 @@ class ArtifactRecord:
         if not isinstance(self.file_path, Path):
             raise TypeError("file_path must be a Path")
         validate_unix_time(self.created_at, "created_at")
+
+
+@dataclass(frozen=True)
+class CommandRunRecord:
+    id: str
+    session_id: str
+    command: str
+    cwd: str
+    exit_code: int
+    status: str
+    output_path: Path
+    created_at: int
+    thread_id: str | None = None
+    task_id: str | None = None
+    agent_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.exit_code) is not int:
+            raise TypeError("exit_code must be an int")
+        if not isinstance(self.output_path, Path):
+            raise TypeError("output_path must be a Path")
+        validate_unix_time(self.created_at, "created_at")

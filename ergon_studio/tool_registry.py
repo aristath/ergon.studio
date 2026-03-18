@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_framework import FunctionTool, tool
 
 
-def build_workspace_tool_registry(project_root: Path) -> dict[str, FunctionTool]:
+def build_workspace_tool_registry(
+    project_root: Path,
+    *,
+    run_command_handler: Callable[[str, int], dict[str, int | str]] | None = None,
+) -> dict[str, FunctionTool]:
     workspace_root = project_root.resolve()
 
     def resolve_path(path: str) -> Path:
@@ -71,6 +77,8 @@ def build_workspace_tool_registry(project_root: Path) -> dict[str, FunctionTool]
 
     @tool(name="run_command", approval_mode="always_require", kind="shell")
     def run_command(command: str, timeout: int = 60) -> dict[str, int | str]:
+        if run_command_handler is not None:
+            return run_command_handler(command, timeout)
         completed = subprocess.run(
             command,
             cwd=workspace_root,
@@ -86,6 +94,8 @@ def build_workspace_tool_registry(project_root: Path) -> dict[str, FunctionTool]
             "exit_code": completed.returncode,
             "stdout": completed.stdout,
             "stderr": completed.stderr,
+            "status": "completed",
+            "created_at": int(time.time()),
         }
 
     return {

@@ -56,6 +56,34 @@ class ToolRegistryTests(unittest.TestCase):
             self.assertEqual(result["exit_code"], 0)
             self.assertEqual(result["cwd"], str(project_root))
             self.assertEqual(result["stdout"].strip(), str(project_root))
+            self.assertEqual(result["status"], "completed")
+
+    def test_run_command_can_delegate_to_a_custom_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            observed: list[tuple[str, int]] = []
+
+            def handler(command: str, timeout: int) -> dict[str, int | str]:
+                observed.append((command, timeout))
+                return {
+                    "command": command,
+                    "cwd": str(project_root),
+                    "exit_code": 0,
+                    "stdout": "delegated",
+                    "stderr": "",
+                    "status": "completed",
+                    "command_run_id": "command-run-1",
+                }
+
+            registry = build_workspace_tool_registry(
+                project_root,
+                run_command_handler=handler,
+            )
+
+            result = registry["run_command"].func(command="pwd", timeout=5)
+
+            self.assertEqual(observed, [("pwd", 5)])
+            self.assertEqual(result["command_run_id"], "command-run-1")
 
     def test_tools_reject_paths_outside_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

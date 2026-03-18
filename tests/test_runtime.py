@@ -223,6 +223,34 @@ Return reviewed code and a clear summary.
                 ["definition_saved"],
             )
 
+    def test_runtime_can_run_and_persist_workspace_commands(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            result = runtime.run_workspace_command(
+                "pwd",
+                created_at=1_710_755_200,
+                thread_id=runtime.main_thread_id,
+                agent_id="user",
+            )
+
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(result["status"], "completed")
+            command_runs = runtime.list_command_runs()
+            self.assertEqual(len(command_runs), 1)
+            self.assertEqual(command_runs[0].thread_id, runtime.main_thread_id)
+            self.assertEqual(command_runs[0].agent_id, "user")
+            self.assertIn("# Command Run", runtime.read_command_output(command_runs[0].id))
+            self.assertIn("command_run", [event.kind for event in runtime.list_events()])
+
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime
 

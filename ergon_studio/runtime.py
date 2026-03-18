@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import subprocess
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +13,7 @@ from ergon_studio.approval_store import ApprovalStore
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.artifact_store import ArtifactStore
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.command_store import CommandStore
 from ergon_studio.config import save_global_config_text
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.definitions import DefinitionDocument, save_definition_text
@@ -19,8 +21,9 @@ from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
+from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.workflow_store import WorkflowStore
 
@@ -55,6 +58,7 @@ class RuntimeContext:
     approval_store: ApprovalStore
     memory_store: MemoryStore
     artifact_store: ArtifactStore
+    command_store: CommandStore
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -325,6 +329,36 @@ class RuntimeContext:
     def list_artifacts(self) -> list[ArtifactRecord]:
         return self.artifact_store.list_artifacts(self.main_session_id)
 
+    def list_command_runs(self) -> list[CommandRunRecord]:
+        return self.command_store.list_command_runs(self.main_session_id)
+
+    def list_command_runs_for_workflow_run(self, workflow_run_id: str) -> list[CommandRunRecord]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+
+        task_ids: set[str] = set()
+        thread_ids: set[str] = set()
+        if run_view.root_task is not None:
+            task_ids.add(run_view.root_task.id)
+        for step in run_view.steps:
+            task_ids.add(step.task.id)
+            for thread in step.threads:
+                thread_ids.add(thread.id)
+
+        command_runs = [
+            command_run
+            for command_run in self.list_command_runs()
+            if command_run.task_id in task_ids or command_run.thread_id in thread_ids
+        ]
+        return sorted(command_runs, key=lambda command_run: (command_run.created_at, command_run.id))
+
+    def read_command_output(self, command_run_id: str) -> str:
+        for command_run in self.list_command_runs():
+            if command_run.id == command_run_id:
+                return self.command_store.read_command_output(command_run)
+        raise ValueError(f"unknown command run: {command_run_id}")
+
     def read_artifact_body(self, artifact_id: str) -> str:
         for artifact in self.list_artifacts():
             if artifact.id == artifact_id:
@@ -519,18 +553,26 @@ class RuntimeContext:
             agent_id=agent_id,
             session_factory=lambda session_id: agent.create_session(session_id=session_id),
         )
+        thread = self.get_thread(thread_id)
+        tool_context = ToolExecutionContext(
+            session_id=self.main_session_id,
+            thread_id=thread_id,
+            task_id=thread.parent_task_id if thread is not None else None,
+            agent_id=agent_id,
+        )
 
         try:
-            response = await agent.run(
-                [
-                    Message(
-                        role="user",
-                        text=body,
-                        author_name=prompt_sender,
-                    )
-                ],
-                session=session,
-            )
+            with use_tool_execution_context(tool_context):
+                response = await agent.run(
+                    [
+                        Message(
+                            role="user",
+                            text=body,
+                            author_name=prompt_sender,
+                        )
+                    ],
+                    session=session,
+                )
         except Exception as exc:
             self.append_event(
                 kind="agent_failed",
@@ -563,6 +605,90 @@ class RuntimeContext:
             created_at=created_at + 1,
         )
         return prompt_message, reply_message
+
+    def run_workspace_command(
+        self,
+        command: str,
+        timeout: int = 60,
+        *,
+        created_at: int | None = None,
+        thread_id: str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, int | str]:
+        if created_at is None:
+            created_at = int(time.time())
+
+        context = current_tool_execution_context()
+        session_id = context.session_id if context is not None else self.main_session_id
+        resolved_thread_id = thread_id if thread_id is not None else (context.thread_id if context is not None else None)
+        resolved_task_id = task_id if task_id is not None else (context.task_id if context is not None else None)
+        resolved_agent_id = agent_id if agent_id is not None else (context.agent_id if context is not None else None)
+        workspace_root = self.paths.project_root.resolve()
+
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workspace_root,
+                shell=True,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+            exit_code = completed.returncode
+            stdout = completed.stdout
+            stderr = completed.stderr
+            status = "completed"
+        except subprocess.TimeoutExpired as exc:
+            exit_code = -1
+            stdout = exc.stdout or ""
+            stderr_lines = [exc.stderr or ""]
+            stderr_lines.append(f"Timed out after {timeout} seconds.")
+            stderr = "\n".join(line for line in stderr_lines if line)
+            status = "timeout"
+
+        command_run = self.command_store.create_command_run(
+            session_id=session_id,
+            command_run_id=f"command-run-{uuid4().hex[:8]}",
+            command=command,
+            cwd=str(workspace_root),
+            exit_code=exit_code,
+            status=status,
+            output_content=_render_command_output(
+                command=command,
+                cwd=str(workspace_root),
+                exit_code=exit_code,
+                status=status,
+                timeout=timeout,
+                stdout=stdout,
+                stderr=stderr,
+                thread_id=resolved_thread_id,
+                task_id=resolved_task_id,
+                agent_id=resolved_agent_id,
+            ),
+            created_at=created_at,
+            thread_id=resolved_thread_id,
+            task_id=resolved_task_id,
+            agent_id=resolved_agent_id,
+        )
+        runner = resolved_agent_id or "user"
+        self.append_event(
+            kind="command_run",
+            summary=f"{runner} ran `{command}` [{status}]",
+            created_at=created_at,
+            thread_id=resolved_thread_id,
+            task_id=resolved_task_id,
+        )
+        return {
+            "command": command,
+            "cwd": str(workspace_root),
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "status": status,
+            "command_run_id": command_run.id,
+        }
 
     def _workflow_threads_for_run(self, workflow_run: WorkflowRunRecord) -> list[ThreadRecord]:
         if workflow_run.root_task_id is None:
@@ -1086,7 +1212,6 @@ class RuntimeContext:
 def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
     registry = load_registry(paths)
-    tool_registry = build_workspace_tool_registry(paths.project_root)
     agent_session_store = AgentSessionStore(paths)
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
@@ -1095,10 +1220,11 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     approval_store = ApprovalStore(paths)
     memory_store = MemoryStore(paths)
     artifact_store = ArtifactStore(paths)
+    command_store = CommandStore(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
-        tool_registry=tool_registry,
+        tool_registry={},
         agent_session_store=agent_session_store,
         conversation_store=conversation_store,
         task_store=task_store,
@@ -1107,6 +1233,15 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         approval_store=approval_store,
         memory_store=memory_store,
         artifact_store=artifact_store,
+        command_store=command_store,
+    )
+    object.__setattr__(
+        runtime,
+        "tool_registry",
+        build_workspace_tool_registry(
+            paths.project_root,
+            run_command_handler=runtime.run_workspace_command,
+        ),
     )
     runtime.ensure_main_conversation()
     return runtime
@@ -1127,3 +1262,48 @@ def _workflow_participants(workflow_id: str) -> tuple[str, ...]:
         "replanning": ("architect",),
     }
     return workflow_map.get(workflow_id, ())
+
+
+def _render_command_output(
+    *,
+    command: str,
+    cwd: str,
+    exit_code: int,
+    status: str,
+    timeout: int,
+    stdout: str,
+    stderr: str,
+    thread_id: str | None,
+    task_id: str | None,
+    agent_id: str | None,
+) -> str:
+    lines = [
+        "# Command Run",
+        "",
+        f"- Command: `{command}`",
+        f"- Cwd: `{cwd}`",
+        f"- Exit Code: {exit_code}",
+        f"- Status: {status}",
+        f"- Timeout: {timeout}",
+    ]
+    if agent_id is not None:
+        lines.append(f"- Agent: {agent_id}")
+    if thread_id is not None:
+        lines.append(f"- Thread: {thread_id}")
+    if task_id is not None:
+        lines.append(f"- Task: {task_id}")
+    lines.extend(
+        [
+            "",
+            "## Stdout",
+            "```text",
+            stdout.rstrip("\n"),
+            "```",
+            "",
+            "## Stderr",
+            "```text",
+            stderr.rstrip("\n"),
+            "```",
+        ]
+    )
+    return "\n".join(lines)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 
 
 SCHEMA_STATEMENTS = (
@@ -114,6 +114,22 @@ SCHEMA_STATEMENTS = (
       created_at INTEGER NOT NULL,
       thread_id TEXT,
       task_id TEXT,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS command_runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      command TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      exit_code INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      output_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      thread_id TEXT,
+      task_id TEXT,
+      agent_id TEXT,
       FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     """,
@@ -709,6 +725,59 @@ class MetadataStore:
                 created_at=row[5],
                 thread_id=row[6],
                 task_id=row[7],
+            )
+            for row in rows
+        ]
+
+    def insert_command_run(self, record: CommandRunRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO command_runs (
+                  id, session_id, command, cwd, exit_code, status, output_path, created_at, thread_id, task_id, agent_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.command,
+                    record.cwd,
+                    record.exit_code,
+                    record.status,
+                    str(record.output_path),
+                    record.created_at,
+                    record.thread_id,
+                    record.task_id,
+                    record.agent_id,
+                ),
+            )
+            connection.commit()
+
+    def list_command_runs(self, session_id: str) -> list[CommandRunRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, command, cwd, exit_code, status, output_path, created_at, thread_id, task_id, agent_id
+                FROM command_runs
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            CommandRunRecord(
+                id=row[0],
+                session_id=row[1],
+                command=row[2],
+                cwd=row[3],
+                exit_code=row[4],
+                status=row[5],
+                output_path=Path(row[6]),
+                created_at=row[7],
+                thread_id=row[8],
+                task_id=row[9],
+                agent_id=row[10],
             )
             for row in rows
         ]

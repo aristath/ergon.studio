@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.storage.models import MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
+from ergon_studio.storage.models import CommandRunRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, WorkflowRunRecord
 from ergon_studio.storage.sqlite import MetadataStore, initialize_database
 
 
@@ -24,7 +24,7 @@ class InitializeDatabaseTests(unittest.TestCase):
                     )
                 }
 
-            self.assertTrue({"sessions", "threads", "tasks", "messages"}.issubset(table_names))
+            self.assertTrue({"sessions", "threads", "tasks", "messages", "command_runs"}.issubset(table_names))
 
 
 class MetadataStoreTests(unittest.TestCase):
@@ -82,12 +82,27 @@ class MetadataStoreTests(unittest.TestCase):
                 last_thread_id="thread-1",
             )
             store.insert_workflow_run(workflow_run)
+            command_run = CommandRunRecord(
+                id="command-run-1",
+                session_id="session-1",
+                command="pwd",
+                cwd="/workspace",
+                exit_code=0,
+                status="completed",
+                output_path=Path("logs/commands/command-run-1.md"),
+                created_at=1_710_755_600,
+                thread_id="thread-1",
+                task_id="task-1",
+                agent_id="orchestrator",
+            )
+            store.insert_command_run(command_run)
 
             self.assertEqual(store.get_session("session-1"), session)
             self.assertEqual(store.get_thread("thread-1"), thread)
             self.assertEqual(store.get_task("task-1"), task)
             self.assertEqual(store.get_message("message-1"), message)
             self.assertEqual(store.get_workflow_run("workflow-run-1"), workflow_run)
+            self.assertEqual(store.list_command_runs("session-1"), [command_run])
 
     def test_message_metadata_stores_body_path_not_message_body(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

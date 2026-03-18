@@ -457,6 +457,31 @@ class RuntimeContext:
             return self.conversation_store.read_message_body(message).rstrip("\n")
         return None
 
+    def _append_workflow_completion_summary(
+        self,
+        *,
+        workflow_run: WorkflowRunRecord,
+        thread: ThreadRecord,
+        created_at: int,
+    ) -> MessageRecord:
+        final_output = self._latest_agent_message_body(thread.id)
+        summary_lines = [f"Workflow complete: {workflow_run.workflow_id}"]
+        if thread.assigned_agent_id is not None and final_output:
+            summary_lines.extend(
+                [
+                    "",
+                    f"Final output from {thread.assigned_agent_id}:",
+                    final_output,
+                ]
+            )
+        return self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="orchestrator",
+            kind="status_update",
+            body="\n".join(summary_lines),
+            created_at=created_at,
+        )
+
     def create_task(
         self,
         *,
@@ -624,6 +649,11 @@ class RuntimeContext:
                     state="completed",
                     updated_at=created_at + 2,
                 )
+            self._append_workflow_completion_summary(
+                workflow_run=updated,
+                thread=thread,
+                created_at=created_at + 2,
+            )
             self.append_event(
                 kind="workflow_completed",
                 summary=f"Completed workflow {workflow_run.workflow_id}",

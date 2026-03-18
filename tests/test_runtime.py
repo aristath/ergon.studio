@@ -773,3 +773,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(completed_run.state, "completed")
             self.assertEqual(runtime.get_task(completed_run.root_task_id).state, "completed")
+            self.assertIn(
+                "Workflow complete: single-agent-execution",
+                runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]),
+            )

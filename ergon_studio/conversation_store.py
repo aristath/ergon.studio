@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from ergon_studio.paths import StudioPaths
@@ -20,6 +21,12 @@ class ConversationStore:
         )
         self.metadata.insert_session(record)
         return record
+
+    def ensure_session(self, session_id: str, created_at: int | None = None) -> SessionRecord:
+        existing = self.metadata.get_session(session_id)
+        if existing is not None:
+            return existing
+        return self.create_session(session_id=session_id, created_at=created_at or _now())
 
     def create_thread(
         self,
@@ -46,6 +53,30 @@ class ConversationStore:
         )
         self.metadata.insert_thread(record)
         return record
+
+    def ensure_thread(
+        self,
+        *,
+        session_id: str,
+        thread_id: str,
+        kind: str,
+        created_at: int | None = None,
+        summary: str | None = None,
+        parent_task_id: str | None = None,
+        parent_thread_id: str | None = None,
+    ) -> ThreadRecord:
+        existing = self.metadata.get_thread(thread_id)
+        if existing is not None:
+            return existing
+        return self.create_thread(
+            session_id=session_id,
+            thread_id=thread_id,
+            kind=kind,
+            created_at=created_at or _now(),
+            summary=summary,
+            parent_task_id=parent_task_id,
+            parent_thread_id=parent_thread_id,
+        )
 
     def append_message(
         self,
@@ -82,9 +113,16 @@ class ConversationStore:
     def list_messages(self, thread_id: str) -> list[MessageRecord]:
         return self.metadata.list_messages(thread_id)
 
+    def list_threads(self, session_id: str) -> list[ThreadRecord]:
+        return self.metadata.list_threads(session_id)
+
     def read_message_body(self, message: MessageRecord) -> str:
         return Path(message.body_path).read_text(encoding="utf-8")
 
 
 def _ensure_trailing_newline(body: str) -> str:
     return body if body.endswith("\n") else f"{body}\n"
+
+
+def _now() -> int:
+    return int(time.time())

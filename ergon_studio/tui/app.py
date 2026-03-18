@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
 from ergon_studio.runtime import RuntimeContext
@@ -9,11 +9,17 @@ from ergon_studio.runtime import RuntimeContext
 
 class Panel(Static):
     def __init__(self, title: str, body: str, *, panel_id: str, classes: str | None = None) -> None:
+        self.title_text = title
+        self.body = body
         super().__init__(self._render_panel(title, body), id=panel_id, classes=classes)
 
     @staticmethod
     def _render_panel(title: str, body: str) -> str:
         return f"[b]{title}[/b]\n{body}"
+
+    def set_body(self, body: str) -> None:
+        self.body = body
+        self.update(self._render_panel(self.title_text, body))
 
 
 class ErgonStudioApp(App[None]):
@@ -68,15 +74,12 @@ class ErgonStudioApp(App[None]):
         with Horizontal(id="workspace"):
             with Vertical(id="left-sidebar"):
                 yield Panel("Tasks", "Task tree will appear here.", panel_id="tasks", classes="panel")
-                yield Panel("Threads", "Thread list will appear here.", panel_id="threads", classes="panel")
+                yield Panel("Threads", self._render_threads_body(), panel_id="threads", classes="panel")
                 yield Panel("Activity", "Workflow activity will appear here.", panel_id="activity", classes="panel")
             with Vertical(id="center-column"):
                 yield Panel(
                     "Main Chat",
-                    (
-                        f"Project UUID: {self.runtime.paths.project_uuid}\n"
-                        f"Workspace: {self.runtime.paths.project_root}"
-                    ),
+                    self._render_main_chat_body(),
                     panel_id="main-chat",
                     classes="panel",
                 )
@@ -99,3 +102,27 @@ class ErgonStudioApp(App[None]):
                     classes="panel",
                 )
         yield Footer()
+
+    def _render_threads_body(self) -> str:
+        threads = self.runtime.list_threads()
+        if not threads:
+            return "No threads yet."
+        return "\n".join(
+            f"{thread.id} ({thread.kind})"
+            for thread in threads
+        )
+
+    def _render_main_chat_body(self) -> str:
+        messages = self.runtime.list_main_messages()
+        if not messages:
+            return (
+                f"Project UUID: {self.runtime.paths.project_uuid}\n"
+                f"Workspace: {self.runtime.paths.project_root}\n"
+                "No messages yet."
+            )
+
+        rendered_messages = []
+        for message in messages:
+            body = self.runtime.conversation_store.read_message_body(message).rstrip("\n")
+            rendered_messages.append(f"[{message.sender}] {body}")
+        return "\n\n".join(rendered_messages)

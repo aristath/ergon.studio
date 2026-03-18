@@ -139,6 +139,31 @@ class MetadataStore:
             parent_thread_id=row[7],
         )
 
+    def list_threads(self, session_id: str) -> list[ThreadRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, kind, created_at, updated_at, summary, parent_task_id, parent_thread_id
+                FROM threads
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            ThreadRecord(
+                id=row[0],
+                session_id=row[1],
+                kind=row[2],
+                created_at=row[3],
+                updated_at=row[4],
+                summary=row[5],
+                parent_task_id=row[6],
+                parent_thread_id=row[7],
+            )
+            for row in rows
+        ]
+
     def insert_task(self, record: TaskRecord) -> None:
         with self._connect() as connection:
             connection.execute(

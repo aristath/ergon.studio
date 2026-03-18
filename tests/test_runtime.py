@@ -23,6 +23,10 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.paths.project_root, project_root)
             self.assertIn("orchestrator", runtime.registry.agent_definitions)
             self.assertIn("read_file", runtime.tool_registry)
+            self.assertEqual(runtime.main_session_id, "session-main")
+            self.assertEqual(runtime.main_thread_id, "thread-main")
+            self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
+            self.assertEqual(runtime.list_main_messages(), [])
 
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -57,3 +61,30 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual(agent.name, "Orchestrator")
             self.assertEqual(agent.client.model_id, "qwen2.5-coder")
+
+    def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Hello from runtime.",
+                created_at=1_710_755_200,
+            )
+
+            messages = runtime.list_main_messages()
+
+            self.assertEqual([message.id for message in messages], ["message-1"])
+            self.assertEqual(
+                runtime.conversation_store.read_message_body(messages[0]),
+                "Hello from runtime.\n",
+            )

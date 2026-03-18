@@ -404,10 +404,31 @@ class ErgonStudioApp(App[None]):
         agent_ids = self.runtime.list_agent_ids()
         if not agent_ids:
             return "No agents defined."
-        return "\n".join(
+        lines = [
             f"{'> ' if agent_id == self.selected_agent_id else '  '}{agent_id} [{self.runtime.agent_status_summary(agent_id)}]"
             for agent_id in agent_ids
+        ]
+        definition = self.runtime.registry.agent_definitions.get(self.selected_agent_id)
+        if definition is None:
+            return "\n".join(lines)
+
+        role = str(definition.metadata.get("role", self.selected_agent_id))
+        tools = definition.metadata.get("tools", [])
+        if not isinstance(tools, list):
+            tools = []
+        identity = definition.sections.get("Identity", "")
+
+        lines.extend(
+            [
+                "",
+                f"Role: {role}",
+                f"Status: {self.runtime.agent_status_summary(self.selected_agent_id)}",
+                f"Tools: {', '.join(str(tool) for tool in tools) if tools else 'none'}",
+            ]
         )
+        if identity:
+            lines.extend(["", identity])
+        return "\n".join(lines)
 
     def _render_workflows_body(self) -> str:
         workflow_ids = self.runtime.list_workflow_ids()

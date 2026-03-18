@@ -425,10 +425,14 @@ class TuiAppTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test():
                 team = app.query_one("#team", Panel)
                 self.assertIn("> orchestrator", team.body)
+                self.assertIn("Role: orchestrator", team.body)
+                self.assertIn("Tools: read_file, write_file, patch_file, run_command", team.body)
 
                 app.action_next_agent()
 
                 self.assertIn("> researcher", team.body)
+                self.assertIn("Role: researcher", team.body)
+                self.assertIn("Tools: search_files, web_lookup", team.body)
 
     async def test_app_can_switch_selected_workflow(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp

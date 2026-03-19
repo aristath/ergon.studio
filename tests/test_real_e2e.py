@@ -101,6 +101,12 @@ def _calculator_entrypoint(project_root: Path) -> tuple[Path, list[str]] | None:
             path,
             _cli_command_candidates(f"python3 {command_base}"),
         )
+        module_name = ".".join(relative.with_suffix("").parts)
+        if module_name:
+            add_candidate(
+                path,
+                _cli_command_candidates(f"python3 -m {module_name}"),
+            )
 
     return candidates[0] if candidates else None
 

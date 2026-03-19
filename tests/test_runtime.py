@@ -2704,6 +2704,76 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(report.id)
             self.assertIn("Automatic repair cycles: 1", body)
 
+    async def test_runtime_recovers_blocked_step_with_orchestrator_clarification(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "coder": FakeAgent(
+                [
+                    "The deliverable is already implemented in the workspace and does not need another edit.",
+                    "I still do not have a file edit to record because the implementation is already present.",
+                    "Clarification: the current implementation is already correct, so no extra file write is required.",
+                ]
+            ),
+            "orchestrator": FakeAgent(
+                [
+                    '{"action": "clarify", "summary": "Ask the coder to explain why no additional edit is needed.", "agent_id": "coder", "request": "Explain briefly why the current workspace already satisfies the goal and why no new file edit is necessary.", "tool_mode": "none"}',
+                    '{"accepted": true, "summary": "The coder clarified the blocked step clearly enough to accept the result.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda agent_id: ("write_file",) if agent_id == "coder" else (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="single-agent-execution",
+                    goal="Deliver the requested change cleanly.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.current_step_index, 2)
+            team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
+            self.assertEqual(team[-2:], ["orchestrator", "coder"])
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_clarification_requested", event_kinds)
+            self.assertIn("workflow_clarification_cycle_requested", event_kinds)
+            report = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(workflow_run.id)
+                if artifact.kind == "workflow-report"
+            )
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("Clarification cycles: 1", body)
+
     def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
         from ergon_studio.runtime import load_runtime
 

@@ -41,6 +41,7 @@ class _ExecutionTracker:
     thread_tool_modes: dict[str, str] = field(default_factory=dict)
     blocked_step_index: int | None = None
     blocked_thread_id: str | None = None
+    blocked_summary: str | None = None
     failed: bool = False
     last_thread_id: str | None = None
     review_summary: str | None = None
@@ -161,6 +162,9 @@ class _ThreadExecutor(Executor):
         if reply is None:
             self.tracker.blocked_step_index = self.step_index
             self.tracker.blocked_thread_id = self.thread.id
+            self.tracker.blocked_summary = (
+                f"{self.thread.assigned_agent_id or self.thread.id} did not produce a reply."
+            )
             self.tracker.last_thread_id = self.thread.id
             if task_id is not None:
                 self.runtime.update_task_state(
@@ -222,6 +226,9 @@ class _ThreadExecutor(Executor):
         if retry_reply is None:
             self.tracker.blocked_step_index = self.step_index
             self.tracker.blocked_thread_id = self.thread.id
+            self.tracker.blocked_summary = (
+                f"{self.thread.assigned_agent_id or self.thread.id} did not answer the retry request for tool-backed evidence."
+            )
             self.tracker.last_thread_id = self.thread.id
             raise RuntimeError(f"workflow step blocked after retry: {self.thread.assigned_agent_id or self.thread.id}")
 
@@ -236,6 +243,10 @@ class _ThreadExecutor(Executor):
 
         self.tracker.blocked_step_index = self.step_index
         self.tracker.blocked_thread_id = self.thread.id
+        self.tracker.blocked_summary = (
+            f"{self.thread.assigned_agent_id or self.thread.id} replied without the required tool evidence "
+            f"({', '.join(required_tools)})."
+        )
         self.tracker.last_thread_id = self.thread.id
         if self.thread.parent_task_id is not None:
             self.runtime.update_task_state(
@@ -602,9 +613,7 @@ async def execute_defined_workflow(
             start_step_index=start_step_index,
             initial_payload=initial_payload,
         )
-        if tracker.failed or tracker.blocked_step_index is not None:
-            break
-        if tracker.review_accepted is not False:
+        if tracker.failed:
             break
         followup = await _decide_followup_action(
             runtime=runtime,
@@ -615,7 +624,9 @@ async def execute_defined_workflow(
             cursor=cursor,
             tracker=tracker,
         )
-        if followup is None:
+        if tracker.blocked_step_index is None and tracker.review_accepted is not False:
+            break
+        if followup is None and tracker.blocked_step_index is None:
             followup = _next_followup_cycle(
                 runtime=runtime,
                 workflow_id=active_workflow_run.workflow_id,
@@ -664,6 +675,9 @@ async def execute_defined_workflow(
         if followup.tool_mode != "default":
             for thread in new_threads:
                 tracker.thread_tool_modes[thread.id] = followup.tool_mode
+        tracker.blocked_step_index = None
+        tracker.blocked_thread_id = None
+        tracker.blocked_summary = None
         refreshed_view = runtime.describe_workflow_run(active_workflow_run.id)
         if refreshed_view is None:
             tracker.failed = True
@@ -908,6 +922,7 @@ async def _execute_magentic_workflow(
     if result.get_request_info_events():
         tracker.blocked_step_index = 0
         tracker.blocked_thread_id = workroom_thread.id
+        tracker.blocked_summary = "The dynamic workroom requested external information before it could continue."
         tracker.last_thread_id = workroom_thread.id
         return _finalize_workflow_run(
             runtime=runtime,
@@ -2409,8 +2424,9 @@ def _orchestrator_review_instructions() -> str:
 def _workflow_followup_decision_instructions() -> str:
     return "\n".join(
         [
-            "You are deciding the next workflow move after a rejected orchestrator review.",
-            "Prefer the smallest action that can resolve the rejection.",
+            "You are deciding the next workflow move after either a rejected orchestrator review or a blocked worker step.",
+            "Prefer the smallest action that can resolve the problem.",
+            "If a worker step is blocked, prefer a clarification or narrow repair before replanning.",
             "Use `clarify` when the work may already be acceptable but evidence or explanation is missing.",
             "Use `repair` when the underlying work needs a focused fix.",
             "Use `replan` when the current approach is wrong enough that another narrow fix is wasteful.",
@@ -2434,15 +2450,33 @@ def _workflow_followup_decision_prompt(
     run_view: WorkflowRunView | None,
 ) -> str:
     changed_files = runtime._workflow_changed_files(run_view.workflow_run.id) if run_view is not None else []
+    trigger = "blocked worker step" if tracker.blocked_step_index is not None else "rejected orchestrator review"
     lines = [
         f"Workflow: {workflow_id}",
+        f"Current trigger: {trigger}",
         "",
         "Goal:",
         _truncate_text(goal, 800),
-        "",
-        "Latest orchestrator review:",
-        tracker.review_summary or "(no review summary)",
     ]
+    if tracker.blocked_step_index is not None:
+        lines.extend(
+            [
+                "",
+                "Blocked step:",
+                _blocked_agent_label(run_view=run_view, tracker=tracker),
+                "",
+                "Blocked summary:",
+                tracker.blocked_summary or "(no blocked summary)",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Latest orchestrator review:",
+                tracker.review_summary or "(no review summary)",
+            ]
+        )
     if tracker.review_findings:
         lines.extend(["", "Current findings:"])
         lines.extend(f"- {finding}" for finding in tracker.review_findings)
@@ -2472,6 +2506,19 @@ def _truncate_text(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()} ..."
+
+
+def _blocked_agent_label(
+    *,
+    run_view: WorkflowRunView | None,
+    tracker: _ExecutionTracker,
+) -> str:
+    if run_view is not None and tracker.blocked_thread_id is not None:
+        for step in run_view.steps:
+            for thread in step.threads:
+                if thread.id == tracker.blocked_thread_id:
+                    return thread.assigned_agent_id or thread.summary or thread.id
+    return tracker.blocked_thread_id or "(unknown)"
 
 
 def _parse_review_verdict(raw: str) -> WorkflowReviewVerdict:

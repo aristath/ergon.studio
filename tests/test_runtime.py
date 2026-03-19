@@ -2636,6 +2636,74 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(report.id)
             self.assertIn("Clarification cycles: 1", body)
 
+    async def test_runtime_uses_custom_followup_staffing_from_orchestrator(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture ready."),
+            "coder": FakeAgent("Implementation ready."),
+            "tester": FakeAgent(["Initial verification failed.", "Focused re-check passed."]),
+            "reviewer": FakeAgent(["Initial review complete.", "Custom follow-up review complete."]),
+            "fixer": FakeAgent("Applied the targeted correction."),
+            "orchestrator": FakeAgent(
+                [
+                    '{"accepted": false, "summary": "The initial evidence is not good enough yet.", "findings": ["The fix needs another focused verification pass."], "requires_replan": false, "replan_summary": ""}',
+                    '{"action": "repair", "summary": "Run a custom tester -> fixer -> reviewer loop.", "request": "Have the tester restate the failure first, then fix only that issue, then review the corrected result.", "step_groups": [["tester"], ["fixer"], ["reviewer"]], "tool_mode": "none"}',
+                    '{"accepted": true, "summary": "The custom follow-up loop resolved the issue cleanly.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
+            self.assertEqual(team[-4:], ["orchestrator", "tester", "fixer", "reviewer"])
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_auto_repair_started", event_kinds)
+            self.assertIn("workflow_repair_cycle_requested", event_kinds)
+            report = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(workflow_run.id)
+                if artifact.kind == "workflow-report"
+            )
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("Automatic repair cycles: 1", body)
+
     def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
         from ergon_studio.runtime import load_runtime
 

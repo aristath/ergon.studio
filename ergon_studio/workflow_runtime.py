@@ -79,6 +79,7 @@ class WorkflowFollowupDecision:
     summary: str
     agent_id: str | None = None
     request: str | None = None
+    step_groups: tuple[tuple[str, ...], ...] = ()
     tool_mode: str = "default"
 
 
@@ -1769,6 +1770,22 @@ def _replan_step_groups(runtime: RuntimeContext, workflow_id: str) -> tuple[tupl
     return _workflow_step_group_metadata(runtime, workflow_id, "replan_step_groups")
 
 
+def _is_valid_followup_step_groups(
+    runtime: RuntimeContext,
+    step_groups: tuple[tuple[str, ...], ...],
+) -> bool:
+    if not step_groups:
+        return False
+    known_agents = runtime.registry.agent_definitions
+    for group in step_groups:
+        if not group:
+            return False
+        for agent_id in group:
+            if agent_id not in known_agents:
+                return False
+    return True
+
+
 async def _decide_followup_action(
     *,
     runtime: RuntimeContext,
@@ -1805,15 +1822,22 @@ async def _decide_followup_action(
     if decision.action == "clarify":
         if tracker.clarification_cycles >= _max_clarification_cycles(runtime, workflow_run.workflow_id):
             return None
-        if decision.agent_id is None or decision.request is None:
+        if decision.request is None:
             return None
-        if decision.agent_id not in runtime.registry.agent_definitions:
-            return None
+        step_groups = decision.step_groups
+        if step_groups:
+            if not _is_valid_followup_step_groups(runtime, step_groups):
+                return None
+        else:
+            if decision.agent_id is None or decision.agent_id not in runtime.registry.agent_definitions:
+                return None
+            step_groups = ((decision.agent_id,),)
         tracker.clarification_cycles += 1
-        summary = decision.summary or f"Requesting clarification from {decision.agent_id}"
+        primary_agent = step_groups[0][0]
+        summary = decision.summary or f"Requesting clarification from {primary_agent}"
         return WorkflowFollowupPlan(
             cycle_kind="clarify",
-            step_groups=((decision.agent_id,),),
+            step_groups=step_groups,
             event_kind="workflow_clarification_requested",
             event_summary=summary,
             payload=_render_followup_payload(
@@ -1829,7 +1853,9 @@ async def _decide_followup_action(
         )
 
     if decision.action == "repair":
-        repair_groups = _repair_step_groups(runtime, workflow_run.workflow_id)
+        repair_groups = decision.step_groups or _repair_step_groups(runtime, workflow_run.workflow_id)
+        if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
+            return None
         if not repair_groups or tracker.repair_cycles >= _max_repair_cycles(runtime, workflow_run.workflow_id):
             return None
         tracker.repair_cycles += 1
@@ -1845,11 +1871,15 @@ async def _decide_followup_action(
                 tracker=tracker,
                 run_view=run_view,
                 cycle_kind="repair",
+                custom_request=decision.request,
             ),
+            tool_mode=decision.tool_mode,
         )
 
     if decision.action == "replan":
-        replan_groups = _replan_step_groups(runtime, workflow_run.workflow_id)
+        replan_groups = decision.step_groups or _replan_step_groups(runtime, workflow_run.workflow_id)
+        if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
+            return None
         if not replan_groups or tracker.replan_cycles >= _max_replan_cycles(runtime, workflow_run.workflow_id):
             return None
         tracker.replan_cycles += 1
@@ -1865,7 +1895,9 @@ async def _decide_followup_action(
                 tracker=tracker,
                 run_view=run_view,
                 cycle_kind="replan",
+                custom_request=decision.request,
             ),
+            tool_mode=decision.tool_mode,
         )
 
     return None
@@ -1979,6 +2011,8 @@ def _render_followup_payload(
             ]
         )
     elif cycle_kind == "replan":
+        if custom_request:
+            lines.extend(["", "Specific follow-up request:", custom_request])
         lines.extend(
             [
                 "",
@@ -1986,6 +2020,8 @@ def _render_followup_payload(
             ]
         )
     else:
+        if custom_request:
+            lines.extend(["", "Specific follow-up request:", custom_request])
         lines.extend(
             [
                 "",
@@ -2379,10 +2415,12 @@ def _workflow_followup_decision_instructions() -> str:
             "Use `repair` when the underlying work needs a focused fix.",
             "Use `replan` when the current approach is wrong enough that another narrow fix is wasteful.",
             "Use `stop` when no safe automatic follow-up is justified.",
-            "For `clarify`, provide both `agent_id` and a specific `request`.",
+            "For `clarify`, provide a specific `request` and either `agent_id` or `step_groups`.",
+            "You may provide `step_groups` as a list of agent-id lists when the next follow-up should use custom staffing instead of the workflow defaults.",
+            "If you omit `step_groups`, the runtime will use the workflow defaults for `repair` and `replan`.",
             "Set `tool_mode` to `none` only when the clarification should be explanation-only and should not require fresh tool evidence.",
             "Return JSON only with this shape:",
-            '{"action":"clarify","summary":"one concise sentence","agent_id":"tester","request":"Run one concrete command and report the result.","tool_mode":"default"}',
+            '{"action":"clarify","summary":"one concise sentence","agent_id":"tester","request":"Run one concrete command and report the result.","step_groups":[["tester"]],"tool_mode":"default"}',
         ]
     )
 
@@ -2492,14 +2530,32 @@ def _parse_followup_decision(raw: str) -> WorkflowFollowupDecision:
     summary = str(payload.get("summary", "")).strip()
     agent_id_raw = payload.get("agent_id")
     request_raw = payload.get("request")
+    step_groups_raw = payload.get("step_groups", [])
     tool_mode = str(payload.get("tool_mode", "default")).strip().lower() or "default"
     if tool_mode not in {"default", "none"}:
         tool_mode = "default"
+    step_groups: list[tuple[str, ...]] = []
+    if isinstance(step_groups_raw, list):
+        for raw_group in step_groups_raw:
+            if not isinstance(raw_group, list):
+                raise ValueError("followup step_groups must be a list of lists")
+            cleaned_group: list[str] = []
+            for item in raw_group:
+                if not isinstance(item, str):
+                    raise ValueError("followup step_groups entries must be strings")
+                agent_id = item.strip()
+                if not agent_id:
+                    raise ValueError("followup step_groups entries must be non-empty")
+                cleaned_group.append(agent_id)
+            if not cleaned_group:
+                raise ValueError("followup step_groups may not contain empty groups")
+            step_groups.append(tuple(cleaned_group))
     return WorkflowFollowupDecision(
         action=action,
         summary=summary,
         agent_id=str(agent_id_raw).strip() if isinstance(agent_id_raw, str) and str(agent_id_raw).strip() else None,
         request=str(request_raw).strip() if isinstance(request_raw, str) and str(request_raw).strip() else None,
+        step_groups=tuple(step_groups),
         tool_mode=tool_mode,
     )
 

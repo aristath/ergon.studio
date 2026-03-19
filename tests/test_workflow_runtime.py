@@ -54,6 +54,23 @@ class WorkflowRuntimeTests(unittest.TestCase):
             ),
         )
 
+    def test_parse_followup_decision_reads_custom_step_groups(self) -> None:
+        decision = _parse_followup_decision(
+            '{"action": "repair", "summary": "Use a custom repair path.", "request": "Investigate first, then patch.", "step_groups": [["tester"], ["fixer"], ["reviewer"]], "tool_mode": "default"}'
+        )
+
+        self.assertEqual(
+            decision,
+            WorkflowFollowupDecision(
+                action="repair",
+                summary="Use a custom repair path.",
+                agent_id=None,
+                request="Investigate first, then patch.",
+                step_groups=(("tester",), ("fixer",), ("reviewer",)),
+                tool_mode="default",
+            ),
+        )
+
     def test_auto_repair_support_is_limited_to_delivery_workflows(self) -> None:
         self.assertTrue(_supports_auto_repair("standard-build"))
         self.assertTrue(_supports_auto_repair("best-of-n"))

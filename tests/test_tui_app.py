@@ -12,7 +12,7 @@ from textual.widgets import Collapsible, Input, RichLog, Static
 from ergon_studio.tui.widgets import ComposerTextArea
 
 from ergon_studio.runtime import load_runtime
-from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
+from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
 from ergon_studio.tui.widgets import AgentStatusBar, InfoBar, SideThreadBlock
 
 
@@ -362,6 +362,41 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertEqual(app.runtime.main_session_id, first_session_id)
             text = _richlog_text(app)
             self.assertIn("main session message", text)
+
+    async def test_switch_session_without_id_opens_picker(self):
+        _, runtime, app = _make_env()
+        load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/switch-session"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, SessionPickerScreen)
+
+    async def test_session_picker_can_switch_sessions(self):
+        _, runtime, app = _make_env()
+        second = load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        async with app.run_test() as pilot:
+            app._open_session_picker()
+            await pilot.pause()
+            screen = app.screen
+            self.assertIsInstance(screen, SessionPickerScreen)
+            screen.dismiss(second.main_session_id)
+            await pilot.pause()
+            self.assertEqual(app.runtime.main_session_id, second.main_session_id)
+            text = _richlog_text(app)
+            self.assertIn("Parallel lane", text)
 
     async def test_archive_current_session_switches_to_fresh_session(self):
         _, runtime, app = _make_env()

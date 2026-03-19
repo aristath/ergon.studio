@@ -85,6 +85,54 @@ class DefinitionEditorScreen(ModalScreen[None]):
         self.dismiss()
 
 
+class SessionPickerScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+    CSS = """
+    #session-picker-container {
+      width: 70%;
+      height: auto;
+      max-height: 80%;
+      border: round $accent;
+      background: $surface;
+      padding: 1;
+    }
+
+    #session-picker-options {
+      height: auto;
+      max-height: 20;
+      margin: 1 0 0 0;
+    }
+    """
+
+    def __init__(self, *, sessions, current_session_id: str) -> None:
+        super().__init__()
+        self.sessions = list(sessions)
+        self.current_session_id = current_session_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="session-picker-container"):
+            yield Static("[b]Switch Session[/b]\nSelect a session and press Enter.")
+            options = []
+            for session in self.sessions:
+                marker = "•" if session.id == self.current_session_id else " "
+                options.append(f"{marker} {session.title}  [dim]{session.id}[/dim]")
+            yield OptionList(*options, id="session-picker-options")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id != "session-picker-options":
+            return
+        index = event.option_list.highlighted
+        if index is None or index < 0 or index >= len(self.sessions):
+            self.dismiss(None)
+            return
+        self.dismiss(self.sessions[index].id)
+
+
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
@@ -431,7 +479,7 @@ class ErgonStudioApp(App[None]):
         elif command == "/switch-session":
             target = args.strip()
             if not target:
-                chat.write("[red]Usage: /switch-session <id>[/red]")
+                self._open_session_picker()
             else:
                 try:
                     new_runtime = load_runtime(
@@ -549,6 +597,34 @@ class ErgonStudioApp(App[None]):
             self.query_one(AgentStatusBar).refresh_from_runtime()
 
         self.push_screen(ConfigWizardScreen(self.runtime), on_dismiss)
+
+    def _open_session_picker(self) -> None:
+        sessions = self.runtime.list_sessions()
+        if not sessions:
+            self.query_one("#main-chat", RichLog).write("[dim]No sessions available.[/dim]")
+            return
+
+        def on_dismiss(result: str | None) -> None:
+            if not result or result == self.runtime.main_session_id:
+                return
+            new_runtime = load_runtime(
+                project_root=self.runtime.paths.project_root,
+                home_dir=self.runtime.paths.home_dir,
+                session_id=result,
+            )
+            session = new_runtime.current_session()
+            notice = "[green]Switched[/green] session"
+            if session is not None:
+                notice = f"[green]Switched[/green] to session {session.title}"
+            self._replace_runtime(new_runtime, notice=notice)
+
+        self.push_screen(
+            SessionPickerScreen(
+                sessions=sessions,
+                current_session_id=self.runtime.main_session_id,
+            ),
+            on_dismiss,
+        )
 
     def action_edit_orchestrator_definition(self) -> None:
         initial_text = self.runtime.read_agent_definition_text("orchestrator")

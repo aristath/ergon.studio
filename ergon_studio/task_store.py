@@ -25,7 +25,10 @@ class TaskStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
         record = TaskRecord(
@@ -38,6 +41,7 @@ class TaskStore:
             parent_task_id=parent_task_id,
         )
         self.metadata.insert_task(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def get_task(self, task_id: str) -> TaskRecord | None:
@@ -57,6 +61,7 @@ class TaskStore:
             parent_task_id=task.parent_task_id,
         )
         self.metadata.update_task(updated)
+        self.metadata.touch_session(task.session_id, updated_at=updated_at)
         return updated
 
     def list_tasks(self, session_id: str) -> list[TaskRecord]:

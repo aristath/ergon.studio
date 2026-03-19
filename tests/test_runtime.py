@@ -40,6 +40,134 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_tool_calls(), [])
             self.assertIsNotNone(runtime.agent_session_store)
 
+    def test_load_runtime_can_create_and_attach_to_multiple_sessions(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Parallel lane",
+            )
+
+            self.assertEqual(first.main_session_id, "session-main")
+            self.assertEqual(first.main_thread_id, "thread-main")
+            self.assertNotEqual(second.main_session_id, first.main_session_id)
+            self.assertTrue(second.main_thread_id.startswith("thread-main-session-"))
+            self.assertEqual(second.current_session().title, "Parallel lane")
+            self.assertEqual(
+                [session.id for session in second.list_sessions()],
+                [second.main_session_id, first.main_session_id],
+            )
+
+    def test_runtime_isolates_messages_by_active_session(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            first.append_message_to_main_thread(
+                message_id="message-main-1",
+                sender="user",
+                kind="chat",
+                body="first session",
+                created_at=1,
+            )
+
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Parallel lane",
+            )
+            second.append_message_to_main_thread(
+                message_id="message-main-2",
+                sender="user",
+                kind="chat",
+                body="second session",
+                created_at=2,
+            )
+
+            reloaded_first = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                session_id="session-main",
+            )
+
+            self.assertEqual(
+                [reloaded_first.conversation_store.read_message_body(message).strip() for message in reloaded_first.list_main_messages()],
+                ["first session"],
+            )
+            self.assertEqual(
+                [second.conversation_store.read_message_body(message).strip() for message in second.list_main_messages()],
+                ["second session"],
+            )
+
+    def test_load_runtime_defaults_to_latest_session(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Latest lane",
+            )
+
+            resumed = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            self.assertEqual(first.main_session_id, "session-main")
+            self.assertEqual(resumed.main_session_id, second.main_session_id)
+            self.assertEqual(resumed.current_session().title, "Latest lane")
+
+    def test_load_runtime_can_reopen_specific_session_by_id(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Parallel lane",
+            )
+
+            reopened = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                session_id=first.main_session_id,
+            )
+
+            self.assertEqual(reopened.main_session_id, first.main_session_id)
+            self.assertNotEqual(reopened.main_session_id, second.main_session_id)
+            self.assertEqual(reopened.current_session().title, "Main Session")
+
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1249,7 +1377,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     created_at=1_710_755_200,
                 )
 
-            session_path = runtime.paths.sessions_dir / "thread-main" / "orchestrator.json"
+            session_path = runtime.paths.session_agent_sessions_dir(runtime.main_session_id) / "thread-main" / "orchestrator.json"
             self.assertTrue(session_path.exists())
             self.assertEqual(first_agent.created_session_ids, ["thread-main:orchestrator"])
             self.assertEqual(first_agent.seen_session_ids, ["thread-main:orchestrator"])

@@ -26,7 +26,10 @@ class EventStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
         record = EventRecord(
@@ -39,6 +42,7 @@ class EventStore:
             task_id=task_id,
         )
         self.metadata.insert_event(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def list_events(self, session_id: str) -> list[EventRecord]:

@@ -29,11 +29,14 @@ class ArtifactStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
 
-        file_path = self.paths.artifacts_dir / f"{artifact_id}.md"
+        file_path = self.paths.session_artifacts_dir(session_id) / f"{artifact_id}.md"
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(_ensure_trailing_newline(content), encoding="utf-8")
 
@@ -48,6 +51,7 @@ class ArtifactStore:
             task_id=task_id,
         )
         self.metadata.insert_artifact(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def list_artifacts(self, session_id: str) -> list[ArtifactRecord]:

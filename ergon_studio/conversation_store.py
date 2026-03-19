@@ -13,22 +13,26 @@ class ConversationStore:
         self.paths = paths
         self.metadata = MetadataStore(paths.state_db_path)
 
-    def create_session(self, session_id: str, created_at: int) -> SessionRecord:
+    def create_session(self, session_id: str, created_at: int, title: str | None = None) -> SessionRecord:
         record = SessionRecord(
             id=session_id,
             project_uuid=str(self.paths.project_uuid),
+            title=title or session_id,
             created_at=created_at,
+            updated_at=created_at,
+            archived_at=None,
         )
         self.metadata.insert_session(record)
         return record
 
-    def ensure_session(self, session_id: str, created_at: int | None = None) -> SessionRecord:
+    def ensure_session(self, session_id: str, created_at: int | None = None, title: str | None = None) -> SessionRecord:
         existing = self.metadata.get_session(session_id)
         if existing is not None:
             return existing
         return self.create_session(
             session_id=session_id,
             created_at=created_at if created_at is not None else _now(),
+            title=title,
         )
 
     def create_thread(
@@ -43,7 +47,7 @@ class ConversationStore:
         parent_task_id: str | None = None,
         parent_thread_id: str | None = None,
     ) -> ThreadRecord:
-        thread_dir = self.paths.threads_dir / thread_id / "messages"
+        thread_dir = self.paths.session_threads_dir(session_id) / thread_id / "messages"
         thread_dir.mkdir(parents=True, exist_ok=True)
         record = ThreadRecord(
             id=thread_id,
@@ -57,6 +61,7 @@ class ConversationStore:
             parent_thread_id=parent_thread_id,
         )
         self.metadata.insert_thread(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def ensure_thread(
@@ -101,7 +106,10 @@ class ConversationStore:
         artifact_id: str | None = None,
         tool_call_id: str | None = None,
     ) -> MessageRecord:
-        message_dir = self.paths.threads_dir / thread_id / "messages"
+        thread = self.metadata.get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"unknown thread: {thread_id}")
+        message_dir = self.paths.session_threads_dir(thread.session_id) / thread_id / "messages"
         message_dir.mkdir(parents=True, exist_ok=True)
         body_path = message_dir / f"{message_id}.md"
         body_path.write_text(_ensure_trailing_newline(body), encoding="utf-8")
@@ -118,6 +126,7 @@ class ConversationStore:
             tool_call_id=tool_call_id,
         )
         self.metadata.insert_message(record)
+        self.metadata.touch_session(thread.session_id, updated_at=created_at)
         return record
 
     def list_messages(self, thread_id: str) -> list[MessageRecord]:
@@ -125,6 +134,12 @@ class ConversationStore:
 
     def list_threads(self, session_id: str) -> list[ThreadRecord]:
         return self.metadata.list_threads(session_id)
+
+    def list_sessions(self, *, include_archived: bool = False) -> list[SessionRecord]:
+        return self.metadata.list_sessions(
+            str(self.paths.project_uuid),
+            include_archived=include_archived,
+        )
 
     def read_message_body(self, message: MessageRecord) -> str:
         return Path(message.body_path).read_text(encoding="utf-8")

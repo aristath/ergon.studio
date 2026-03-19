@@ -15,10 +15,16 @@ def validate_unix_time(value: Any, field_name: str) -> int:
 class SessionRecord:
     id: str
     project_uuid: str
+    title: str
     created_at: int
+    updated_at: int
+    archived_at: int | None = None
 
     def __post_init__(self) -> None:
         validate_unix_time(self.created_at, "created_at")
+        validate_unix_time(self.updated_at, "updated_at")
+        if self.archived_at is not None:
+            validate_unix_time(self.archived_at, "archived_at")
 
 
 @dataclass(frozen=True)

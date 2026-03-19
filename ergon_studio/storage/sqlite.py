@@ -11,7 +11,10 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       project_uuid TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      title TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      archived_at INTEGER
     )
     """,
     """
@@ -163,6 +166,17 @@ def initialize_database(db_path: Path) -> None:
         connection.execute("PRAGMA foreign_keys = ON")
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        _ensure_column(connection, table_name="sessions", column_name="title", definition="TEXT")
+        _ensure_column(connection, table_name="sessions", column_name="updated_at", definition="INTEGER")
+        _ensure_column(connection, table_name="sessions", column_name="archived_at", definition="INTEGER")
+        connection.execute(
+            """
+            UPDATE sessions
+            SET title = COALESCE(title, id),
+                updated_at = COALESCE(updated_at, created_at)
+            WHERE title IS NULL OR updated_at IS NULL
+            """
+        )
         _ensure_column(connection, table_name="threads", column_name="assigned_agent_id", definition="TEXT")
         _ensure_column(connection, table_name="workflow_runs", column_name="current_step_index", definition="INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, table_name="workflow_runs", column_name="last_thread_id", definition="TEXT")
@@ -184,10 +198,36 @@ class MetadataStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO sessions (id, project_uuid, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO sessions (id, project_uuid, title, created_at, updated_at, archived_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (record.id, record.project_uuid, record.created_at),
+                (
+                    record.id,
+                    record.project_uuid,
+                    record.title,
+                    record.created_at,
+                    record.updated_at,
+                    record.archived_at,
+                ),
+            )
+            connection.commit()
+
+    def update_session(self, record: SessionRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE sessions
+                SET project_uuid = ?, title = ?, created_at = ?, updated_at = ?, archived_at = ?
+                WHERE id = ?
+                """,
+                (
+                    record.project_uuid,
+                    record.title,
+                    record.created_at,
+                    record.updated_at,
+                    record.archived_at,
+                    record.id,
+                ),
             )
             connection.commit()
 
@@ -195,7 +235,7 @@ class MetadataStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, project_uuid, created_at
+                SELECT id, project_uuid, title, created_at, updated_at, archived_at
                 FROM sessions
                 WHERE id = ?
                 """,
@@ -203,7 +243,50 @@ class MetadataStore:
             ).fetchone()
         if row is None:
             return None
-        return SessionRecord(id=row[0], project_uuid=row[1], created_at=row[2])
+        return SessionRecord(
+            id=row[0],
+            project_uuid=row[1],
+            title=row[2],
+            created_at=row[3],
+            updated_at=row[4],
+            archived_at=row[5],
+        )
+
+    def list_sessions(self, project_uuid: str, *, include_archived: bool = False) -> list[SessionRecord]:
+        query = """
+            SELECT id, project_uuid, title, created_at, updated_at, archived_at
+            FROM sessions
+            WHERE project_uuid = ?
+        """
+        params: tuple[object, ...] = (project_uuid,)
+        if not include_archived:
+            query += " AND archived_at IS NULL"
+        query += " ORDER BY updated_at DESC, created_at DESC, rowid DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            SessionRecord(
+                id=row[0],
+                project_uuid=row[1],
+                title=row[2],
+                created_at=row[3],
+                updated_at=row[4],
+                archived_at=row[5],
+            )
+            for row in rows
+        ]
+
+    def touch_session(self, session_id: str, *, updated_at: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE sessions
+                SET updated_at = ?
+                WHERE id = ? AND (updated_at IS NULL OR updated_at < ?)
+                """,
+                (updated_at, session_id, updated_at),
+            )
+            connection.commit()
 
     def insert_thread(self, record: ThreadRecord) -> None:
         with self._connect() as connection:

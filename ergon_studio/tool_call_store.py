@@ -33,11 +33,14 @@ class ToolCallStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
 
-        tool_dir = self.paths.logs_dir / "tool_calls"
+        tool_dir = self.paths.session_logs_dir(session_id) / "tool_calls"
         tool_dir.mkdir(parents=True, exist_ok=True)
         request_path = tool_dir / f"{tool_call_id}-request.json"
         request_path.write_text(
@@ -67,6 +70,7 @@ class ToolCallStore:
             error_message=error_message,
         )
         self.metadata.insert_tool_call(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def list_tool_calls(self, session_id: str) -> list[ToolCallRecord]:

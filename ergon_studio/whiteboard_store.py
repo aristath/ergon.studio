@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from ergon_studio.paths import StudioPaths
+from ergon_studio.storage.sqlite import MetadataStore
 from ergon_studio.storage.models import validate_unix_time
 
 
@@ -39,9 +40,16 @@ class TaskWhiteboardRecord:
 class WhiteboardStore:
     def __init__(self, paths: StudioPaths) -> None:
         self.paths = paths
+        self.metadata = MetadataStore(paths.state_db_path)
 
-    def whiteboard_path(self, task_id: str) -> Path:
-        return self.paths.whiteboards_dir / f"{task_id}.md"
+    def whiteboard_path(self, task_id: str, *, session_id: str | None = None) -> Path:
+        resolved_session_id = session_id
+        if resolved_session_id is None:
+            task = self.metadata.get_task(task_id)
+            resolved_session_id = task.session_id if task is not None else None
+        if resolved_session_id is None:
+            return self.paths.whiteboards_dir / f"{task_id}.md"
+        return self.paths.session_whiteboards_dir(resolved_session_id) / f"{task_id}.md"
 
     def read_task_whiteboard(self, task_id: str) -> TaskWhiteboardRecord | None:
         path = self.whiteboard_path(task_id)

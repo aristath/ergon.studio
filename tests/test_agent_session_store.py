@@ -28,8 +28,17 @@ class AgentSessionStoreTests(unittest.TestCase):
             store = AgentSessionStore(paths)
             session = AgentSession(session_id="thread-main:orchestrator")
 
-            store.save_session(thread_id="thread-main", agent_id="orchestrator", session=session)
-            loaded = store.load_session(thread_id="thread-main", agent_id="orchestrator")
+            store.save_session(
+                session_id="session-1",
+                thread_id="thread-main",
+                agent_id="orchestrator",
+                session=session,
+            )
+            loaded = store.load_session(
+                session_id="session-1",
+                thread_id="thread-main",
+                agent_id="orchestrator",
+            )
 
             self.assertIsNotNone(loaded)
             self.assertEqual(loaded.session_id, "thread-main:orchestrator")
@@ -51,6 +60,7 @@ class AgentSessionStoreTests(unittest.TestCase):
             created_ids: list[str] = []
 
             session = store.load_or_create_session(
+                session_id="session-1",
                 thread_id="thread-main",
                 agent_id="orchestrator",
                 session_factory=lambda session_id: created_ids.append(session_id) or AgentSession(session_id=session_id),

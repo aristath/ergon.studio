@@ -32,11 +32,14 @@ class CommandStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
 
-        output_path = self.paths.logs_dir / "commands" / f"{command_run_id}.md"
+        output_path = self.paths.session_logs_dir(session_id) / "commands" / f"{command_run_id}.md"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(_ensure_trailing_newline(output_content), encoding="utf-8")
 
@@ -54,6 +57,7 @@ class CommandStore:
             agent_id=agent_id,
         )
         self.metadata.insert_command_run(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def list_command_runs(self, session_id: str) -> list[CommandRunRecord]:

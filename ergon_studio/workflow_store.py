@@ -27,7 +27,10 @@ class WorkflowStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
         record = WorkflowRunRecord(
@@ -42,6 +45,7 @@ class WorkflowStore:
             last_thread_id=last_thread_id,
         )
         self.metadata.insert_workflow_run(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord | None:
@@ -49,6 +53,7 @@ class WorkflowStore:
 
     def update_workflow_run(self, record: WorkflowRunRecord) -> None:
         self.metadata.update_workflow_run(record)
+        self.metadata.touch_session(record.session_id, updated_at=record.updated_at)
 
     def list_workflow_runs(self, session_id: str) -> list[WorkflowRunRecord]:
         return self.metadata.list_workflow_runs(session_id)

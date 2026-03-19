@@ -46,6 +46,24 @@ class StudioPaths:
     def sessions_dir(self) -> Path:
         return self.project_data_dir / "sessions"
 
+    def session_dir(self, session_id: str) -> Path:
+        return self.sessions_dir / session_id
+
+    def session_threads_dir(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "threads"
+
+    def session_agent_sessions_dir(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "agent_sessions"
+
+    def session_whiteboards_dir(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "whiteboards"
+
+    def session_artifacts_dir(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "artifacts"
+
+    def session_logs_dir(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "logs"
+
     @property
     def threads_dir(self) -> Path:
         return self.project_data_dir / "threads"

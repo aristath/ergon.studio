@@ -26,7 +26,8 @@ from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
+from ergon_studio.session_store import SessionStore
+from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_call_store import ToolCallStore
 from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
@@ -71,6 +72,7 @@ class RuntimeContext:
     paths: StudioPaths
     registry: RuntimeRegistry
     tool_registry: dict[str, object]
+    session_store: SessionStore
     agent_session_store: AgentSessionStore
     conversation_store: ConversationStore
     task_store: TaskStore
@@ -161,6 +163,12 @@ class RuntimeContext:
 
     def read_global_config_text(self) -> str:
         return self.paths.config_path.read_text(encoding="utf-8")
+
+    def current_session(self) -> SessionRecord | None:
+        return self.session_store.get_session(self.main_session_id)
+
+    def list_sessions(self, *, include_archived: bool = False) -> list[SessionRecord]:
+        return self.session_store.list_sessions(include_archived=include_archived)
 
     def save_agent_definition_text(self, *, agent_id: str, text: str, created_at: int | None = None) -> DefinitionDocument:
         definition = self.registry.agent_definitions[agent_id]
@@ -1247,21 +1255,23 @@ class RuntimeContext:
             )
             return prompt_message, None
 
+        thread = self.get_thread(thread_id)
+        runtime_session_id = thread.session_id if thread is not None else self.main_session_id
         session = self.agent_session_store.load_or_create_session(
+            session_id=runtime_session_id,
             thread_id=thread_id,
             agent_id=agent_id,
             session_factory=lambda session_id: agent.create_session(session_id=session_id),
         )
-        thread = self.get_thread(thread_id)
         session.state[WORKSPACE_STATE_KEY] = {
-            "session_id": self.main_session_id,
+            "session_id": runtime_session_id,
             "thread_id": thread_id,
             "task_id": thread.parent_task_id if thread is not None else None,
             "agent_id": agent_id,
             "created_at": created_at,
         }
         tool_context = ToolExecutionContext(
-            session_id=self.main_session_id,
+            session_id=runtime_session_id,
             thread_id=thread_id,
             task_id=thread.parent_task_id if thread is not None else None,
             agent_id=agent_id,
@@ -1287,6 +1297,7 @@ class RuntimeContext:
                 thread_id=thread_id,
             )
             self.agent_session_store.save_session(
+                session_id=runtime_session_id,
                 thread_id=thread_id,
                 agent_id=agent_id,
                 session=session,
@@ -1294,6 +1305,7 @@ class RuntimeContext:
             return prompt_message, None
 
         self.agent_session_store.save_session(
+            session_id=runtime_session_id,
             thread_id=thread_id,
             agent_id=agent_id,
             session=session,
@@ -2692,7 +2704,12 @@ class RuntimeContext:
         return artifact
 
     def ensure_main_conversation(self) -> None:
-        self.conversation_store.ensure_session(self.main_session_id, created_at=0)
+        session = self.current_session()
+        self.conversation_store.ensure_session(
+            self.main_session_id,
+            created_at=0,
+            title=session.title if session is not None else None,
+        )
         self.conversation_store.ensure_thread(
             session_id=self.main_session_id,
             thread_id=self.main_thread_id,
@@ -2777,9 +2794,17 @@ class RuntimeContext:
         return candidate
 
 
-def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
+def load_runtime(
+    project_root: Path,
+    home_dir: Path,
+    *,
+    session_id: str | None = None,
+    create_session: bool = False,
+    session_title: str | None = None,
+) -> RuntimeContext:
     paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
     registry = load_registry(paths)
+    session_store = SessionStore(paths)
     agent_session_store = AgentSessionStore(paths)
     conversation_store = ConversationStore(paths)
     task_store = TaskStore(paths)
@@ -2792,10 +2817,17 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     command_store = CommandStore(paths)
     tool_call_store = ToolCallStore(paths)
     retrieval_index = RetrievalIndex(paths)
+    resolved_session = _resolve_runtime_session(
+        session_store=session_store,
+        session_id=session_id,
+        create_session=create_session,
+        session_title=session_title,
+    )
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
         tool_registry={},
+        session_store=session_store,
         agent_session_store=agent_session_store,
         conversation_store=conversation_store,
         task_store=task_store,
@@ -2808,6 +2840,8 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         command_store=command_store,
         tool_call_store=tool_call_store,
         retrieval_index=retrieval_index,
+        main_session_id=resolved_session.id,
+        main_thread_id=_main_thread_id_for_session(resolved_session.id),
     )
     object.__setattr__(
         runtime,
@@ -2834,6 +2868,46 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     )
     runtime.ensure_main_conversation()
     return runtime
+
+
+def _resolve_runtime_session(
+    *,
+    session_store: SessionStore,
+    session_id: str | None,
+    create_session: bool,
+    session_title: str | None,
+) -> SessionRecord:
+    now = int(time.time())
+    if session_id is not None:
+        existing = session_store.get_session(session_id)
+        if existing is not None:
+            return existing
+        if not create_session:
+            raise ValueError(f"unknown session: {session_id}")
+        return session_store.create_session(
+            session_id=session_id,
+            title=session_title,
+            created_at=now,
+        )
+    if create_session:
+        return session_store.create_session(
+            title=session_title,
+            created_at=now,
+        )
+    latest = session_store.latest_session()
+    if latest is not None:
+        return latest
+    return session_store.create_session(
+        session_id=MAIN_SESSION_ID,
+        title=session_title,
+        created_at=now,
+    )
+
+
+def _main_thread_id_for_session(session_id: str) -> str:
+    if session_id == MAIN_SESSION_ID:
+        return MAIN_THREAD_ID
+    return f"{MAIN_THREAD_ID}-{session_id}"
 
 
 def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:

@@ -33,12 +33,19 @@ class ApprovalStore:
                 SessionRecord(
                     id=session_id,
                     project_uuid=str(self.paths.project_uuid),
+                    title=session_id,
                     created_at=created_at,
+                    updated_at=created_at,
+                    archived_at=None,
                 )
             )
         payload_path = None
         if payload is not None:
-            payload_path = self._write_payload(approval_id=approval_id, payload=payload)
+            payload_path = self._write_payload(
+                session_id=session_id,
+                approval_id=approval_id,
+                payload=payload,
+            )
         record = ApprovalRecord(
             id=approval_id,
             session_id=session_id,
@@ -53,6 +60,7 @@ class ApprovalStore:
             payload_path=payload_path,
         )
         self.metadata.insert_approval(record)
+        self.metadata.touch_session(session_id, updated_at=created_at)
         return record
 
     def get_approval(self, approval_id: str) -> ApprovalRecord | None:
@@ -88,8 +96,9 @@ class ApprovalStore:
         self.metadata.update_approval(updated)
         return updated
 
-    def _write_payload(self, *, approval_id: str, payload: dict[str, Any]) -> Path:
-        payload_path = self.paths.logs_dir / "approvals" / f"{approval_id}.json"
+    def _write_payload(self, *, session_id: str, approval_id: str, payload: dict[str, Any]) -> Path:
+        base_dir = self.paths.session_logs_dir(session_id)
+        payload_path = base_dir / "approvals" / f"{approval_id}.json"
         payload_path.parent.mkdir(parents=True, exist_ok=True)
         payload_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return payload_path

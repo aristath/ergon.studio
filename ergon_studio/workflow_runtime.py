@@ -352,19 +352,20 @@ class _GroupChatParticipantExecutor(Executor):
             raise
 
         session = self.runtime.agent_session_store.load_or_create_session(
+            session_id=self.thread.session_id,
             thread_id=self.thread.id,
             agent_id=self.agent_id,
             session_factory=lambda session_id: base_agent.create_session(session_id=session_id),
         )
         session.state[WORKSPACE_STATE_KEY] = {
-            "session_id": self.runtime.main_session_id,
+            "session_id": self.thread.session_id,
             "thread_id": self.thread.id,
             "task_id": self.thread.parent_task_id,
             "agent_id": self.agent_id,
             "created_at": self.cursor.next(),
         }
         tool_context = ToolExecutionContext(
-            session_id=self.runtime.main_session_id,
+            session_id=self.thread.session_id,
             thread_id=self.thread.id,
             task_id=self.thread.parent_task_id,
             agent_id=self.agent_id,
@@ -382,12 +383,14 @@ class _GroupChatParticipantExecutor(Executor):
                 task_id=self.thread.parent_task_id,
             )
             self.runtime.agent_session_store.save_session(
+                session_id=self.thread.session_id,
                 thread_id=self.thread.id,
                 agent_id=self.agent_id,
                 session=session,
             )
             raise
         self.runtime.agent_session_store.save_session(
+            session_id=self.thread.session_id,
             thread_id=self.thread.id,
             agent_id=self.agent_id,
             session=session,

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import time
 
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
+from ergon_studio.session_store import SessionStore
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import ErgonStudioApp
 
@@ -14,40 +16,43 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     bootstrap_parser = subparsers.add_parser("bootstrap")
-    bootstrap_parser.add_argument(
-        "--project-root",
-        type=Path,
-        default=Path.cwd(),
-    )
-    bootstrap_parser.add_argument(
-        "--home-dir",
-        type=Path,
-        default=Path.home(),
-    )
+    _add_project_args(bootstrap_parser)
 
     tui_parser = subparsers.add_parser("tui")
-    tui_parser.add_argument(
-        "--project-root",
-        type=Path,
-        default=Path.cwd(),
-    )
-    tui_parser.add_argument(
-        "--home-dir",
-        type=Path,
-        default=Path.home(),
-    )
+    _add_project_args(tui_parser)
+    _add_session_args(tui_parser)
 
     eval_parser = subparsers.add_parser("eval")
-    eval_parser.add_argument(
-        "--project-root",
-        type=Path,
-        default=Path.cwd(),
+    _add_project_args(eval_parser)
+    _add_session_args(eval_parser)
+
+    sessions_parser = subparsers.add_parser("sessions")
+    session_subparsers = sessions_parser.add_subparsers(dest="sessions_command", required=True)
+
+    sessions_list_parser = session_subparsers.add_parser("list")
+    _add_project_args(sessions_list_parser)
+    sessions_list_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include archived sessions",
     )
-    eval_parser.add_argument(
-        "--home-dir",
-        type=Path,
-        default=Path.home(),
+
+    sessions_new_parser = session_subparsers.add_parser("new")
+    _add_project_args(sessions_new_parser)
+    sessions_new_parser.add_argument(
+        "--title",
+        type=str,
+        default=None,
     )
+
+    sessions_rename_parser = session_subparsers.add_parser("rename")
+    _add_project_args(sessions_rename_parser)
+    sessions_rename_parser.add_argument("session_id", type=str)
+    sessions_rename_parser.add_argument("--title", type=str, required=True)
+
+    sessions_archive_parser = session_subparsers.add_parser("archive")
+    _add_project_args(sessions_archive_parser)
+    sessions_archive_parser.add_argument("session_id", type=str)
     return parser
 
 
@@ -68,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         runtime = load_runtime(
             project_root=args.project_root,
             home_dir=args.home_dir,
+            session_id=args.session_id,
+            create_session=args.new_session,
+            session_title=args.title,
         )
         app = ErgonStudioApp(runtime)
         app.run()
@@ -77,14 +85,88 @@ def main(argv: list[str] | None = None) -> int:
         runtime = load_runtime(
             project_root=args.project_root,
             home_dir=args.home_dir,
+            session_id=args.session_id,
+            create_session=args.new_session,
+            session_title=args.title,
         )
         results = run_builtin_evals(runtime)
         report_path = write_eval_report(runtime, results)
         print(summarize_results(results))
+        print(f"session_id={runtime.main_session_id}")
         print(f"report={report_path}")
         for result in results:
             print(f"{result.name}:{result.status}:{result.details}")
         return 0
 
+    if args.command == "sessions":
+        paths = bootstrap_workspace(
+            project_root=args.project_root,
+            home_dir=args.home_dir,
+        )
+        store = SessionStore(paths)
+        if args.sessions_command == "list":
+            for session in store.list_sessions(include_archived=args.all):
+                archived = " archived" if session.archived_at is not None else ""
+                print(f"{session.id}\t{session.title}\t{session.updated_at}{archived}")
+            return 0
+        if args.sessions_command == "new":
+            session = store.create_session(
+                title=args.title,
+                created_at=int(time.time()),
+            )
+            print(f"session_id={session.id}")
+            print(f"title={session.title}")
+            return 0
+        if args.sessions_command == "rename":
+            session = store.rename_session(
+                session_id=args.session_id,
+                title=args.title,
+                updated_at=int(time.time()),
+            )
+            print(f"session_id={session.id}")
+            print(f"title={session.title}")
+            return 0
+        if args.sessions_command == "archive":
+            session = store.archive_session(
+                session_id=args.session_id,
+                archived_at=int(time.time()),
+            )
+            print(f"session_id={session.id}")
+            print("archived=true")
+            return 0
+
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+def _add_project_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+    )
+    parser.add_argument(
+        "--home-dir",
+        type=Path,
+        default=Path.home(),
+    )
+
+
+def _add_session_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--session",
+        dest="session_id",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--new-session",
+        action="store_true",
+        help="Create and attach to a new session",
+    )
+    parser.add_argument(
+        "--title",
+        type=str,
+        default=None,
+        help="Optional title when creating a new session",
+    )

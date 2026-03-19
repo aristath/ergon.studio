@@ -37,7 +37,10 @@ class MetadataStoreTests(unittest.TestCase):
             session = SessionRecord(
                 id="session-1",
                 project_uuid="12345678-1234-5678-1234-567812345678",
+                title="Session 1",
                 created_at=1_710_755_200,
+                updated_at=1_710_755_200,
+                archived_at=None,
             )
             thread = ThreadRecord(
                 id="thread-1",
@@ -113,7 +116,10 @@ class MetadataStoreTests(unittest.TestCase):
             session = SessionRecord(
                 id="session-1",
                 project_uuid="12345678-1234-5678-1234-567812345678",
+                title="Session 1",
                 created_at=1,
+                updated_at=1,
+                archived_at=None,
             )
             thread = ThreadRecord(
                 id="thread-1",

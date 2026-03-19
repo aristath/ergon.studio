@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agent_framework import Agent, Executor, Message, WorkflowBuilder, WorkflowContext, handler
-from agent_framework.orchestrations import GroupChatBuilder, clean_conversation_for_handoff
+from agent_framework.orchestrations import GroupChatBuilder, HandoffBuilder, MagenticBuilder, clean_conversation_for_handoff
 from agent_framework_orchestrations._base_group_chat_orchestrator import GroupChatParticipantMessage, GroupChatRequestMessage, GroupChatResponseMessage
 
 from ergon_studio.agent_factory import compose_instructions
@@ -539,6 +539,26 @@ async def execute_defined_workflow(
             cursor=cursor,
             tracker=tracker,
         )
+    if _workflow_orchestration(runtime, workflow_run.workflow_id) == "magentic":
+        return await _execute_magentic_workflow(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            cursor=cursor,
+            tracker=tracker,
+        )
+    if _workflow_orchestration(runtime, workflow_run.workflow_id) == "handoff":
+        return await _execute_handoff_workflow(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            cursor=cursor,
+            tracker=tracker,
+        )
     active_workflow_run = workflow_run
     active_run_view = run_view
     start_step_index = 0
@@ -742,6 +762,292 @@ async def _execute_group_chat_workflow(
     )
 
 
+async def _execute_magentic_workflow(
+    *,
+    runtime: RuntimeContext,
+    workflow_run: WorkflowRunRecord,
+    run_view: WorkflowRunView,
+    goal: str,
+    review_thread: ThreadRecord,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+) -> WorkflowExecutionSummary:
+    if not run_view.steps or not run_view.steps[0].threads:
+        tracker.failed = True
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=None,
+        )
+
+    workroom_thread = run_view.steps[0].threads[0]
+    participant_ids = _workflow_participants(runtime, workflow_run.workflow_id)
+    runtime.update_task_state(
+        task_id=run_view.steps[0].task.id,
+        state="in_progress",
+        updated_at=cursor.next(),
+    )
+    runtime.append_message_to_thread(
+        thread_id=workroom_thread.id,
+        message_id=f"message-{uuid4().hex}",
+        sender="workflow",
+        kind="assignment",
+        body=_render_group_chat_assignment(
+            workflow_id=workflow_run.workflow_id,
+            goal=goal,
+            participants=participant_ids,
+        ),
+        created_at=cursor.next(),
+    )
+    participant_executors = [
+        _GroupChatParticipantExecutor(
+            runtime=runtime,
+            thread=workroom_thread,
+            agent_id=agent_id,
+            workflow_id=workflow_run.workflow_id,
+            goal=goal,
+            cursor=cursor,
+            tracker=tracker,
+        )
+        for agent_id in participant_ids
+    ]
+    manager_agent = _build_magentic_manager_agent(runtime, workflow_run.workflow_id, participant_ids)
+    workflow = MagenticBuilder(
+        participants=participant_executors,
+        manager_agent=manager_agent,
+        max_round_count=_workflow_max_rounds(runtime, workflow_run.workflow_id),
+        enable_plan_review=False,
+    ).build()
+
+    try:
+        result = await workflow.run(goal, include_status_events=True)
+    except Exception as exc:
+        tracker.failed = True
+        tracker.last_thread_id = workroom_thread.id
+        runtime.append_event(
+            kind="workflow_failed",
+            summary=f"Magentic workflow failed: {type(exc).__name__}: {exc}",
+            created_at=cursor.next(),
+            thread_id=workroom_thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=None,
+        )
+
+    _record_magentic_events(
+        runtime=runtime,
+        result=result,
+        thread=workroom_thread,
+        task_id=workflow_run.root_task_id,
+        cursor=cursor,
+    )
+    _append_output_messages_to_thread(
+        runtime=runtime,
+        thread=workroom_thread,
+        outputs=result.get_outputs(),
+        cursor=cursor,
+        tracker=tracker,
+        assistant_only=False,
+    )
+    if result.get_request_info_events():
+        tracker.blocked_step_index = 0
+        tracker.blocked_thread_id = workroom_thread.id
+        tracker.last_thread_id = workroom_thread.id
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=result,
+        )
+
+    transcript = _read_thread_transcript(runtime, workroom_thread.id)
+    tracker.thread_outputs[workroom_thread.id] = transcript
+    tracker.last_thread_id = workroom_thread.id
+    runtime.update_task_state(
+        task_id=run_view.steps[0].task.id,
+        state="completed",
+        updated_at=cursor.next(),
+    )
+    await _perform_orchestrator_review(
+        runtime=runtime,
+        workflow_run=workflow_run,
+        review_thread=review_thread,
+        goal=goal,
+        payload=transcript,
+        cursor=cursor,
+        tracker=tracker,
+    )
+    return _finalize_workflow_run(
+        runtime=runtime,
+        workflow_run=workflow_run,
+        run_view=run_view,
+        goal=goal,
+        review_thread=review_thread,
+        tracker=tracker,
+        cursor=cursor,
+        result=result,
+    )
+
+
+async def _execute_handoff_workflow(
+    *,
+    runtime: RuntimeContext,
+    workflow_run: WorkflowRunRecord,
+    run_view: WorkflowRunView,
+    goal: str,
+    review_thread: ThreadRecord,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+) -> WorkflowExecutionSummary:
+    if not run_view.steps or not run_view.steps[0].threads:
+        tracker.failed = True
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=None,
+        )
+
+    workroom_thread = run_view.steps[0].threads[0]
+    participant_ids = _workflow_participants(runtime, workflow_run.workflow_id)
+    runtime.update_task_state(
+        task_id=run_view.steps[0].task.id,
+        state="in_progress",
+        updated_at=cursor.next(),
+    )
+    runtime.append_message_to_thread(
+        thread_id=workroom_thread.id,
+        message_id=f"message-{uuid4().hex}",
+        sender="workflow",
+        kind="assignment",
+        body=_render_group_chat_assignment(
+            workflow_id=workflow_run.workflow_id,
+            goal=goal,
+            participants=participant_ids,
+        ),
+        created_at=cursor.next(),
+    )
+    agents = _build_handoff_agents(runtime, workflow_run.workflow_id, participant_ids)
+    builder = HandoffBuilder(
+        name=f"workflow-{workflow_run.id}-handoff",
+        participants=list(agents.values()),
+        termination_condition=_build_handoff_termination_condition(runtime, workflow_run.workflow_id),
+    ).with_start_agent(agents[_handoff_start_agent(runtime, workflow_run.workflow_id, participant_ids)])
+    builder = builder.with_autonomous_mode(
+        agents=list(_handoff_autonomous_agents(runtime, workflow_run.workflow_id, participant_ids)),
+        turn_limits={
+            agent_id: _handoff_autonomous_turn_limit(runtime, workflow_run.workflow_id)
+            for agent_id in participant_ids
+        },
+    )
+    _apply_handoff_topology(builder, runtime, workflow_run.workflow_id, agents, participant_ids)
+    workflow = builder.build()
+
+    try:
+        result = await workflow.run(
+            Message(role="user", text=goal, author_name="workflow"),
+            include_status_events=True,
+        )
+    except Exception as exc:
+        tracker.failed = True
+        tracker.last_thread_id = workroom_thread.id
+        runtime.append_event(
+            kind="workflow_failed",
+            summary=f"Handoff workflow failed: {type(exc).__name__}: {exc}",
+            created_at=cursor.next(),
+            thread_id=workroom_thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=None,
+        )
+
+    handoff_results = [result]
+    while result.get_request_info_events():
+        responses = {
+            event.request_id: []
+            for event in result.get_request_info_events()
+        }
+        result = await workflow.run(
+            responses=responses,
+            include_status_events=True,
+        )
+        handoff_results.append(result)
+
+    for handoff_result in handoff_results:
+        _record_handoff_events(
+            runtime=runtime,
+            result=handoff_result,
+            thread=workroom_thread,
+            task_id=workflow_run.root_task_id,
+            cursor=cursor,
+        )
+    _append_output_messages_to_thread(
+        runtime=runtime,
+        thread=workroom_thread,
+        outputs=_combine_workflow_outputs(handoff_results),
+        cursor=cursor,
+        tracker=tracker,
+        assistant_only=True,
+    )
+
+    transcript = _read_thread_transcript(runtime, workroom_thread.id)
+    tracker.thread_outputs[workroom_thread.id] = transcript
+    tracker.last_thread_id = workroom_thread.id
+    runtime.update_task_state(
+        task_id=run_view.steps[0].task.id,
+        state="completed",
+        updated_at=cursor.next(),
+    )
+    await _perform_orchestrator_review(
+        runtime=runtime,
+        workflow_run=workflow_run,
+        review_thread=review_thread,
+        goal=goal,
+        payload=transcript,
+        cursor=cursor,
+        tracker=tracker,
+    )
+    return _finalize_workflow_run(
+        runtime=runtime,
+        workflow_run=workflow_run,
+        run_view=run_view,
+        goal=goal,
+        review_thread=review_thread,
+        tracker=tracker,
+        cursor=cursor,
+        result=result,
+    )
+
+
 async def _execute_workflow_pass(
     *,
     runtime: RuntimeContext,
@@ -908,6 +1214,16 @@ def _workflow_group_chat_sequence(runtime: RuntimeContext, workflow_id: str) -> 
     return tuple(sequence)
 
 
+def _workflow_participants(runtime: RuntimeContext, workflow_id: str) -> tuple[str, ...]:
+    groups = runtime.workflow_step_groups(workflow_id)
+    participant_ids: list[str] = []
+    for group in groups:
+        for agent_id in group:
+            if agent_id not in participant_ids:
+                participant_ids.append(agent_id)
+    return tuple(participant_ids)
+
+
 def _workflow_acceptance_rule(runtime: RuntimeContext, workflow_id: str) -> str:
     acceptance_mode = str(runtime.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery"))
     if acceptance_mode == "decision_ready":
@@ -918,7 +1234,10 @@ def _workflow_acceptance_rule(runtime: RuntimeContext, workflow_id: str) -> str:
         return "Decide whether the work produced a concrete design brief that is implementation-ready and aligned with the goal."
     if acceptance_mode == "revised_plan":
         return "Decide whether the work produced an explicit revised plan that realigns the project and is actionable."
-    return "Decide whether the work satisfies the goal and represents a minimal working delivery."
+    return (
+        "Decide whether the work satisfies the goal and represents a minimal working delivery. "
+        "For runnable deliverables, require concrete command evidence that at least one direct invocation worked."
+    )
 
 
 def _build_group_chat_manager(
@@ -1029,13 +1348,317 @@ def _build_group_chat_selection_func(runtime: RuntimeContext, workflow_id: str):
 
 
 def _group_chat_participants(runtime: RuntimeContext, workflow_id: str) -> tuple[str, ...]:
-    groups = runtime.workflow_step_groups(workflow_id)
-    participant_ids: list[str] = []
-    for group in groups:
-        for agent_id in group:
-            if agent_id not in participant_ids:
-                participant_ids.append(agent_id)
-    return tuple(participant_ids)
+    return _workflow_participants(runtime, workflow_id)
+
+
+def _build_magentic_manager_agent(
+    runtime: RuntimeContext,
+    workflow_id: str,
+    participants: Sequence[str],
+) -> Agent:
+    orchestrator = runtime.build_agent("orchestrator")
+    client = getattr(orchestrator, "client", None)
+    if client is None:
+        raise ValueError("orchestrator client is unavailable for magentic workflow management")
+    participant_list = ", ".join(participants)
+    return Agent(
+        client=client,
+        id=f"{workflow_id}-magentic-manager",
+        name="Adaptive Workflow Manager",
+        description="Coordinates dynamic specialist delegation",
+        instructions="\n".join(
+            [
+                "You are the adaptive manager for a local AI software team.",
+                f"The available participants are: {participant_list}.",
+                "Make a concrete plan, pick the next best specialist, track progress, and replan when necessary.",
+                "Do not implement the task yourself unless producing the final manager answer is required.",
+                "Use the specialists to move the task forward and keep the final answer concrete.",
+            ]
+        ),
+        context_providers=getattr(orchestrator, "context_providers", None),
+        default_options=getattr(orchestrator, "default_options", None),
+    )
+
+
+def _build_handoff_agents(
+    runtime: RuntimeContext,
+    workflow_id: str,
+    participants: Sequence[str],
+) -> dict[str, Agent]:
+    agents: dict[str, Agent] = {}
+    for agent_id in participants:
+        base_agent = runtime.build_agent(agent_id)
+        client = getattr(base_agent, "client", None)
+        if client is None:
+            raise ValueError(f"{agent_id} is unavailable for handoff workflow execution")
+        definition = runtime.registry.agent_definitions[agent_id]
+        instructions = compose_instructions(definition)
+        extra = _handoff_agent_instructions(runtime, workflow_id, agent_id)
+        if extra:
+            instructions = f"{instructions}\n\n{extra}".strip()
+        agents[agent_id] = Agent(
+            client=client,
+            id=base_agent.id,
+            name=base_agent.name,
+            description=base_agent.description,
+            instructions=instructions,
+            context_providers=getattr(base_agent, "context_providers", None),
+            default_options=getattr(base_agent, "default_options", None),
+        )
+    return agents
+
+
+def _handoff_agent_instructions(runtime: RuntimeContext, workflow_id: str, agent_id: str) -> str:
+    acceptance_mode = str(runtime.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery"))
+    lines = [
+        "You are participating in a decentralized specialist handoff workflow.",
+        "If another specialist is better placed to continue, use a handoff tool instead of trying to do everything yourself.",
+        "If you can finish your part cleanly, respond directly and stop.",
+    ]
+    if acceptance_mode == "decision_ready":
+        lines.extend(
+            [
+                "This is a discussion workflow, not an implementation workflow.",
+                "Aim for a concrete decision-ready recommendation, not code changes.",
+            ]
+        )
+    if agent_id == "reviewer":
+        lines.append("When the discussion is ready to conclude, return the final recommendation plainly without handing off.")
+    return "\n".join(lines)
+
+
+def _handoff_start_agent(
+    runtime: RuntimeContext,
+    workflow_id: str,
+    participants: Sequence[str],
+) -> str:
+    configured = runtime.registry.workflow_definitions[workflow_id].metadata.get("start_agent")
+    if isinstance(configured, str) and configured in participants:
+        return configured
+    if not participants:
+        raise ValueError(f"handoff workflow '{workflow_id}' has no participants")
+    return participants[0]
+
+
+def _handoff_finalizers(runtime: RuntimeContext, workflow_id: str) -> tuple[str, ...]:
+    configured = runtime.registry.workflow_definitions[workflow_id].metadata.get("finalizers")
+    if not isinstance(configured, list):
+        return ("reviewer",)
+    finalizers: list[str] = []
+    for item in configured:
+        if isinstance(item, str) and item.strip():
+            finalizers.append(item.strip())
+    return tuple(finalizers) or ("reviewer",)
+
+
+def _handoff_autonomous_agents(
+    runtime: RuntimeContext,
+    workflow_id: str,
+    participants: Sequence[str],
+) -> tuple[str, ...]:
+    configured = runtime.registry.workflow_definitions[workflow_id].metadata.get("autonomous_agents")
+    if not isinstance(configured, list):
+        return tuple(participants)
+    enabled: list[str] = []
+    for item in configured:
+        if isinstance(item, str) and item in participants:
+            enabled.append(item)
+    return tuple(enabled) or tuple(participants)
+
+
+def _handoff_autonomous_turn_limit(runtime: RuntimeContext, workflow_id: str) -> int:
+    value = runtime.registry.workflow_definitions[workflow_id].metadata.get("autonomous_turn_limit")
+    if type(value) is int and value > 0:
+        return value
+    return 2
+
+
+def _handoff_topology(runtime: RuntimeContext, workflow_id: str) -> dict[str, tuple[str, ...]]:
+    configured = runtime.registry.workflow_definitions[workflow_id].metadata.get("handoffs")
+    if not isinstance(configured, dict):
+        return {}
+    topology: dict[str, tuple[str, ...]] = {}
+    for source, raw_targets in configured.items():
+        if not isinstance(source, str):
+            continue
+        if isinstance(raw_targets, str):
+            topology[source] = (raw_targets,)
+            continue
+        if not isinstance(raw_targets, list):
+            continue
+        targets = tuple(item for item in raw_targets if isinstance(item, str) and item)
+        if targets:
+            topology[source] = targets
+    return topology
+
+
+def _apply_handoff_topology(
+    builder: HandoffBuilder,
+    runtime: RuntimeContext,
+    workflow_id: str,
+    agents: dict[str, Agent],
+    participants: Sequence[str],
+) -> None:
+    topology = _handoff_topology(runtime, workflow_id)
+    if not topology:
+        return
+    for source_id in participants:
+        targets = topology.get(source_id)
+        if not targets:
+            continue
+        builder.add_handoff(agents[source_id], [agents[target_id] for target_id in targets if target_id in agents])
+
+
+def _build_handoff_termination_condition(runtime: RuntimeContext, workflow_id: str):
+    finalizers = set(_handoff_finalizers(runtime, workflow_id))
+    max_rounds = _workflow_max_rounds(runtime, workflow_id)
+
+    def _termination(messages: list[Message]) -> bool:
+        assistant_messages = [message for message in messages if message.role == "assistant"]
+        if not assistant_messages:
+            return False
+        last = assistant_messages[-1]
+        author_name = last.author_name if isinstance(last.author_name, str) else ""
+        if author_name in finalizers and len(assistant_messages) >= 2:
+            return True
+        return max_rounds is not None and len(assistant_messages) >= max_rounds
+
+    return _termination
+
+
+def _record_magentic_events(
+    *,
+    runtime: RuntimeContext,
+    result,
+    thread: ThreadRecord,
+    task_id: str | None,
+    cursor: _TimestampCursor,
+) -> None:
+    for event in result:
+        if event.type != "magentic_orchestrator":
+            continue
+        data = getattr(event, "data", None)
+        event_type = str(getattr(data, "event_type", "")).split(".")[-1].lower()
+        content = getattr(data, "content", None)
+        if isinstance(content, Message):
+            sender = content.author_name if isinstance(content.author_name, str) and content.author_name else "magentic_manager"
+            body = _message_text(content)
+            if body:
+                runtime.append_message_to_thread(
+                    thread_id=thread.id,
+                    message_id=f"message-{uuid4().hex}",
+                    sender=sender,
+                    kind="status_update",
+                    body=body,
+                    created_at=cursor.next(),
+                )
+                runtime.append_event(
+                    kind=f"magentic_{event_type or 'update'}",
+                    summary=f"Magentic manager updated {thread.summary or thread.id}",
+                    created_at=cursor.next(),
+                    thread_id=thread.id,
+                    task_id=task_id,
+                )
+
+
+def _record_handoff_events(
+    *,
+    runtime: RuntimeContext,
+    result,
+    thread: ThreadRecord,
+    task_id: str | None,
+    cursor: _TimestampCursor,
+) -> None:
+    for event in result:
+        if event.type != "handoff_sent":
+            continue
+        data = getattr(event, "data", None)
+        source = getattr(data, "source", None)
+        target = getattr(data, "target", None)
+        if isinstance(source, str) and isinstance(target, str):
+            runtime.append_event(
+                kind="workflow_handoff",
+                summary=f"{source} handed off to {target}",
+                created_at=cursor.next(),
+                thread_id=thread.id,
+                task_id=task_id,
+            )
+
+
+def _append_output_messages_to_thread(
+    *,
+    runtime: RuntimeContext,
+    thread: ThreadRecord,
+    outputs: list[object],
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+    assistant_only: bool,
+) -> None:
+    messages = _collect_output_messages(outputs)
+    for message in messages:
+        if assistant_only and message.role != "assistant":
+            continue
+        body = _message_text(message)
+        if not body:
+            continue
+        sender = message.author_name if isinstance(message.author_name, str) and message.author_name else (
+            thread.assigned_agent_id or message.role or "workflow"
+        )
+        runtime.append_message_to_thread(
+            thread_id=thread.id,
+            message_id=f"message-{uuid4().hex}",
+            sender=sender,
+            kind="chat",
+            body=body,
+            created_at=cursor.next(),
+        )
+        _append_thread_output(
+            tracker=tracker,
+            thread_id=thread.id,
+            speaker=sender,
+            body=body,
+        )
+        tracker.last_thread_id = thread.id
+
+
+def _collect_output_messages(outputs: list[object]) -> list[Message]:
+    messages: list[Message] = []
+    for output in outputs:
+        if isinstance(output, Message):
+            messages.append(output)
+            continue
+        if not isinstance(output, list):
+            continue
+        for item in output:
+            if isinstance(item, Message):
+                messages.append(item)
+    return messages
+
+
+def _combine_workflow_outputs(results: Sequence[object]) -> list[object]:
+    outputs: list[object] = []
+    for result in results:
+        getter = getattr(result, "get_outputs", None)
+        if getter is None:
+            continue
+        outputs.extend(getter())
+    return outputs
+
+
+def _message_text(message: Message) -> str:
+    text = message.text.strip() if isinstance(message.text, str) else ""
+    if text:
+        return text
+    contents = getattr(message, "contents", None)
+    if not isinstance(contents, list):
+        return ""
+    lines: list[str] = []
+    for content in contents:
+        content_text = getattr(content, "text", None)
+        if isinstance(content_text, str) and content_text.strip():
+            lines.append(content_text.strip())
+    return "\n\n".join(lines).strip()
+
 
 
 def _append_thread_output(
@@ -1340,6 +1963,10 @@ def _render_step_prompt(
         f"Step: {step_index + 1}/{total_steps}",
         f"Assigned agent: {agent_id}",
         "",
+        "Step contract:",
+        "Complete only the work for your assigned role in this step.",
+        "Do not claim later workflow steps are already done unless you actually performed them with tools available to you.",
+        "",
         "Goal:",
         goal,
         "",
@@ -1406,23 +2033,27 @@ def _step_role_rules(agent_id: str) -> str:
     if agent_id == "architect":
         return (
             "Produce a concrete handoff for implementation: proposed files, responsibilities, CLI behavior, "
-            "and any key edge cases. Do not stop at saying you will design it."
+            "and any key edge cases. For runnable deliverables, name one obvious entrypoint and one obvious way to run it. "
+            "Do not stop at saying you will design it, and do not claim the implementation already exists."
         )
     if agent_id == "coder":
         return (
             "Produce actual repo changes in this step. Use file tools to create or modify the implementation. "
             "A prose-only answer is not sufficient. Keep the solution minimal, avoid extra files unless required, "
-            "and run at most two focused verification commands."
+            "and run at most two focused verification commands. For runnable deliverables, prefer one obvious entrypoint "
+            "and include one exact working invocation in your handoff."
         )
     if agent_id == "tester":
         return (
             "Verify the actual implementation with focused commands. Report the concrete commands and outcomes. "
-            "If something is missing or broken, say so plainly. Run at most two focused verification commands."
+            "If something is missing or broken, say so plainly. Run at most two focused verification commands. "
+            "For runnable deliverables, confirm that at least one direct non-interactive invocation succeeds."
         )
     if agent_id == "reviewer":
         return (
             "Review the actual workspace state and verification evidence. Approve only if the requested deliverable exists "
-            "and the essential behavior is covered. Run at most two focused checks."
+            "and the essential behavior is covered. For runnable deliverables, require concrete black-box command evidence. "
+            "Run at most two focused checks."
         )
     return "Move the assigned work forward concretely."
 
@@ -1538,6 +2169,7 @@ def _orchestrator_review_instructions() -> str:
         [
             "You are a dedicated workflow acceptance reviewer.",
             "Judge whether the work satisfies the stated goal and whether it is a minimal working delivery.",
+            "For runnable deliverables, reject the work if the evidence does not show at least one concrete successful command run.",
             "Do not suggest optional polish.",
             "Do not delegate, do not plan, and do not call tools.",
             "Output JSON only with this shape:",

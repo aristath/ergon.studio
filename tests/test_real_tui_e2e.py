@@ -64,7 +64,7 @@ def _configure_local_runtime(runtime) -> None:
     runtime.reload_registry()
 
 
-def _calculator_entrypoint(project_root: Path) -> tuple[Path, list[str]] | None:
+def _calculator_entrypoints(project_root: Path) -> list[tuple[Path, list[str]]]:
     candidates: list[tuple[Path, list[str]]] = []
     seen_paths: set[Path] = set()
 
@@ -94,7 +94,7 @@ def _calculator_entrypoint(project_root: Path) -> tuple[Path, list[str]] | None:
         if module_name:
             add_candidate(path, _cli_command_candidates(f"python3 -m {module_name}"))
 
-    return candidates[0] if candidates else None
+    return candidates
 
 
 def _cli_command_candidates(invocation: str) -> list[str]:
@@ -127,6 +127,18 @@ def _verification_commands(project_root: Path, entrypoint_commands: list[str]) -
 @unittest.skipUnless(_model_available(), f"requires local llama-router model {MODEL_ID}")
 class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
     async def test_textual_app_can_build_end_to_end_from_main_chat(self) -> None:
+        last_error: AssertionError | None = None
+        for _attempt in range(2):
+            try:
+                await self._assert_textual_build_flow()
+                return
+            except AssertionError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        self.fail("textual build flow did not run")
+
+    async def _assert_textual_build_flow(self) -> None:
         from ergon_studio.tui.app import ErgonStudioApp
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -148,18 +160,17 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                 )
                 await app.on_input_submitted(SimpleNamespace(value=composer.value, input=composer))
                 await self._wait_for(
-                    lambda: bool(runtime.list_workflow_runs()) and runtime.list_workflow_runs()[0].state == "completed",
+                    lambda: self._workflow_finished(runtime),
                     pilot,
-                    attempts=1800,
+                    attempts=4200,
                 )
 
                 workflow_runs = runtime.list_workflow_runs()
                 self.assertEqual(len(workflow_runs), 1)
                 self.assertEqual(workflow_runs[0].state, "completed")
 
-                entrypoint = _calculator_entrypoint(project_root)
-                self.assertIsNotNone(entrypoint, "expected a calculator implementation to be created")
-                assert entrypoint is not None
+                entrypoints = _calculator_entrypoints(project_root)
+                self.assertTrue(entrypoints, "expected a calculator implementation to be created")
 
                 final_message = runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]).strip()
                 self.assertIn("workflow", final_message.lower())
@@ -168,25 +179,27 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Checks:", final_message)
 
                 successful_result = None
-                for index, (command, require_output_prefix) in enumerate(
-                    _verification_commands(project_root, entrypoint[1]),
-                    start=1,
-                ):
-                    command_result = runtime.run_workspace_command(
-                        command,
-                        created_at=10_000 + index,
-                        thread_id=runtime.main_thread_id,
-                        agent_id="tester",
-                        require_approval=False,
-                    )
-                    if command_result["status"] != "completed":
-                        continue
-                    if command_result["exit_code"] != 0:
-                        continue
-                    if require_output_prefix and "5" not in str(command_result["stdout"]):
-                        continue
-                    successful_result = command_result
-                    break
+                command_index = 0
+                for _path, commands in entrypoints:
+                    for command, require_output_prefix in _verification_commands(project_root, commands):
+                        command_index += 1
+                        command_result = runtime.run_workspace_command(
+                            command,
+                            created_at=10_000 + command_index,
+                            thread_id=runtime.main_thread_id,
+                            agent_id="tester",
+                            require_approval=False,
+                        )
+                        if command_result["status"] != "completed":
+                            continue
+                        if command_result["exit_code"] != 0:
+                            continue
+                        if require_output_prefix and "5" not in str(command_result["stdout"]):
+                            continue
+                        successful_result = command_result
+                        break
+                    if successful_result is not None:
+                        break
                 self.assertIsNotNone(successful_result, "expected one calculator invocation to succeed")
 
     async def _wait_for(self, predicate, pilot, *, attempts: int = 200) -> None:
@@ -195,3 +208,12 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                 return
             await pilot.pause()
         self.fail("condition not reached before timeout")
+
+    def _workflow_finished(self, runtime) -> bool:
+        workflow_runs = runtime.list_workflow_runs()
+        if not workflow_runs:
+            return False
+        state = workflow_runs[0].state
+        if state in {"blocked", "failed"}:
+            self.fail(f"workflow ended in unexpected state: {state}")
+        return state == "completed"

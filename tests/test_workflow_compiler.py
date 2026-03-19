@@ -80,3 +80,57 @@ Compare competing approaches.
             self.assertIn("architect", mermaid)
             self.assertIn("brainstormer", mermaid)
             self.assertIn("reviewer", mermaid)
+
+    def test_compile_workflow_definition_supports_magentic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            definition_path = Path(temp_dir) / "dynamic-open-ended.md"
+            definition_path.write_text(
+                """---
+id: dynamic-open-ended
+name: Dynamic Open Ended
+orchestration: magentic
+step_groups:
+  - [architect, coder, reviewer]
+max_rounds: 8
+---
+## Purpose
+Adaptive specialist delegation.
+""",
+                encoding="utf-8",
+            )
+
+            compiled = compile_workflow_definition(load_definition(definition_path))
+            mermaid = compiled.to_mermaid()
+
+            self.assertEqual(compiled.definition_id, "dynamic-open-ended")
+            self.assertIn("magentic_manager", mermaid)
+            self.assertIn("architect", mermaid)
+            self.assertIn("coder", mermaid)
+            self.assertIn("reviewer", mermaid)
+
+    def test_compile_workflow_definition_supports_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            definition_path = Path(temp_dir) / "specialist-handoff.md"
+            definition_path.write_text(
+                """---
+id: specialist-handoff
+name: Specialist Handoff
+orchestration: handoff
+step_groups:
+  - [architect, researcher, reviewer]
+max_rounds: 6
+---
+## Purpose
+Decentralized specialist routing.
+""",
+                encoding="utf-8",
+            )
+
+            compiled = compile_workflow_definition(load_definition(definition_path))
+            mermaid = compiled.to_mermaid()
+
+            self.assertEqual(compiled.definition_id, "specialist-handoff")
+            self.assertIn("handoff_router", mermaid)
+            self.assertIn("architect", mermaid)
+            self.assertIn("researcher", mermaid)
+            self.assertIn("reviewer", mermaid)

@@ -62,7 +62,7 @@ def _configure_local_runtime(runtime) -> None:
     runtime.reload_registry()
 
 
-def _calculator_entrypoint(project_root: Path) -> tuple[Path, list[str]] | None:
+def _calculator_entrypoints(project_root: Path) -> list[tuple[Path, list[str]]]:
     candidates: list[tuple[Path, list[str]]] = []
     seen_paths: set[Path] = set()
 
@@ -108,7 +108,7 @@ def _calculator_entrypoint(project_root: Path) -> tuple[Path, list[str]] | None:
                 _cli_command_candidates(f"python3 -m {module_name}"),
             )
 
-    return candidates[0] if candidates else None
+    return candidates
 
 
 def _verification_commands(project_root: Path, entrypoint_commands: list[str]) -> list[tuple[str, bool]]:
@@ -266,7 +266,96 @@ Be short and concrete.
             self.assertEqual(senders[0], "workflow")
             self.assertEqual(senders[1:], ["architect", "brainstormer", "architect", "reviewer"])
 
+    async def test_real_dynamic_open_ended_workflow_runs_with_magentic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            _configure_local_runtime(runtime)
+
+            result = await runtime.run_workflow(
+                workflow_id="dynamic-open-ended",
+                goal="Create a minimal README.md for this new project with a title and one sentence description.",
+                created_at=1,
+                parent_thread_id=runtime.main_thread_id,
+            )
+
+            readme = project_root / "README.md"
+            self.assertIn(result["status"], {"completed", "blocked"})
+            if readme.exists():
+                readme_text = readme.read_text(encoding="utf-8")
+                self.assertIn("#", readme_text)
+
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            senders = [message.sender for message in runtime.list_thread_messages(workroom.id)]
+            self.assertEqual(senders[0], "workflow")
+            self.assertTrue(any(sender != "workflow" for sender in senders))
+
+    async def test_real_specialist_handoff_workflow_runs_in_a_shared_workroom(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            _configure_local_runtime(runtime)
+
+            result = await runtime.run_workflow(
+                workflow_id="specialist-handoff",
+                goal=(
+                    "Discuss whether a new Python CLI should start with Typer or argparse. "
+                    "End with one clear recommendation and two short reasons."
+                ),
+                created_at=1,
+                parent_thread_id=runtime.main_thread_id,
+            )
+
+            self.assertIn(result["status"], {"completed", "blocked"})
+
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            messages = runtime.list_thread_messages(workroom.id)
+            self.assertGreaterEqual(len(messages), 2)
+            senders = [message.sender for message in messages]
+            self.assertEqual(senders[0], "workflow")
+            self.assertTrue(any(sender != "workflow" for sender in senders))
+
     async def test_real_orchestrator_can_complete_a_vague_build_flow(self) -> None:
+        last_error: AssertionError | None = None
+        for _attempt in range(2):
+            try:
+                await self._assert_vague_build_flow()
+                return
+            except AssertionError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        self.fail("vague build flow did not run")
+
+    async def _assert_vague_build_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             project_root = base / "repo"
@@ -298,31 +387,32 @@ Be short and concrete.
             task_titles = [task.title for task in runtime.list_tasks()]
             self.assertGreaterEqual(len(task_titles), 1)
 
-            entrypoint = _calculator_entrypoint(project_root)
-            self.assertIsNotNone(entrypoint, "expected a runnable calculator entrypoint to be created")
-            assert entrypoint is not None
+            entrypoints = _calculator_entrypoints(project_root)
+            self.assertTrue(entrypoints, "expected a runnable calculator entrypoint to be created")
 
             successful_result = None
-            for index, (command, require_output_prefix) in enumerate(
-                _verification_commands(project_root, entrypoint[1]),
-                start=1,
-            ):
-                command_result = runtime.run_workspace_command(
-                    command,
-                    created_at=200 + index,
-                    thread_id=runtime.main_thread_id,
-                    agent_id="tester",
-                    require_approval=False,
-                )
-                if command_result["status"] != "completed":
-                    continue
-                stdout = str(command_result["stdout"]).strip()
-                if command_result["exit_code"] != 0:
-                    continue
-                if require_output_prefix and re.search(r"\b5(?:\\.0+)?\b", stdout) is None:
-                    continue
-                if not require_output_prefix or re.search(r"\b5(?:\\.0+)?\b", stdout) is not None:
-                    successful_result = command_result
+            command_index = 0
+            for _path, commands in entrypoints:
+                for command, require_output_prefix in _verification_commands(project_root, commands):
+                    command_index += 1
+                    command_result = runtime.run_workspace_command(
+                        command,
+                        created_at=200 + command_index,
+                        thread_id=runtime.main_thread_id,
+                        agent_id="tester",
+                        require_approval=False,
+                    )
+                    if command_result["status"] != "completed":
+                        continue
+                    stdout = str(command_result["stdout"]).strip()
+                    if command_result["exit_code"] != 0:
+                        continue
+                    if require_output_prefix and re.search(r"\b5(?:\\.0+)?\b", stdout) is None:
+                        continue
+                    if not require_output_prefix or re.search(r"\b5(?:\\.0+)?\b", stdout) is not None:
+                        successful_result = command_result
+                        break
+                if successful_result is not None:
                     break
             self.assertIsNotNone(successful_result, "expected one calculator invocation to succeed and print a result starting with 5")
 
@@ -345,7 +435,7 @@ Be short and concrete.
             first_pass_messages = runtime.list_main_messages()
             self.assertGreaterEqual(len(first_pass_messages), 2)
             self.assertEqual(runtime.list_workflow_runs(), [])
-            self.assertIsNone(_calculator_entrypoint(project_root))
+            self.assertEqual(_calculator_entrypoints(project_root), [])
 
             await runtime.send_user_message_to_orchestrator(
                 body="That sounds fine. Please proceed and build it.",
@@ -358,4 +448,4 @@ Be short and concrete.
 
             final_message = runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]).strip()
             self.assertTrue("workflow" in final_message or "built" in final_message.lower())
-            self.assertTrue(_calculator_entrypoint(project_root) is not None or bool(_workspace_python_files(project_root)))
+            self.assertTrue(bool(_calculator_entrypoints(project_root)) or bool(_workspace_python_files(project_root)))

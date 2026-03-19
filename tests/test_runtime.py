@@ -150,6 +150,58 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(len(run_view.steps), 1)
             self.assertEqual(run_view.steps[0].threads[0].kind, "group_workroom")
 
+    def test_starting_dynamic_open_ended_workflow_creates_group_workroom(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="dynamic-open-ended",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(runtime.workflow_orchestration("dynamic-open-ended"), "magentic")
+            self.assertEqual(len(threads), 1)
+            self.assertEqual(threads[0].kind, "group_workroom")
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+            self.assertEqual(run_view.steps[0].threads[0].kind, "group_workroom")
+
+    def test_starting_specialist_handoff_workflow_creates_group_workroom(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="specialist-handoff",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(runtime.workflow_orchestration("specialist-handoff"), "handoff")
+            self.assertEqual(len(threads), 1)
+            self.assertEqual(threads[0].kind, "group_workroom")
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+            self.assertEqual(run_view.steps[0].threads[0].kind, "group_workroom")
+
     def test_runtime_can_reload_registry_after_config_changes(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -326,6 +378,41 @@ Return reviewed code and a clear summary.
             self.assertEqual(command_runs[0].agent_id, "user")
             self.assertIn("# Command Run", runtime.read_command_output(command_runs[0].id))
             self.assertIn("command_run", [event.kind for event in runtime.list_events()])
+
+    def test_runtime_caps_agent_thread_command_budget(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            thread = runtime.create_agent_thread(agent_id="reviewer", created_at=1_710_755_200)
+
+            for index in range(3):
+                result = runtime.run_workspace_command(
+                    "pwd",
+                    created_at=1_710_755_210 + index,
+                    thread_id=thread.id,
+                    agent_id="reviewer",
+                    require_approval=False,
+                )
+                self.assertEqual(result["status"], "completed")
+
+            capped = runtime.run_workspace_command(
+                "pwd",
+                created_at=1_710_755_220,
+                thread_id=thread.id,
+                agent_id="reviewer",
+                require_approval=False,
+            )
+
+            self.assertEqual(capped["status"], "budget_exhausted")
+            self.assertIn("Command budget exhausted", str(capped["stderr"]))
+            self.assertIn("command_budget_exhausted", [event.kind for event in runtime.list_events()])
 
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -1251,9 +1338,62 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("single-agent-execution", runtime.conversation_store.read_message_body(reply))
+            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
             self.assertIn(
-                "orchestrator_non_delivery_rejected",
+                "orchestrator_greenfield_upgraded",
+                [event.kind for event in runtime.list_events()],
+            )
+
+    async def test_runtime_upgrades_greenfield_single_agent_delivery_to_standard_build(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="single-agent-execution",
+                    goal=body,
+                    deliverable_expected=True,
+                )
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                _, reply = await runtime.send_user_message_to_orchestrator(
+                    body="Build a tiny new CLI app from scratch in this repo.",
+                    created_at=10,
+                )
+
+            self.assertIsNotNone(reply)
+            assert reply is not None
+            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
+            self.assertIn(
+                "orchestrator_greenfield_upgraded",
                 [event.kind for event in runtime.list_events()],
             )
 
@@ -1997,6 +2137,270 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             transcript = runtime.conversation_store.read_message_body(thread_messages[1])
             self.assertIn("Typer", transcript)
 
+    async def test_runtime_runs_magentic_workflow_in_a_shared_workroom(self) -> None:
+        import ergon_studio.workflow_runtime as workflow_runtime
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        class FakeWorkflowResult(list):
+            def __init__(self, events, outputs) -> None:
+                super().__init__(events)
+                self._outputs = outputs
+
+            def get_outputs(self):
+                return self._outputs
+
+            def get_final_state(self):
+                return "completed"
+
+            def get_request_info_events(self):
+                return []
+
+        class DummyCtx:
+            def __init__(self) -> None:
+                self.output = None
+
+            async def yield_output(self, value) -> None:
+                self.output = value
+
+            async def send_message(self, value, target_id=None) -> None:
+                del target_id
+                self.output = value
+
+        class FakeBuiltMagenticWorkflow:
+            def __init__(self, participants) -> None:
+                self.participants = participants
+
+            async def run(self, goal, include_status_events=True):
+                del include_status_events
+                participant_map = {participant.id: participant for participant in self.participants}
+                opening = workflow_runtime.GroupChatParticipantMessage(
+                    messages=[Message(role="user", text=goal, author_name="workflow")]
+                )
+                for participant in self.participants:
+                    await participant.sync_messages(opening, DummyCtx())
+
+                responses = []
+                for agent_id in ("architect", "coder", "reviewer"):
+                    participant = participant_map[agent_id]
+                    ctx = DummyCtx()
+                    await participant.handle_request(
+                        workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
+                        ctx,
+                    )
+                    response = ctx.output.message
+                    responses.append(response)
+                    broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
+                    for peer in self.participants:
+                        if peer.id == agent_id:
+                            continue
+                        await peer.sync_messages(broadcast, DummyCtx())
+
+                return FakeWorkflowResult(
+                    events=[
+                        SimpleNamespace(
+                            type="magentic_orchestrator",
+                            data=SimpleNamespace(
+                                event_type="PLAN_CREATED",
+                                content=Message(
+                                    role="assistant",
+                                    text="Plan: architect -> coder -> reviewer",
+                                    author_name="magentic_manager",
+                                ),
+                            ),
+                        )
+                    ],
+                    outputs=[[
+                        Message(
+                            role="assistant",
+                            text="Dynamic workflow complete.",
+                            author_name="magentic_manager",
+                        )
+                    ]],
+                )
+
+        class FakeMagenticBuilder:
+            def __init__(self, *, participants, manager_agent=None, max_round_count=None, enable_plan_review=False) -> None:
+                del manager_agent, max_round_count, enable_plan_review
+                self.participants = participants
+
+            def build(self):
+                return FakeBuiltMagenticWorkflow(self.participants)
+
+        fake_agents = {
+            "architect": FakeAgent("We should break the task into a CLI module and a thin entrypoint."),
+            "coder": FakeAgent("I implemented the first concrete slice."),
+            "reviewer": FakeAgent("The adaptive run is coherent and ready for review."),
+            "orchestrator": FakeAgent('{"accepted": true, "summary": "The adaptive workflow reached a concrete result."}'),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime.MagenticBuilder",
+                FakeMagenticBuilder,
+            ), patch(
+                "ergon_studio.workflow_runtime._build_magentic_manager_agent",
+                return_value=SimpleNamespace(),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="dynamic-open-ended",
+                    goal="Build a small CLI in the repo using adaptive delegation.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            run_view = runtime.describe_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            thread_messages = runtime.list_thread_messages(workroom.id)
+            senders = [message.sender for message in thread_messages]
+            self.assertEqual(
+                senders,
+                ["workflow", "architect", "coder", "reviewer", "magentic_manager", "magentic_manager"],
+            )
+
+    async def test_runtime_runs_handoff_workflow_in_a_shared_workroom(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        class FakeWorkflowResult(list):
+            def __init__(self, events, outputs) -> None:
+                super().__init__(events)
+                self._outputs = outputs
+
+            def get_outputs(self):
+                return self._outputs
+
+            def get_final_state(self):
+                return "completed"
+
+            def get_request_info_events(self):
+                return []
+
+        class FakeBuiltHandoffWorkflow:
+            async def run(self, goal, include_status_events=True):
+                del goal, include_status_events
+                return FakeWorkflowResult(
+                    events=[
+                        SimpleNamespace(
+                            type="handoff_sent",
+                            data=SimpleNamespace(source="architect", target="reviewer"),
+                        )
+                    ],
+                    outputs=[[
+                        Message(
+                            role="assistant",
+                            text="Typer keeps the CLI easier to extend.",
+                            author_name="architect",
+                        ),
+                        Message(
+                            role="assistant",
+                            text="Recommendation: choose Typer for the initial CLI.",
+                            author_name="reviewer",
+                        ),
+                    ]],
+                )
+
+        class FakeHandoffBuilder:
+            def __init__(self, *, name=None, participants=None, description=None, checkpoint_storage=None, termination_condition=None) -> None:
+                del name, participants, description, checkpoint_storage, termination_condition
+
+            def with_start_agent(self, agent) -> "FakeHandoffBuilder":
+                del agent
+                return self
+
+            def with_autonomous_mode(self, *, agents=None, prompts=None, turn_limits=None) -> "FakeHandoffBuilder":
+                del agents, prompts, turn_limits
+                return self
+
+            def add_handoff(self, source, targets, *, description=None) -> "FakeHandoffBuilder":
+                del source, targets, description
+                return self
+
+            def build(self):
+                return FakeBuiltHandoffWorkflow()
+
+        fake_agents = {
+            "orchestrator": FakeAgent('{"accepted": true, "summary": "The handoff workflow reached a clear recommendation."}'),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime.HandoffBuilder",
+                FakeHandoffBuilder,
+            ), patch(
+                "ergon_studio.workflow_runtime._build_handoff_agents",
+                return_value={
+                    "architect": SimpleNamespace(name="architect"),
+                    "researcher": SimpleNamespace(name="researcher"),
+                    "brainstormer": SimpleNamespace(name="brainstormer"),
+                    "reviewer": SimpleNamespace(name="reviewer"),
+                },
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="specialist-handoff",
+                    goal="Discuss whether Typer or argparse is the better default for a new CLI.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            run_view = runtime.describe_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            thread_messages = runtime.list_thread_messages(workroom.id)
+            senders = [message.sender for message in thread_messages]
+            self.assertEqual(senders, ["workflow", "architect", "reviewer"])
+
     async def test_runtime_auto_repairs_with_workflow_metadata(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -2187,3 +2591,26 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("- calc.py", summary)
             self.assertIn("Checks:", summary)
             self.assertIn("- python3 calc.py", summary)
+
+    def test_runtime_formats_workflow_summary_with_explicit_acceptance_when_review_summary_is_blank(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            summary = runtime._format_workflow_summary(
+                workflow_id="standard-build",
+                result={
+                    "status": "completed",
+                    "review_summary": "",
+                    "review_accepted": True,
+                },
+            )
+
+            self.assertIn("ACCEPTED:", summary)

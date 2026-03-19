@@ -70,6 +70,7 @@ Design systems, break work down, and clarify interfaces and tradeoffs.
 
 ## Rules
 Optimize for coherent architecture, not novelty.
+In multi-step delivery workflows, do not claim implementation is done. Your job is to design and hand off a concrete plan.
 
 ## Tool Usage
 Use `list_files` first when you need to understand the repo shape.
@@ -78,6 +79,7 @@ Do not use wildcard searches like `*` to inspect the workspace.
 
 ## Collaboration
 Work closely with the orchestrator and give actionable plans to implementers.
+Name the files, interfaces, entrypoints, and verification shape the next specialist should use.
 
 ## Output Style
 Be structured and concrete.
@@ -104,14 +106,16 @@ Turn accepted plans into clean code changes.
 Keep changes scoped and aligned with the task.
 Do not add extra files, docs, or polish unless the goal requires them.
 Keep self-verification focused and minimal.
+For executable deliverables, prefer one obvious entrypoint and one obvious invocation style over clever interfaces.
 
 ## Tool Usage
 Use `list_files` to inspect the workspace before choosing files to edit.
 Use `read_file` before `patch_file` when modifying existing files.
 Keep command usage focused and use file tools to actually produce deliverables.
+When you build something runnable, verify at least one direct non-interactive command yourself and include that exact command in your handoff.
 
 ## Collaboration
-Hand work back with concise notes on what changed and any remaining issues.
+Hand work back with concise notes on what changed, the exact verification command that worked, and any remaining issues.
 
 ## Output Style
 Be practical, implementation-oriented, and brief.
@@ -136,9 +140,11 @@ Find defects, risks, regressions, and weak reasoning.
 ## Rules
 Be skeptical, specific, and evidence-driven.
 Keep review tight. Do not repeat the entire tester workload.
+For runnable deliverables, do not approve without concrete black-box verification evidence.
 
 ## Tool Usage
 Use `list_files` to confirm what changed, `read_file` for inspection, and `search_files` for targeted checks.
+When the deliverable should be runnable, use `run_command` on the actual entrypoint or reject it.
 
 ## Collaboration
 Return clear findings and separate blockers from minor issues.
@@ -222,10 +228,12 @@ Reproduce behavior, run tests, and report confidence clearly.
 ## Rules
 Do not assume correctness without verification evidence.
 Keep verification focused. Do not run a large matrix of commands when a couple of direct checks are enough.
+For runnable deliverables, confirm at least one direct non-interactive invocation succeeds.
 
 ## Tool Usage
 Use `list_files` to locate the implementation first.
 Run focused commands against the actual artifact and report the meaningful result.
+Prefer the implementer's stated invocation when available; otherwise infer the simplest obvious entrypoint from the workspace.
 
 ## Collaboration
 Return repro steps, results, and clear pass/fail status.
@@ -498,6 +506,70 @@ Prefer explicit tradeoffs over vague compromise.
 
 ## Exit Conditions
 The orchestrator has enough evidence to choose a direction.
+""",
+    "dynamic-open-ended.md": """---
+id: dynamic-open-ended
+name: Dynamic Open Ended
+kind: workflow
+orchestration: magentic
+step_groups:
+  - [architect, coder, reviewer, fixer, tester, researcher]
+max_rounds: 8
+acceptance_mode: delivery
+---
+## Purpose
+Let the orchestrator manage an adaptive multi-agent implementation flow.
+
+## When To Use
+Use when the work is broad, uncertain, or likely to need replanning mid-flight.
+
+## Flow
+The manager plans, assigns the next specialist, evaluates progress, and replans when needed.
+
+## Decision Rules
+Prefer adaptive delegation over rigid stage ordering.
+
+## Exit Conditions
+The manager reaches a concrete delivery that passes orchestrator review.
+""",
+    "specialist-handoff.md": """---
+id: specialist-handoff
+name: Specialist Handoff
+kind: workflow
+orchestration: handoff
+step_groups:
+  - [architect, researcher, brainstormer, reviewer]
+start_agent: architect
+finalizers:
+  - reviewer
+autonomous_agents:
+  - architect
+  - researcher
+  - brainstormer
+  - reviewer
+autonomous_turn_limit: 2
+max_rounds: 6
+acceptance_mode: decision_ready
+handoffs:
+  architect: [researcher, brainstormer, reviewer]
+  researcher: [architect, brainstormer, reviewer]
+  brainstormer: [architect, researcher, reviewer]
+  reviewer: [architect]
+---
+## Purpose
+Let specialists pass control directly among themselves until a final recommendation is ready.
+
+## When To Use
+Use when the work is mainly exploratory and one specialist may need to hand off to another without a central stage plan.
+
+## Flow
+One specialist starts, hands off as needed, and the reviewer closes with the final recommendation.
+
+## Decision Rules
+Prefer direct specialist-to-specialist routing over centralized micromanagement.
+
+## Exit Conditions
+The reviewer returns a concrete recommendation and the orchestrator can decide what to do next.
 """,
     "research-then-decide.md": """---
 id: research-then-decide

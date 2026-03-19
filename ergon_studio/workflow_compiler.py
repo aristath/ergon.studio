@@ -31,6 +31,20 @@ def compile_workflow_definition(definition: DefinitionDocument) -> CompiledWorkf
             workflow=workflow,
             step_groups=step_groups,
         )
+    if orchestration == "magentic":
+        workflow = _compile_star_workflow(definition, step_groups, coordinator_id="magentic_manager")
+        return CompiledWorkflow(
+            definition_id=definition.id,
+            workflow=workflow,
+            step_groups=step_groups,
+        )
+    if orchestration == "handoff":
+        workflow = _compile_star_workflow(definition, step_groups, coordinator_id="handoff_router")
+        return CompiledWorkflow(
+            definition_id=definition.id,
+            workflow=workflow,
+            step_groups=step_groups,
+        )
     root = _executor("workflow-start")
     builder = WorkflowBuilder(
         name=f"workflow-{definition.id}",
@@ -59,12 +73,21 @@ def _compile_group_chat_workflow(
     definition: DefinitionDocument,
     step_groups: tuple[tuple[str, ...], ...],
 ):
+    return _compile_star_workflow(definition, step_groups, coordinator_id="group_chat_orchestrator")
+
+
+def _compile_star_workflow(
+    definition: DefinitionDocument,
+    step_groups: tuple[tuple[str, ...], ...],
+    *,
+    coordinator_id: str,
+):
     participants = tuple(agent_id for group in step_groups for agent_id in group)
     if not participants:
-        raise ValueError(f"group chat workflow '{definition.id}' must declare participants")
-    orchestrator = _executor("group_chat_orchestrator")
+        raise ValueError(f"orchestrated workflow '{definition.id}' must declare participants")
+    orchestrator = _executor(coordinator_id)
     participant_executors = tuple(_executor(agent_id) for agent_id in participants)
-    merge = _merge_executor(participant_executors, (_executor("group_chat_summary"),))
+    merge = _merge_executor(participant_executors, (_executor(f"{coordinator_id}_summary"),))
     builder = WorkflowBuilder(
         name=f"workflow-{definition.id}",
         description=str(definition.metadata.get("name", definition.id)),

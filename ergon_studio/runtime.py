@@ -872,6 +872,28 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
+        if (
+            decision.deliverable_expected
+            and decision.mode == "workflow"
+            and decision.workflow_id == "single-agent-execution"
+            and self._workspace_is_greenfield()
+        ):
+            decision = OrchestratorTurnDecision(
+                mode="workflow",
+                reply=decision.reply,
+                workflow_id="standard-build",
+                agent_id=decision.agent_id,
+                title=decision.title,
+                request=resolved_request,
+                goal=resolved_goal,
+                deliverable_expected=True,
+            )
+            self.append_event(
+                kind="orchestrator_greenfield_upgraded",
+                summary="Upgraded greenfield delivery work from single-agent-execution to standard-build",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
         self.append_event(
             kind="orchestrator_turn_planned",
             summary=f"Orchestrator selected {decision.mode}",
@@ -1383,6 +1405,51 @@ class RuntimeContext:
             return False
         return _as_bool(parsed.get("allowed"))
 
+    async def _should_escalate_greenfield_single_agent(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> bool:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return False
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return False
+        classifier = Agent(
+            client=client,
+            id="orchestrator-greenfield-escalation-guard",
+            name="Orchestrator Greenfield Escalation Guard",
+            description="Internal guard for greenfield workflow escalation",
+            instructions=_greenfield_single_agent_guard_instructions(),
+        )
+        try:
+            response = await classifier.run(
+                [
+                    Message(
+                        role="user",
+                        text=_greenfield_single_agent_guard_prompt(self, body),
+                        author_name="system",
+                    )
+                ],
+                session=classifier.create_session(session_id=f"main-greenfield-guard:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_greenfield_guard_failed",
+                summary=f"Greenfield escalation guard failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return False
+        try:
+            parsed = _parse_turn_decision_json(response.text.strip())
+        except ValueError:
+            return False
+        return _as_bool(parsed.get("escalate"))
+
     async def generate_agent_text_without_tools(
         self,
         *,
@@ -1496,8 +1563,13 @@ class RuntimeContext:
             if team:
                 lines.append(f"Team: {' -> '.join(team)}")
         review_summary = result.get("review_summary")
+        review_accepted = result.get("review_accepted")
         if isinstance(review_summary, str) and review_summary.strip():
             lines.extend(["", review_summary.strip()])
+        elif review_accepted is True:
+            lines.extend(["", "ACCEPTED: The workflow completed and passed orchestrator review."])
+        elif review_accepted is False:
+            lines.extend(["", "REJECTED: The workflow finished without passing orchestrator review."])
         status = result.get("status")
         if isinstance(status, str) and status != "completed":
             lines.extend(["", f"Status: {status}"])
@@ -1533,6 +1605,15 @@ class RuntimeContext:
             if path.is_file() and ".ergon.studio" not in path.parts
         ]
         return files[:limit]
+
+    def _workspace_is_greenfield(self) -> bool:
+        root = self.paths.project_root.resolve()
+        files = [
+            path
+            for path in root.rglob("*")
+            if path.is_file() and ".ergon.studio" not in path.parts
+        ]
+        return len(files) <= 1
 
     def _workflow_team_summary(self, workflow_run_id: str) -> list[str]:
         run_view = self.describe_workflow_run(workflow_run_id)
@@ -1607,6 +1688,64 @@ class RuntimeContext:
         resolved_task_id = task_id if task_id is not None else (context.task_id if context is not None else None)
         resolved_agent_id = agent_id if agent_id is not None else (context.agent_id if context is not None else None)
         workspace_root = self.paths.project_root.resolve()
+        command_budget = self._agent_thread_command_budget(
+            thread_id=resolved_thread_id,
+            agent_id=resolved_agent_id,
+        )
+        if command_budget is not None:
+            prior_runs = [
+                command_run
+                for command_run in self.list_command_runs()
+                if command_run.thread_id == resolved_thread_id
+                and command_run.agent_id == resolved_agent_id
+                and command_run.status not in {"awaiting_approval", "budget_exhausted"}
+            ]
+            if len(prior_runs) >= command_budget:
+                stderr = (
+                    f"Command budget exhausted for {resolved_agent_id} in {resolved_thread_id}. "
+                    "Reuse the existing verification evidence instead of running more commands."
+                )
+                command_run = self.command_store.create_command_run(
+                    session_id=session_id,
+                    command_run_id=f"command-run-{uuid4().hex[:8]}",
+                    command=command,
+                    cwd=str(workspace_root),
+                    exit_code=1,
+                    status="budget_exhausted",
+                    output_content=_render_command_output(
+                        command=command,
+                        cwd=str(workspace_root),
+                        exit_code=1,
+                        status="budget_exhausted",
+                        timeout=timeout,
+                        stdout="",
+                        stderr=stderr,
+                        thread_id=resolved_thread_id,
+                        task_id=resolved_task_id,
+                        agent_id=resolved_agent_id,
+                    ),
+                    created_at=created_at,
+                    thread_id=resolved_thread_id,
+                    task_id=resolved_task_id,
+                    agent_id=resolved_agent_id,
+                )
+                runner = resolved_agent_id or "user"
+                self.append_event(
+                    kind="command_budget_exhausted",
+                    summary=f"{runner} hit the command budget in `{resolved_thread_id}`",
+                    created_at=created_at,
+                    thread_id=resolved_thread_id,
+                    task_id=resolved_task_id,
+                )
+                return {
+                    "command": command,
+                    "cwd": str(workspace_root),
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": stderr,
+                    "status": "budget_exhausted",
+                    "command_run_id": command_run.id,
+                }
 
         if require_approval and self._approval_mode_for_action("run_command") in {"ask", "block"}:
             approval = self.request_approval(
@@ -1700,6 +1839,27 @@ class RuntimeContext:
             "status": status,
             "command_run_id": command_run.id,
         }
+
+    def _agent_thread_command_budget(
+        self,
+        *,
+        thread_id: str | None,
+        agent_id: str | None,
+    ) -> int | None:
+        if thread_id is None or agent_id is None:
+            return None
+        thread = self.get_thread(thread_id)
+        if thread is None:
+            return None
+        if thread.kind not in {"agent_direct", "group_workroom"}:
+            return None
+        budgets = {
+            "coder": 4,
+            "fixer": 4,
+            "tester": 6,
+            "reviewer": 3,
+        }
+        return budgets.get(agent_id)
 
     def _workflow_threads_for_run(self, workflow_run: WorkflowRunRecord) -> list[ThreadRecord]:
         if workflow_run.root_task_id is None:
@@ -1913,7 +2073,7 @@ class RuntimeContext:
             created_at=created_at + 1,
             task_id=root_task.id,
         )
-        if orchestration == "group_chat":
+        if orchestration in {"group_chat", "magentic", "handoff"}:
             threads = self._append_group_workroom_step(
                 workflow_id=workflow_id,
                 root_task_id=root_task.id,
@@ -2537,6 +2697,10 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "Rules:",
             "- Prefer workflow for non-trivial implementation, debugging, verification, or delivery work.",
             "- If the user wants runnable code or an implemented project outcome, prefer `single-agent-execution` for small self-contained work and `standard-build` for broader or riskier work.",
+            "- For greenfield app creation or repo-from-scratch implementation, prefer `standard-build` over `single-agent-execution` even when the target is small.",
+            "- Prefer `dynamic-open-ended` only when the work is genuinely broad, evolving, and likely to need adaptive specialist reassignment across multiple phases.",
+            "- Do not choose `dynamic-open-ended` for small or medium tasks that still fit a clear direct workflow like `single-agent-execution` or `standard-build`.",
+            "- Prefer `specialist-handoff` when the work is mainly exploratory discussion and specialists should pass control directly among themselves.",
             "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
             "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
             "- If the recent conversation already settled the approach and the latest user turn is approval to proceed, choose delivery work instead of another reply.",
@@ -2615,6 +2779,24 @@ def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
     )
 
 
+def _greenfield_single_agent_guard_instructions() -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal guard for the orchestrator.",
+            "The planner selected `single-agent-execution` for a greenfield delivery task.",
+            "Decide whether the task should be escalated to `standard-build` instead.",
+            "Output JSON only.",
+            "",
+            "Return:",
+            '{"escalate": false}',
+            "",
+            "Set `escalate` to true when the task is a new app, new subsystem, or from-scratch delivery where separate planning, implementation, testing, and review would materially improve reliability.",
+            "Set `escalate` to false when the task is still a truly tiny, isolated change despite the repo being nearly empty.",
+            "Use the recent conversation and workspace file list, not keyword matching.",
+        ]
+    )
+
+
 def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
     recent_messages = runtime.list_main_messages()[-8:]
     transcript_lines = []
@@ -2627,6 +2809,29 @@ def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
         [
             "Main thread transcript:",
             *transcript_lines,
+            "",
+            "Latest user request:",
+            body,
+        ]
+    )
+
+
+def _greenfield_single_agent_guard_prompt(runtime: RuntimeContext, body: str) -> str:
+    recent_messages = runtime.list_main_messages()[-8:]
+    transcript_lines = []
+    for message in recent_messages:
+        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
+        if not text:
+            continue
+        transcript_lines.append(f"{message.sender}: {text}")
+    workspace_files = runtime._workspace_file_list(limit=12)
+    return "\n".join(
+        [
+            "Main thread transcript:",
+            *transcript_lines,
+            "",
+            "Current workspace files:",
+            *(workspace_files or ["(no files)"]),
             "",
             "Latest user request:",
             body,
@@ -2682,6 +2887,8 @@ def _legacy_workflow_steps(workflow_id: str) -> tuple[str, ...]:
         "test-driven-repair": ("tester", "fixer", "reviewer"),
         "approval-gated": (),
         "replanning": ("architect",),
+        "dynamic-open-ended": ("architect", "coder", "reviewer", "fixer", "tester", "researcher"),
+        "specialist-handoff": ("architect", "researcher", "brainstormer", "reviewer"),
     }
     return workflow_map.get(workflow_id, ())
 

@@ -7,7 +7,8 @@ from rich.markdown import Markdown
 from rich.panel import Panel as RichPanel
 from rich.text import Text
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
+from textual.css.query import NoMatches
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Collapsible, OptionList, RichLog, Static, TextArea
@@ -226,8 +227,13 @@ class ErgonStudioApp(App[None]):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "composer-input":
             return
+        if not self.is_mounted:
+            return
         value = event.text_area.text
-        cmd_list = self.query_one("#slash-commands", OptionList)
+        try:
+            cmd_list = self.query_one("#slash-commands", OptionList)
+        except (NoMatches, ScreenStackError):
+            return
         if value.startswith("/") and " " not in value:
             prefix = value.lower()
             matches = [
@@ -249,10 +255,15 @@ class ErgonStudioApp(App[None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "slash-commands":
             return
+        if not self.is_mounted:
+            return
         # Extract the command from "  /cmd  description"
         text = str(event.option.prompt).strip()
         cmd = text.split()[0] if text else ""
-        inp = self.query_one("#composer-input", ComposerTextArea)
+        try:
+            inp = self.query_one("#composer-input", ComposerTextArea)
+        except (NoMatches, ScreenStackError):
+            return
         # If command takes args, put cursor after it with a space
         if cmd in ("/workflow", "/agent", "/new-session", "/rename-session", "/archive-session", "/switch-session"):
             inp.value = cmd + " "

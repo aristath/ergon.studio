@@ -147,6 +147,14 @@ class TestMessages(IsolatedAsyncioTestCase):
             inp = app.query_one("#composer-input", ComposerTextArea)
             self.assertIn("orchestrator", str(inp.placeholder))
 
+    async def test_text_change_handler_ignores_unmounted_composer_events(self):
+        _, runtime, app = _make_env()
+        app.on_text_area_changed(
+            SimpleNamespace(
+                text_area=SimpleNamespace(id="composer-input", text="/he"),
+            )
+        )
+
 
 class TestApprovals(IsolatedAsyncioTestCase):
     async def test_pending_approval_appears_in_chat(self):

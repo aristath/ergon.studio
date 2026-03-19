@@ -450,6 +450,7 @@ async def _perform_orchestrator_review(
 ) -> str:
     prompt = _render_review_prompt(
         runtime=runtime,
+        workflow_run=workflow_run,
         workflow_id=workflow_run.workflow_id,
         goal=goal,
         payload=payload,
@@ -2231,6 +2232,7 @@ def _render_step_prompt(
 def _render_review_prompt(
     *,
     runtime: RuntimeContext,
+    workflow_run: WorkflowRunRecord,
     workflow_id: str,
     goal: str,
     payload: str | list[str],
@@ -2250,6 +2252,17 @@ def _render_review_prompt(
     else:
         lines.append("(no files)")
     lines.append("")
+    evidence_lines = _workflow_review_evidence_lines(runtime, workflow_run.id)
+    if evidence_lines:
+        lines.extend(
+            [
+                "Recorded execution evidence (authoritative system facts):",
+                *evidence_lines,
+                "",
+                "When agent narrative conflicts with recorded execution evidence, trust the recorded evidence.",
+                "",
+            ]
+        )
     if isinstance(payload, list):
         lines.append("Final upstream outputs:")
         for index, item in enumerate(payload, start=1):
@@ -2271,6 +2284,48 @@ def _render_review_prompt(
         ]
     )
     return "\n".join(lines).strip()
+
+
+def _workflow_review_evidence_lines(runtime: RuntimeContext, workflow_run_id: str) -> list[str]:
+    lines: list[str] = []
+
+    file_changes: list[str] = []
+    for tool_call in runtime.list_tool_calls_for_workflow_run(workflow_run_id):
+        if tool_call.status != "completed" or tool_call.tool_name not in {"write_file", "patch_file"}:
+            continue
+        try:
+            request = json.loads(runtime.read_tool_call_request(tool_call.id))
+        except json.JSONDecodeError:
+            request = {}
+        path = request.get("path")
+        if isinstance(path, str) and path:
+            file_changes.append(f"- {tool_call.tool_name} by {tool_call.agent_id or 'unknown'}: {path}")
+
+    if file_changes:
+        lines.append("Recorded file changes:")
+        lines.extend(file_changes[:8])
+        if len(file_changes) > 8:
+            lines.append(f"- ... and {len(file_changes) - 8} more")
+        lines.append("")
+
+    command_evidence: list[str] = []
+    for command_run in runtime.list_command_runs_for_workflow_run(workflow_run_id):
+        if command_run.status != "completed":
+            continue
+        output = runtime.command_store.read_command_output(command_run).strip()
+        output_excerpt = _truncate_text(output, 200) if output else "(no output)"
+        command_evidence.append(
+            f"- {command_run.command} -> exit {command_run.exit_code}; output: {output_excerpt}"
+        )
+
+    if command_evidence:
+        lines.append("Recorded command runs:")
+        lines.extend(command_evidence[:8])
+        if len(command_evidence) > 8:
+            lines.append(f"- ... and {len(command_evidence) - 8} more")
+        lines.append("")
+
+    return lines
 
 
 def _step_role_rules(agent_id: str) -> str:

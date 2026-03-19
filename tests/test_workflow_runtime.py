@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from ergon_studio.workflow_runtime import WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _supports_auto_repair
+from ergon_studio.workflow_runtime import WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _supports_auto_repair, _workflow_review_evidence_lines
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
@@ -104,4 +104,42 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 new_tool_ids={"old", "new"},
                 required_tools=("run_command",),
             )
+        )
+
+    def test_workflow_review_evidence_lines_include_recorded_file_and_command_evidence(self) -> None:
+        runtime = SimpleNamespace(
+            list_tool_calls_for_workflow_run=lambda workflow_run_id: [
+                SimpleNamespace(
+                    id="tool-1",
+                    status="completed",
+                    tool_name="write_file",
+                    agent_id="coder",
+                )
+            ],
+            read_tool_call_request=lambda tool_call_id: '{"path": "calculator.py"}',
+            list_command_runs_for_workflow_run=lambda workflow_run_id: [
+                SimpleNamespace(
+                    id="cmd-1",
+                    status="completed",
+                    command="python3 calculator.py 2 + 2",
+                    exit_code=0,
+                )
+            ],
+            command_store=SimpleNamespace(
+                read_command_output=lambda command_run: "4\n",
+            ),
+        )
+
+        lines = _workflow_review_evidence_lines(runtime, "workflow-run-1")
+
+        self.assertEqual(
+            lines,
+            [
+                "Recorded file changes:",
+                "- write_file by coder: calculator.py",
+                "",
+                "Recorded command runs:",
+                "- python3 calculator.py 2 + 2 -> exit 0; output: 4",
+                "",
+            ],
         )

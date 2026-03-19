@@ -355,6 +355,7 @@ id: single-agent-execution
 name: Single-Agent Execution
 kind: workflow
 orchestration: direct
+delivery_candidate: true
 steps:
   - coder
 max_repair_cycles: 3
@@ -413,6 +414,7 @@ id: standard-build
 name: Standard Build
 kind: workflow
 orchestration: sequential
+delivery_candidate: true
 steps:
   - architect
   - coder
@@ -514,6 +516,7 @@ id: dynamic-open-ended
 name: Dynamic Open Ended
 kind: workflow
 orchestration: magentic
+delivery_candidate: true
 step_groups:
   - [architect, coder, reviewer, fixer, tester, researcher]
 max_rounds: 8

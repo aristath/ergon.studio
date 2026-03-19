@@ -809,11 +809,8 @@ class RuntimeContext:
         delivery_reason = ""
         if (
             decision.mode == "workflow"
-            and decision.workflow_id in {
-                "architecture-first",
-                "research-then-decide",
-                "debate",
-            }
+            and decision.workflow_id is not None
+            and self._workflow_is_non_delivery(decision.workflow_id)
             and not await self._allow_non_delivery_workflow(
                 body=body,
                 workflow_id=decision.workflow_id,
@@ -828,11 +825,12 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
-        elif decision.deliverable_expected and decision.mode == "workflow" and decision.workflow_id in {
-            "architecture-first",
-            "research-then-decide",
-            "debate",
-        }:
+        elif (
+            decision.deliverable_expected
+            and decision.mode == "workflow"
+            and decision.workflow_id is not None
+            and self._workflow_is_non_delivery(decision.workflow_id)
+        ):
             requires_delivery_workflow = True
             delivery_reason = "Replaced a non-delivery workflow with a delivery workflow"
         if decision.deliverable_expected and decision.mode == "reply":
@@ -1470,7 +1468,7 @@ class RuntimeContext:
         current_workflow_id: str | None,
         created_at: int,
     ) -> str:
-        allowed = {"single-agent-execution", "standard-build", "dynamic-open-ended"}
+        allowed = set(self._delivery_candidate_workflow_ids())
         try:
             orchestrator = self.build_agent("orchestrator")
         except (KeyError, ValueError):
@@ -1483,7 +1481,7 @@ class RuntimeContext:
             id="orchestrator-delivery-workflow-selector",
             name="Orchestrator Delivery Workflow Selector",
             description="Internal delivery workflow selector",
-            instructions=_delivery_workflow_selector_instructions(),
+            instructions=_delivery_workflow_selector_instructions(tuple(sorted(allowed))),
         )
         try:
             response = await selector.run(
@@ -1518,11 +1516,32 @@ class RuntimeContext:
             return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
         return selected
 
+    def _workflow_is_non_delivery(self, workflow_id: str) -> bool:
+        definition = self.registry.workflow_definitions.get(workflow_id)
+        if definition is None:
+            return False
+        return str(definition.metadata.get("acceptance_mode", "delivery")) != "delivery"
+
+    def _delivery_candidate_workflow_ids(self) -> tuple[str, ...]:
+        configured: list[str] = []
+        for workflow_id in self.list_workflow_ids():
+            definition = self.registry.workflow_definitions[workflow_id]
+            if definition.metadata.get("delivery_candidate") is True:
+                configured.append(workflow_id)
+        if configured:
+            return tuple(configured)
+        return ("single-agent-execution", "standard-build", "dynamic-open-ended")
+
     def _fallback_delivery_workflow(self, *, current_workflow_id: str | None) -> str:
-        if current_workflow_id in {"single-agent-execution", "standard-build", "dynamic-open-ended"}:
+        candidates = self._delivery_candidate_workflow_ids()
+        if current_workflow_id in candidates:
             return current_workflow_id
-        if self._workspace_is_greenfield():
+        if self._workspace_is_greenfield() and "standard-build" in candidates:
             return "standard-build"
+        if "single-agent-execution" in candidates:
+            return "single-agent-execution"
+        if candidates:
+            return candidates[0]
         return "single-agent-execution"
 
     async def generate_agent_text_without_tools(
@@ -2873,7 +2892,29 @@ def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
     )
 
 
-def _delivery_workflow_selector_instructions() -> str:
+def _delivery_workflow_selector_instructions(allowed_workflow_ids: tuple[str, ...]) -> str:
+    rules = [
+        "- Prefer the smallest workflow that still fits the actual task, but do not force a rigid staged workflow onto genuinely adaptive work.",
+        "- Use the whole recent conversation and workspace state, not keyword matching.",
+    ]
+    if "single-agent-execution" in allowed_workflow_ids:
+        rules.insert(
+            0,
+            "- Use `single-agent-execution` only for truly small, contained work that one specialist can complete cleanly.",
+        )
+    if "standard-build" in allowed_workflow_ids:
+        rules.insert(
+            1 if "single-agent-execution" in allowed_workflow_ids else 0,
+            "- Use `standard-build` when the work is clear enough for a predictable staged flow with explicit plan, implementation, verification, and review.",
+        )
+        rules.insert(
+            2 if "single-agent-execution" in allowed_workflow_ids else 1,
+            "- Prefer `standard-build` for straightforward greenfield delivery when the requested outcome is clear and bounded.",
+        )
+    if "dynamic-open-ended" in allowed_workflow_ids:
+        rules.append(
+            "- Use `dynamic-open-ended` only when the work is genuinely broad, uncertain, evolving, likely to need replanning, or likely to need changing specialists mid-flight."
+        )
     return "\n".join(
         [
             "You are a narrow internal workflow selector for delivery work.",
@@ -2881,20 +2922,13 @@ def _delivery_workflow_selector_instructions() -> str:
             "Output JSON only.",
             "",
             "Allowed workflow_id values:",
-            '- "single-agent-execution"',
-            '- "standard-build"',
-            '- "dynamic-open-ended"',
+            *[f'- "{workflow_id}"' for workflow_id in allowed_workflow_ids],
             "",
             "Rules:",
-            "- Use `single-agent-execution` only for truly small, contained work that one specialist can complete cleanly.",
-            "- Use `standard-build` when the work is clear enough for a predictable staged flow with explicit plan, implementation, verification, and review.",
-            "- Prefer `standard-build` for straightforward greenfield delivery when the requested outcome is clear and bounded.",
-            "- Use `dynamic-open-ended` only when the work is genuinely broad, uncertain, evolving, likely to need replanning, or likely to need changing specialists mid-flight.",
-            "- Prefer the smallest workflow that still fits the actual task, but do not force a rigid staged workflow onto genuinely adaptive work.",
-            "- Use the whole recent conversation and workspace state, not keyword matching.",
+            *rules,
             "",
             "Return:",
-            '{"workflow_id": "dynamic-open-ended"}',
+            f'{{"workflow_id": "{allowed_workflow_ids[-1] if allowed_workflow_ids else "single-agent-execution"}"}}',
         ]
     )
 

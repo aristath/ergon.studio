@@ -52,3 +52,6 @@ class RegistryTests(unittest.TestCase):
                 single_agent.metadata["repair_step_groups"],
                 [["tester"], ["fixer"], ["tester"], ["reviewer"]],
             )
+            self.assertTrue(single_agent.metadata["delivery_candidate"])
+            self.assertTrue(registry.workflow_definitions["standard-build"].metadata["delivery_candidate"])
+            self.assertTrue(registry.workflow_definitions["dynamic-open-ended"].metadata["delivery_candidate"])

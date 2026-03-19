@@ -1419,6 +1419,71 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [event.kind for event in runtime.list_events()],
             )
 
+    async def test_runtime_reselects_non_delivery_workflow_by_metadata(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="specialist-handoff",
+                    goal=body,
+                    deliverable_expected=True,
+                )
+
+            async def choose_workflow(
+                _runtime,
+                *,
+                body: str,
+                goal: str,
+                current_workflow_id: str | None,
+                created_at: int,
+            ) -> str:
+                self.assertEqual(current_workflow_id, "specialist-handoff")
+                return "standard-build"
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                _, reply = await runtime.send_user_message_to_orchestrator(
+                    body="Build the feature now after the discussion.",
+                    created_at=10,
+                )
+
+            self.assertIsNotNone(reply)
+            assert reply is not None
+            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
+            self.assertIn(
+                "orchestrator_delivery_workflow_selected",
+                [event.kind for event in runtime.list_events()],
+            )
+
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
         from ergon_studio.runtime import load_runtime
 

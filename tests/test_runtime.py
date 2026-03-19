@@ -168,6 +168,28 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotEqual(reopened.main_session_id, second.main_session_id)
             self.assertEqual(reopened.current_session().title, "Main Session")
 
+    def test_load_runtime_creates_fresh_session_when_only_archived_sessions_exist(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            first.archive_session(
+                session_id=first.main_session_id,
+                created_at=10,
+            )
+
+            resumed = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            self.assertNotEqual(resumed.main_session_id, first.main_session_id)
+            self.assertIsNone(resumed.current_session().archived_at)
+            self.assertTrue(resumed.main_session_id.startswith("session-"))
+
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
 

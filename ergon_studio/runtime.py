@@ -170,6 +170,31 @@ class RuntimeContext:
     def list_sessions(self, *, include_archived: bool = False) -> list[SessionRecord]:
         return self.session_store.list_sessions(include_archived=include_archived)
 
+    def rename_session(self, *, session_id: str, title: str, created_at: int) -> SessionRecord:
+        session = self.session_store.rename_session(
+            session_id=session_id,
+            title=title,
+            updated_at=created_at,
+        )
+        self.append_event(
+            kind="session_renamed",
+            summary=f"Renamed session {session.id} to {session.title}",
+            created_at=created_at,
+        )
+        return session
+
+    def archive_session(self, *, session_id: str, created_at: int) -> SessionRecord:
+        session = self.session_store.archive_session(
+            session_id=session_id,
+            archived_at=created_at,
+        )
+        self.append_event(
+            kind="session_archived",
+            summary=f"Archived session {session.id}",
+            created_at=created_at,
+        )
+        return session
+
     def save_agent_definition_text(self, *, agent_id: str, text: str, created_at: int | None = None) -> DefinitionDocument:
         definition = self.registry.agent_definitions[agent_id]
         saved = save_definition_text(definition.path, text)
@@ -2897,6 +2922,11 @@ def _resolve_runtime_session(
     latest = session_store.latest_session()
     if latest is not None:
         return latest
+    if session_store.get_session(MAIN_SESSION_ID) is not None:
+        return session_store.create_session(
+            title=session_title,
+            created_at=now,
+        )
     return session_store.create_session(
         session_id=MAIN_SESSION_ID,
         title=session_title,

@@ -315,6 +315,19 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertIn("Switched", text)
             self.assertIn("Parallel lane", text)
 
+    async def test_rename_session_updates_current_session_title(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/rename-session Focus lane"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.runtime.current_session().title, "Focus lane")
+            text = _richlog_text(app)
+            self.assertIn("Renamed", text)
+            self.assertIn("Focus lane", text)
+
     async def test_switch_session_reopens_specific_session(self):
         _, runtime, app = _make_env()
         first_session_id = runtime.main_session_id
@@ -341,6 +354,21 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertEqual(app.runtime.main_session_id, first_session_id)
             text = _richlog_text(app)
             self.assertIn("main session message", text)
+
+    async def test_archive_current_session_switches_to_fresh_session(self):
+        _, runtime, app = _make_env()
+        archived_session_id = runtime.main_session_id
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/archive-session"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotEqual(app.runtime.main_session_id, archived_session_id)
+            self.assertTrue(app.runtime.main_session_id.startswith("session-"))
+            text = _richlog_text(app)
+            self.assertIn("Archived", text)
+            self.assertIn("Switched", text)
 
     async def test_workflows_lists_inline(self):
         _, runtime, app = _make_env()

@@ -20,6 +20,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/session", "Show the current session"),
     ("/sessions", "List project sessions"),
     ("/new-session", "Create and switch to a new session"),
+    ("/rename-session", "Rename the current session"),
+    ("/archive-session", "Archive a session"),
     ("/switch-session", "Switch to an existing session"),
     ("/config", "Open configuration wizard"),
     ("/workflows", "List workflow definitions"),
@@ -252,14 +254,14 @@ class ErgonStudioApp(App[None]):
         cmd = text.split()[0] if text else ""
         inp = self.query_one("#composer-input", ComposerTextArea)
         # If command takes args, put cursor after it with a space
-        if cmd in ("/workflow", "/agent", "/new-session", "/switch-session"):
+        if cmd in ("/workflow", "/agent", "/new-session", "/rename-session", "/archive-session", "/switch-session"):
             inp.value = cmd + " "
         else:
             inp.value = cmd
         event.option_list.remove_class("visible")
         self.set_focus(inp)
         # Auto-submit commands that don't need args
-        if cmd not in ("/workflow", "/agent", "/new-session", "/switch-session"):
+        if cmd not in ("/workflow", "/agent", "/new-session", "/rename-session", "/archive-session", "/switch-session"):
             inp.post_message(ComposerTextArea.Submitted(inp, cmd))
 
     def on_key(self, event) -> None:
@@ -335,6 +337,8 @@ class ErgonStudioApp(App[None]):
                 "  /session           Show the current session\n"
                 "  /sessions          List project sessions\n"
                 "  /new-session [t]   Create and switch to a new session\n"
+                "  /rename-session t  Rename the current session\n"
+                "  /archive-session   Archive the current session\n"
                 "  /switch-session i  Switch to an existing session\n"
                 "  /config            Edit global configuration\n"
                 "  /workflows         List workflow definitions\n"
@@ -377,6 +381,42 @@ class ErgonStudioApp(App[None]):
                 new_runtime,
                 notice=f"[green]Switched[/green] to session {new_runtime.current_session().title}",
             )
+        elif command == "/rename-session":
+            title = args.strip()
+            if not title:
+                chat.write("[red]Usage: /rename-session <title>[/red]")
+            else:
+                renamed = self.runtime.rename_session(
+                    session_id=self.runtime.main_session_id,
+                    title=title,
+                    created_at=self._next_timestamp(),
+                )
+                chat.write(f"[green]Renamed[/green] current session to {renamed.title}")
+                self._refresh_info()
+        elif command == "/archive-session":
+            target = args.strip() or self.runtime.main_session_id
+            try:
+                self.runtime.archive_session(
+                    session_id=target,
+                    created_at=self._next_timestamp(),
+                )
+            except ValueError:
+                chat.write(f"[red]Unknown session:[/red] {target}")
+            else:
+                if target == self.runtime.main_session_id:
+                    new_runtime = load_runtime(
+                        project_root=self.runtime.paths.project_root,
+                        home_dir=self.runtime.paths.home_dir,
+                    )
+                    self._replace_runtime(
+                        new_runtime,
+                        notice=(
+                            f"[yellow]Archived[/yellow] session {target}\n"
+                            f"[green]Switched[/green] to session {new_runtime.current_session().title}"
+                        ),
+                    )
+                else:
+                    chat.write(f"[yellow]Archived[/yellow] session {target}")
         elif command == "/switch-session":
             target = args.strip()
             if not target:

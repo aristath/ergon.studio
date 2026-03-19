@@ -805,6 +805,8 @@ class RuntimeContext:
                 )
         resolved_goal = decision.goal or self.recent_main_user_context(limit=4) or body
         resolved_request = decision.request or resolved_goal
+        requires_delivery_workflow = False
+        delivery_reason = ""
         if (
             decision.mode == "workflow"
             and decision.workflow_id in {
@@ -818,19 +820,11 @@ class RuntimeContext:
                 created_at=created_at + 1,
             )
         ):
-            decision = OrchestratorTurnDecision(
-                mode="workflow",
-                reply=decision.reply,
-                workflow_id="single-agent-execution",
-                agent_id=decision.agent_id,
-                title=decision.title,
-                request=resolved_request,
-                goal=resolved_goal,
-                deliverable_expected=True,
-            )
+            requires_delivery_workflow = True
+            delivery_reason = "Rejected a non-delivery workflow for an implementation turn"
             self.append_event(
                 kind="orchestrator_non_delivery_rejected",
-                summary="Rejected a non-delivery workflow for an implementation turn",
+                summary=delivery_reason,
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
@@ -839,49 +833,30 @@ class RuntimeContext:
             "research-then-decide",
             "debate",
         }:
-            decision = OrchestratorTurnDecision(
-                mode="workflow",
-                reply=decision.reply,
-                workflow_id="single-agent-execution",
-                agent_id=decision.agent_id,
-                title=decision.title,
-                request=resolved_request,
-                goal=resolved_goal,
-                deliverable_expected=True,
-            )
-            self.append_event(
-                kind="orchestrator_workflow_upgraded",
-                summary="Upgraded non-delivery workflow to single-agent-execution for deliverable request",
-                created_at=created_at + 1,
-                thread_id=self.main_thread_id,
-            )
+            requires_delivery_workflow = True
+            delivery_reason = "Replaced a non-delivery workflow with a delivery workflow"
         if decision.deliverable_expected and decision.mode == "reply":
-            decision = OrchestratorTurnDecision(
-                mode="workflow",
-                reply=decision.reply,
-                workflow_id="single-agent-execution",
-                agent_id=decision.agent_id,
-                title=decision.title,
-                request=resolved_request,
-                goal=resolved_goal,
-                deliverable_expected=True,
-            )
-            self.append_event(
-                kind="orchestrator_reply_promoted",
-                summary="Promoted reply-only decision to single-agent-execution for deliverable request",
-                created_at=created_at + 1,
-                thread_id=self.main_thread_id,
-            )
+            requires_delivery_workflow = True
+            delivery_reason = "Promoted a reply-only turn into delivery work"
         if (
             decision.deliverable_expected
             and decision.mode == "workflow"
             and decision.workflow_id == "single-agent-execution"
             and self._workspace_is_greenfield()
         ):
+            requires_delivery_workflow = True
+            delivery_reason = "Re-selected the delivery workflow for a greenfield task"
+        if requires_delivery_workflow:
+            selected_workflow_id = await self._select_delivery_workflow(
+                body=body,
+                goal=resolved_goal,
+                current_workflow_id=decision.workflow_id,
+                created_at=created_at + 1,
+            )
             decision = OrchestratorTurnDecision(
                 mode="workflow",
                 reply=decision.reply,
-                workflow_id="standard-build",
+                workflow_id=selected_workflow_id,
                 agent_id=decision.agent_id,
                 title=decision.title,
                 request=resolved_request,
@@ -889,8 +864,8 @@ class RuntimeContext:
                 deliverable_expected=True,
             )
             self.append_event(
-                kind="orchestrator_greenfield_upgraded",
-                summary="Upgraded greenfield delivery work from single-agent-execution to standard-build",
+                kind="orchestrator_delivery_workflow_selected",
+                summary=f"{delivery_reason or 'Selected a delivery workflow'}: {selected_workflow_id}",
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
@@ -1449,6 +1424,69 @@ class RuntimeContext:
         except ValueError:
             return False
         return _as_bool(parsed.get("escalate"))
+
+    async def _select_delivery_workflow(
+        self,
+        *,
+        body: str,
+        goal: str,
+        current_workflow_id: str | None,
+        created_at: int,
+    ) -> str:
+        allowed = {"single-agent-execution", "standard-build", "dynamic-open-ended"}
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
+        selector = Agent(
+            client=client,
+            id="orchestrator-delivery-workflow-selector",
+            name="Orchestrator Delivery Workflow Selector",
+            description="Internal delivery workflow selector",
+            instructions=_delivery_workflow_selector_instructions(),
+        )
+        try:
+            response = await selector.run(
+                [
+                    Message(
+                        role="user",
+                        text=_delivery_workflow_selector_prompt(
+                            runtime=self,
+                            body=body,
+                            goal=goal,
+                            current_workflow_id=current_workflow_id,
+                        ),
+                        author_name="system",
+                    )
+                ],
+                session=selector.create_session(session_id=f"main-delivery-workflow:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_delivery_workflow_selector_failed",
+                summary=f"Delivery workflow selector failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
+        try:
+            parsed = _parse_turn_decision_json(response.text.strip())
+        except ValueError:
+            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
+        selected = _optional_text(parsed.get("workflow_id"))
+        if selected not in allowed:
+            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
+        return selected
+
+    def _fallback_delivery_workflow(self, *, current_workflow_id: str | None) -> str:
+        if current_workflow_id in {"single-agent-execution", "standard-build", "dynamic-open-ended"}:
+            return current_workflow_id
+        if self._workspace_is_greenfield():
+            return "standard-build"
+        return "single-agent-execution"
 
     async def generate_agent_text_without_tools(
         self,
@@ -2696,10 +2734,9 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "",
             "Rules:",
             "- Prefer workflow for non-trivial implementation, debugging, verification, or delivery work.",
-            "- If the user wants runnable code or an implemented project outcome, prefer `single-agent-execution` for small self-contained work and `standard-build` for broader or riskier work.",
-            "- For greenfield app creation or repo-from-scratch implementation, prefer `standard-build` over `single-agent-execution` even when the target is small.",
-            "- Prefer `dynamic-open-ended` only when the work is genuinely broad, evolving, and likely to need adaptive specialist reassignment across multiple phases.",
-            "- Do not choose `dynamic-open-ended` for small or medium tasks that still fit a clear direct workflow like `single-agent-execution` or `standard-build`.",
+            "- If the user wants runnable code or an implemented project outcome, prefer `single-agent-execution` only for truly small self-contained work.",
+            "- Prefer `standard-build` when the work is clearly staged and benefits from a predictable architect -> implement -> verify -> review flow.",
+            "- Prefer `dynamic-open-ended` when the work is broad, greenfield, evolving, or likely to need clarification, replanning, or changing specialist assignments mid-flight.",
             "- Prefer `specialist-handoff` when the work is mainly exploratory discussion and specialists should pass control directly among themselves.",
             "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
             "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
@@ -2797,6 +2834,32 @@ def _greenfield_single_agent_guard_instructions() -> str:
     )
 
 
+def _delivery_workflow_selector_instructions() -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal workflow selector for delivery work.",
+            "Choose the best delivery workflow for the current task.",
+            "Output JSON only.",
+            "",
+            "Allowed workflow_id values:",
+            '- "single-agent-execution"',
+            '- "standard-build"',
+            '- "dynamic-open-ended"',
+            "",
+            "Rules:",
+            "- Use `single-agent-execution` only for truly small, contained work that one specialist can complete cleanly.",
+            "- Use `standard-build` when the work is clear enough for a predictable staged flow with explicit plan, implementation, verification, and review.",
+            "- Prefer `standard-build` for straightforward greenfield delivery when the requested outcome is clear and bounded.",
+            "- Use `dynamic-open-ended` only when the work is genuinely broad, uncertain, evolving, likely to need replanning, or likely to need changing specialists mid-flight.",
+            "- Prefer the smallest workflow that still fits the actual task, but do not force a rigid staged workflow onto genuinely adaptive work.",
+            "- Use the whole recent conversation and workspace state, not keyword matching.",
+            "",
+            "Return:",
+            '{"workflow_id": "dynamic-open-ended"}',
+        ]
+    )
+
+
 def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
     recent_messages = runtime.list_main_messages()[-8:]
     transcript_lines = []
@@ -2809,6 +2872,40 @@ def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
         [
             "Main thread transcript:",
             *transcript_lines,
+            "",
+            "Latest user request:",
+            body,
+        ]
+    )
+
+
+def _delivery_workflow_selector_prompt(
+    runtime: RuntimeContext,
+    *,
+    body: str,
+    goal: str,
+    current_workflow_id: str | None,
+) -> str:
+    recent_messages = runtime.list_main_messages()[-8:]
+    transcript_lines = []
+    for message in recent_messages:
+        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
+        if not text:
+            continue
+        transcript_lines.append(f"{message.sender}: {text}")
+    workspace_files = runtime._workspace_file_list(limit=12)
+    return "\n".join(
+        [
+            "Main thread transcript:",
+            *transcript_lines,
+            "",
+            f"Current workflow candidate: {current_workflow_id or '(none)'}",
+            "",
+            "Resolved delivery goal:",
+            goal,
+            "",
+            "Current workspace files:",
+            *(workspace_files or ["(no files)"]),
             "",
             "Latest user request:",
             body,

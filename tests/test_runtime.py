@@ -1310,6 +1310,16 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
                 return False
 
+            async def choose_workflow(
+                _runtime,
+                *,
+                body: str,
+                goal: str,
+                current_workflow_id: str | None,
+                created_at: int,
+            ) -> str:
+                return "dynamic-open-ended"
+
             async def run_workflow(
                 _runtime,
                 *,
@@ -1329,6 +1339,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
                 patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
                 patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
+                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
                 patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
@@ -1338,13 +1349,13 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
+            self.assertIn("dynamic-open-ended", runtime.conversation_store.read_message_body(reply))
             self.assertIn(
-                "orchestrator_greenfield_upgraded",
+                "orchestrator_delivery_workflow_selected",
                 [event.kind for event in runtime.list_events()],
             )
 
-    async def test_runtime_upgrades_greenfield_single_agent_delivery_to_standard_build(self) -> None:
+    async def test_runtime_reselects_greenfield_single_agent_delivery_with_selector(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1365,6 +1376,16 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     deliverable_expected=True,
                 )
 
+            async def choose_workflow(
+                _runtime,
+                *,
+                body: str,
+                goal: str,
+                current_workflow_id: str | None,
+                created_at: int,
+            ) -> str:
+                return "dynamic-open-ended"
+
             async def run_workflow(
                 _runtime,
                 *,
@@ -1382,6 +1403,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
                 patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
@@ -1391,9 +1413,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
+            self.assertIn("dynamic-open-ended", runtime.conversation_store.read_message_body(reply))
             self.assertIn(
-                "orchestrator_greenfield_upgraded",
+                "orchestrator_delivery_workflow_selected",
                 [event.kind for event in runtime.list_events()],
             )
 

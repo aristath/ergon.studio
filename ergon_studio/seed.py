@@ -357,9 +357,11 @@ kind: workflow
 orchestration: direct
 steps:
   - coder
-max_repair_cycles: 2
+max_repair_cycles: 3
 repair_step_groups:
+  - [tester]
   - [fixer]
+  - [tester]
   - [reviewer]
 max_replan_cycles: 1
 replan_step_groups:

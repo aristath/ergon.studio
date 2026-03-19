@@ -46,3 +46,9 @@ class RegistryTests(unittest.TestCase):
                 registry.config["role_assignments"]["orchestrator"],
                 "default",
             )
+            single_agent = registry.workflow_definitions["single-agent-execution"]
+            self.assertEqual(single_agent.metadata["max_repair_cycles"], 3)
+            self.assertEqual(
+                single_agent.metadata["repair_step_groups"],
+                [["tester"], ["fixer"], ["tester"], ["reviewer"]],
+            )

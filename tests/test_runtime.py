@@ -1499,6 +1499,131 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [event.kind for event in runtime.list_events()],
             )
 
+    async def test_runtime_keeps_full_delivery_goal_for_workflow_runs(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            captured: dict[str, str] = {}
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="standard-build",
+                    goal="Design the architecture only before any implementation happens.",
+                    deliverable_expected=True,
+                )
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                captured["workflow_id"] = workflow_id
+                captured["goal"] = goal
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                await runtime.send_user_message_to_orchestrator(
+                    body="Build a tiny calculator CLI from scratch and implement it in this repo.",
+                    created_at=10,
+                )
+
+            self.assertEqual(captured["workflow_id"], "standard-build")
+            self.assertIn("Build a tiny calculator CLI from scratch", captured["goal"])
+            self.assertIn("implement it in this repo", captured["goal"])
+            self.assertNotIn("Design the architecture only", captured["goal"])
+
+    async def test_runtime_keeps_full_delivery_goal_when_reselecting_delivery_workflow(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            captured: dict[str, str] = {}
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="architecture-first",
+                    goal="Design the architecture only before any implementation happens.",
+                    deliverable_expected=False,
+                )
+
+            async def classify(_runtime, *, body: str, created_at: int) -> bool:
+                return False
+
+            async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
+                return False
+
+            async def choose_workflow(
+                _runtime,
+                *,
+                body: str,
+                goal: str,
+                current_workflow_id: str | None,
+                created_at: int,
+            ) -> str:
+                captured["selected_goal"] = goal
+                return "dynamic-open-ended"
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                captured["run_goal"] = goal
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
+                patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
+                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                await runtime.send_user_message_to_orchestrator(
+                    body="Build a tiny calculator CLI from scratch and implement it in this repo.",
+                    created_at=10,
+                )
+
+            self.assertIn("Build a tiny calculator CLI from scratch", captured["selected_goal"])
+            self.assertIn("implement it in this repo", captured["selected_goal"])
+            self.assertNotIn("Design the architecture only", captured["selected_goal"])
+            self.assertEqual(captured["run_goal"], captured["selected_goal"])
+
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
         from ergon_studio.runtime import load_runtime
 

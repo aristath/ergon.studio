@@ -803,8 +803,12 @@ class RuntimeContext:
                     created_at=created_at + 1,
                     thread_id=self.main_thread_id,
                 )
-        resolved_goal = decision.goal or self.recent_main_user_context(limit=4) or body
+        delivery_context = self.recent_main_user_context(limit=4) or body
+        resolved_goal = decision.goal or delivery_context
         resolved_request = decision.request or resolved_goal
+        if decision.deliverable_expected and decision.mode in {"workflow", "delegate"}:
+            resolved_goal = delivery_context
+            resolved_request = delivery_context
         requires_delivery_workflow = False
         delivery_reason = ""
         if (
@@ -848,7 +852,7 @@ class RuntimeContext:
         if requires_delivery_workflow:
             selected_workflow_id = await self._select_delivery_workflow(
                 body=body,
-                goal=resolved_goal,
+                goal=delivery_context,
                 current_workflow_id=decision.workflow_id,
                 created_at=created_at + 1,
             )
@@ -858,10 +862,12 @@ class RuntimeContext:
                 workflow_id=selected_workflow_id,
                 agent_id=decision.agent_id,
                 title=decision.title,
-                request=resolved_request,
-                goal=resolved_goal,
+                request=delivery_context,
+                goal=delivery_context,
                 deliverable_expected=True,
             )
+            resolved_goal = delivery_context
+            resolved_request = delivery_context
             self.append_event(
                 kind="orchestrator_delivery_workflow_selected",
                 summary=f"{delivery_reason or 'Selected a delivery workflow'}: {selected_workflow_id}",
@@ -2855,8 +2861,9 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "",
             "Rules:",
             "- Prefer workflow for non-trivial implementation, debugging, verification, or delivery work.",
-            "- If the user wants runnable code or an implemented project outcome, prefer `single-agent-execution` only for truly small self-contained work.",
-            "- Prefer `standard-build` when the work is clearly staged and benefits from a predictable architect -> implement -> verify -> review flow.",
+            "- If the user wants runnable code or an implemented project outcome, preserve the full delivery goal instead of narrowing it to a design-only or review-only subtask.",
+            "- Prefer `single-agent-execution` for tiny, bounded deliveries with one obvious entrypoint and minimal moving parts.",
+            "- Prefer `standard-build` only when explicit staging and a separate implementation/review cycle are clearly helpful.",
             "- Prefer `dynamic-open-ended` when the work is broad, greenfield, evolving, or likely to need clarification, replanning, or changing specialist assignments mid-flight.",
             "- Prefer `specialist-handoff` when the work is mainly exploratory discussion and specialists should pass control directly among themselves.",
             "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
@@ -2941,24 +2948,21 @@ def _delivery_workflow_selector_instructions(allowed_workflow_ids: tuple[str, ..
     rules = [
         "- Prefer the smallest workflow that still fits the actual task, but do not force a rigid staged workflow onto genuinely adaptive work.",
         "- Use the whole recent conversation and workspace state, not keyword matching.",
+        "- Preserve the user's full delivery goal. Do not narrow the task to design-only, review-only, or documentation-only work if the user asked for an implemented result.",
     ]
     if "single-agent-execution" in allowed_workflow_ids:
         rules.insert(
             0,
-            "- Use `single-agent-execution` only for truly small, contained work that one specialist can complete cleanly.",
+            "- Use `single-agent-execution` for tiny, contained deliveries that one specialist can complete and verify cleanly.",
         )
     if "standard-build" in allowed_workflow_ids:
         rules.insert(
             1 if "single-agent-execution" in allowed_workflow_ids else 0,
-            "- Use `standard-build` when the work is clear enough for a predictable staged flow with explicit plan, implementation, verification, and review.",
-        )
-        rules.insert(
-            2 if "single-agent-execution" in allowed_workflow_ids else 1,
-            "- Prefer `standard-build` for straightforward greenfield delivery when the requested outcome is clear and bounded.",
+            "- Use `standard-build` only when a predictable staged flow with explicit planning, implementation, verification, and review is clearly worth the overhead.",
         )
     if "dynamic-open-ended" in allowed_workflow_ids:
         rules.append(
-            "- Use `dynamic-open-ended` only when the work is genuinely broad, uncertain, evolving, likely to need replanning, or likely to need changing specialists mid-flight."
+            "- Use `dynamic-open-ended` when the work is genuinely broad, uncertain, evolving, greenfield enough to need judgment calls, or likely to need changing specialists mid-flight."
         )
     return "\n".join(
         [

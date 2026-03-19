@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent_framework import AgentSession
+from agent_framework import AgentSession, Message
 
 from ergon_studio.config import save_global_config
 
@@ -122,6 +122,33 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(
                 any(isinstance(provider, RetrievalContextProvider) for provider in agent.context_providers)
             )
+
+    def test_starting_debate_workflow_creates_group_workroom(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="debate",
+                created_at=1_710_755_200,
+            )
+
+            self.assertEqual(runtime.workflow_orchestration("debate"), "group_chat")
+            self.assertEqual(len(threads), 1)
+            self.assertEqual(threads[0].kind, "group_workroom")
+            self.assertIn("architect + brainstormer + reviewer", threads[0].summary or "")
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+            self.assertEqual(run_view.steps[0].threads[0].kind, "group_workroom")
 
     def test_runtime_can_reload_registry_after_config_changes(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -1843,6 +1870,269 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(report.id)
             self.assertIn("## Orchestrator Review", body)
             self.assertIn("ACCEPTED: This matches the goal", body)
+
+    async def test_runtime_runs_debate_workflow_in_a_shared_workroom(self) -> None:
+        import ergon_studio.workflow_runtime as workflow_runtime
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        class DummyCtx:
+            def __init__(self) -> None:
+                self.output = None
+
+            async def yield_output(self, value) -> None:
+                self.output = value
+
+            async def send_message(self, value, target_id=None) -> None:
+                del target_id
+                self.output = value
+
+        class FakeBuiltGroupChat:
+            def __init__(self, participants, *, selection_func=None, max_rounds=None) -> None:
+                self.participants = participants
+                self.selection_func = selection_func
+                self.max_rounds = max_rounds or len(participants)
+
+            async def run(self, goal, include_status_events=True):
+                del include_status_events
+                participant_map = {participant.id: participant for participant in self.participants}
+                opening = workflow_runtime.GroupChatParticipantMessage(
+                    messages=[Message(role="user", text=goal, author_name="workflow")]
+                )
+                for participant in self.participants:
+                    await participant.sync_messages(opening, DummyCtx())
+
+                responses = []
+                for round_index in range(self.max_rounds):
+                    if self.selection_func is None:
+                        participant = self.participants[round_index]
+                    else:
+                        state = SimpleNamespace(
+                            current_round=round_index,
+                            participants=[participant.id for participant in self.participants],
+                            conversation=list(responses),
+                        )
+                        participant_id = self.selection_func(state)
+                        participant = participant_map[participant_id]
+                    ctx = DummyCtx()
+                    await participant.handle_request(workflow_runtime.GroupChatRequestMessage(), ctx)
+                    response = ctx.output.message
+                    responses.append(response)
+                    broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
+                    for peer in self.participants:
+                        if peer is participant:
+                            continue
+                        await peer.sync_messages(broadcast, DummyCtx())
+                return SimpleNamespace(get_final_state=lambda: responses)
+
+        class FakeGroupChatBuilder:
+            def __init__(self, *, participants, orchestrator_agent=None, selection_func=None, max_rounds=None) -> None:
+                del orchestrator_agent
+                self.participants = participants
+                self.selection_func = selection_func
+                self.max_rounds = max_rounds
+
+            def build(self):
+                return FakeBuiltGroupChat(
+                    self.participants,
+                    selection_func=self.selection_func,
+                    max_rounds=self.max_rounds,
+                )
+
+        fake_agents = {
+            "architect": FakeAgent(
+                [
+                    "Typer is strong for ergonomics and command structure.",
+                    "Given the tradeoffs, I still prefer Typer because it keeps the CLI easier to extend cleanly.",
+                ]
+            ),
+            "brainstormer": FakeAgent("Argparse is lighter, but Typer will keep the CLI easier to extend."),
+            "reviewer": FakeAgent("Recommendation: choose Typer for speed of iteration and clearer commands."),
+            "orchestrator": FakeAgent('{"accepted": true, "summary": "The debate produced a clear direction."}'),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime.GroupChatBuilder",
+                FakeGroupChatBuilder,
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="debate",
+                    goal="Debate whether the CLI should use Typer or argparse.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            run_view = runtime.describe_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            thread_messages = runtime.list_thread_messages(workroom.id)
+            senders = [message.sender for message in thread_messages]
+            self.assertEqual(senders, ["workflow", "architect", "brainstormer", "architect", "reviewer"])
+            transcript = runtime.conversation_store.read_message_body(thread_messages[1])
+            self.assertIn("Typer", transcript)
+
+    async def test_runtime_auto_repairs_with_workflow_metadata(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture ready."),
+            "coder": FakeAgent("Implementation ready."),
+            "tester": FakeAgent(["Tests failed on the first pass.", "Tests passed after the fix."]),
+            "reviewer": FakeAgent(["Initial review complete.", "Follow-up review complete."]),
+            "fixer": FakeAgent("Applied a focused fix."),
+            "orchestrator": FakeAgent(
+                [
+                    '{"accepted": false, "summary": "The implementation still fails verification.", "findings": ["The tester reported a failing verification step."], "requires_replan": false, "replan_summary": ""}',
+                    '{"accepted": true, "summary": "The repair resolved the issue and the workflow can be accepted.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.current_step_index, 7)
+            team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
+            self.assertEqual(team[-3:], ["fixer", "tester", "reviewer"])
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_auto_repair_started", event_kinds)
+            self.assertIn("workflow_repair_cycle_requested", event_kinds)
+            report = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(workflow_run.id)
+                if artifact.kind == "workflow-report"
+            )
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("## Findings", body)
+            self.assertIn("Automatic repair cycles: 1", body)
+
+    async def test_runtime_auto_replans_when_review_requires_it(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent(["Initial plan was too narrow.", "Replanned around a cleaner CLI shape."]),
+            "coder": FakeAgent(["Initial implementation ready.", "Replanned implementation ready."]),
+            "tester": FakeAgent(["Initial verification exposed a structural gap.", "Replanned verification passed."]),
+            "reviewer": FakeAgent(["Initial review complete.", "Replanned review complete."]),
+            "fixer": FakeAgent("Not used."),
+            "orchestrator": FakeAgent(
+                [
+                    '{"accepted": false, "summary": "The approach is structurally off.", "findings": ["The current structure does not match the goal cleanly."], "requires_replan": true, "replan_summary": "Replan around a simpler architecture before continuing."}',
+                    '{"accepted": true, "summary": "The replanned approach now fits the goal.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.current_step_index, 8)
+            team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
+            self.assertEqual(team[-4:], ["architect", "coder", "tester", "reviewer"])
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_auto_replan_started", event_kinds)
+            self.assertIn("workflow_replan_cycle_requested", event_kinds)
+            report = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(workflow_run.id)
+                if artifact.kind == "workflow-report"
+            )
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("Automatic replanning cycles: 1", body)
 
     def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
         from ergon_studio.runtime import load_runtime

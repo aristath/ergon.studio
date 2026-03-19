@@ -349,6 +349,15 @@ kind: workflow
 orchestration: direct
 steps:
   - coder
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [coder]
+  - [reviewer]
 ---
 ## Purpose
 Handle small delivery work with the lightest viable team.
@@ -372,6 +381,7 @@ kind: workflow
 orchestration: sequential
 steps:
   - architect
+acceptance_mode: design_brief
 ---
 ## Purpose
 Design before implementation.
@@ -398,6 +408,17 @@ steps:
   - coder
   - tester
   - reviewer
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [tester]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [coder]
+  - [tester]
+  - [reviewer]
 ---
 ## Purpose
 Run the normal plan-build-review-fix loop.
@@ -422,6 +443,15 @@ orchestration: concurrent
 step_groups:
   - [coder, coder, coder]
   - [reviewer]
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [coder, coder, coder]
+  - [reviewer]
 ---
 ## Purpose
 Improve quality through parallel candidate generation.
@@ -442,11 +472,17 @@ The best candidate is selected, refined if needed, and accepted.
 id: debate
 name: Debate
 kind: workflow
-orchestration: sequential
-steps:
+orchestration: group_chat
+step_groups:
+  - [architect, brainstormer, reviewer]
+max_rounds: 4
+group_chat_manager: round_robin
+selection_sequence:
   - architect
   - brainstormer
+  - architect
   - reviewer
+acceptance_mode: decision_ready
 ---
 ## Purpose
 Compare competing approaches in a structured discussion.
@@ -470,6 +506,7 @@ kind: workflow
 orchestration: sequential
 steps:
   - researcher
+acceptance_mode: research_brief
 ---
 ## Purpose
 Collect relevant evidence before choosing a direction.
@@ -494,6 +531,15 @@ orchestration: sequential
 steps:
   - reviewer
   - fixer
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [fixer]
+  - [reviewer]
 ---
 ## Purpose
 Drive quality upward through review and correction.
@@ -518,6 +564,15 @@ orchestration: sequential
 steps:
   - reviewer
   - fixer
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [fixer]
+  - [reviewer]
 ---
 ## Purpose
 Drive quality upward through review findings and targeted fixes.
@@ -543,6 +598,17 @@ steps:
   - tester
   - fixer
   - reviewer
+max_repair_cycles: 2
+repair_step_groups:
+  - [fixer]
+  - [tester]
+  - [reviewer]
+max_replan_cycles: 1
+replan_step_groups:
+  - [architect]
+  - [tester]
+  - [fixer]
+  - [reviewer]
 ---
 ## Purpose
 Fix behavior based on failing tests or clear reproductions.
@@ -588,6 +654,7 @@ kind: workflow
 orchestration: sequential
 steps:
   - architect
+acceptance_mode: revised_plan
 ---
 ## Purpose
 Adjust course when goals or facts change.

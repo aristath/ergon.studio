@@ -437,6 +437,10 @@ class RuntimeContext:
             "step_groups": self.workflow_step_groups(workflow_id),
         }
 
+    def workflow_orchestration(self, workflow_id: str) -> str:
+        definition = self.registry.workflow_definitions[workflow_id]
+        return str(definition.metadata.get("orchestration", "unknown"))
+
     def workflow_steps(self, workflow_id: str) -> tuple[str, ...]:
         groups = self.workflow_step_groups(workflow_id)
         if any(len(group) != 1 for group in groups):
@@ -1536,7 +1540,10 @@ class RuntimeContext:
             return []
         labels: list[str] = []
         for step in run_view.steps:
-            participants = [thread.assigned_agent_id or thread.id for thread in step.threads]
+            participants = [
+                thread.assigned_agent_id or thread.summary or thread.id
+                for thread in step.threads
+            ]
             if participants:
                 labels.append(" + ".join(participants))
         return labels
@@ -1868,6 +1875,7 @@ class RuntimeContext:
         goal = self.latest_main_user_message_body()
         compiled = compile_workflow_definition(self.registry.workflow_definitions[workflow_id])
         step_groups = self.workflow_step_groups(workflow_id)
+        orchestration = self.workflow_orchestration(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
             title=f"Workflow: {workflow_id}",
@@ -1880,7 +1888,7 @@ class RuntimeContext:
             section_updates={
                 "Goal": goal or f"Workflow: {workflow_id}",
                 "Plan": self._render_workflow_plan(step_groups),
-                "Acceptance Criteria": "Deliver a minimal working result that satisfies the goal and passes orchestrator review.",
+                "Acceptance Criteria": self._workflow_acceptance_criteria(workflow_id),
             },
         )
         workflow_run = self.workflow_store.create_workflow_run(
@@ -1905,12 +1913,20 @@ class RuntimeContext:
             created_at=created_at + 1,
             task_id=root_task.id,
         )
-        threads = self._append_workflow_steps(
-            workflow_id=workflow_id,
-            root_task_id=root_task.id,
-            step_groups=step_groups,
-            created_at=created_at + 2,
-        )
+        if orchestration == "group_chat":
+            threads = self._append_group_workroom_step(
+                workflow_id=workflow_id,
+                root_task_id=root_task.id,
+                participants=tuple(agent_id for group in step_groups for agent_id in group),
+                created_at=created_at + 2,
+            )
+        else:
+            threads = self._append_workflow_steps(
+                workflow_id=workflow_id,
+                root_task_id=root_task.id,
+                step_groups=step_groups,
+                created_at=created_at + 2,
+            )
         return workflow_run, threads
 
     def _render_workflow_plan(self, step_groups: tuple[tuple[str, ...], ...]) -> str:
@@ -1922,11 +1938,44 @@ class RuntimeContext:
             lines.append(f"{index}. {participants}")
         return "\n".join(lines)
 
+    def _workflow_acceptance_criteria(self, workflow_id: str) -> str:
+        acceptance_mode = str(
+            self.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery")
+        )
+        if acceptance_mode == "decision_ready":
+            return "Produce a clear decision-ready recommendation that addresses the goal and passes orchestrator review."
+        if acceptance_mode == "research_brief":
+            return "Produce a concrete research brief with enough evidence for the orchestrator to choose the next step."
+        if acceptance_mode == "design_brief":
+            return "Produce a concrete design brief that is implementation-ready and passes orchestrator review."
+        if acceptance_mode == "revised_plan":
+            return "Produce an explicit revised plan that realigns the work and passes orchestrator review."
+        return "Deliver a minimal working result that satisfies the goal and passes orchestrator review."
+
     def request_workflow_fix_cycle(
         self,
         *,
         workflow_run_id: str,
         created_at: int,
+    ) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        return self.request_workflow_followup_cycle(
+            workflow_run_id=workflow_run_id,
+            created_at=created_at,
+            step_groups=(("fixer",), ("reviewer",)),
+            state="repairing",
+            event_kind="workflow_fix_cycle_requested",
+            event_summary="Requested fix cycle",
+        )
+
+    def request_workflow_followup_cycle(
+        self,
+        *,
+        workflow_run_id: str,
+        created_at: int,
+        step_groups: tuple[tuple[str, ...], ...],
+        state: str,
+        event_kind: str,
+        event_summary: str,
     ) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
         workflow_run = self.get_workflow_run(workflow_run_id)
         if workflow_run is None:
@@ -1943,14 +1992,14 @@ class RuntimeContext:
         threads = self._append_workflow_steps(
             workflow_id=workflow_run.workflow_id,
             root_task_id=workflow_run.root_task_id,
-            step_groups=(("fixer",), ("reviewer",)),
+            step_groups=step_groups,
             created_at=created_at,
         )
         updated = WorkflowRunRecord(
             id=workflow_run.id,
             session_id=workflow_run.session_id,
             workflow_id=workflow_run.workflow_id,
-            state="repairing",
+            state=state,
             created_at=workflow_run.created_at,
             updated_at=created_at + 1,
             root_task_id=workflow_run.root_task_id,
@@ -1964,8 +2013,8 @@ class RuntimeContext:
             updated_at=created_at + 1,
         )
         self.append_event(
-            kind="workflow_fix_cycle_requested",
-            summary=f"Requested fix cycle for workflow {workflow_run.workflow_id}",
+            kind=event_kind,
+            summary=event_summary,
             created_at=created_at + 1,
             task_id=workflow_run.root_task_id,
         )
@@ -2148,6 +2197,31 @@ class RuntimeContext:
                 threads.append(thread)
                 thread_offset += 1
         return threads
+
+    def _append_group_workroom_step(
+        self,
+        *,
+        workflow_id: str,
+        root_task_id: str,
+        participants: tuple[str, ...],
+        created_at: int,
+    ) -> list[ThreadRecord]:
+        label = " + ".join(participants) if participants else "workroom"
+        child_task = self.create_task(
+            task_id=f"task-{uuid4().hex[:8]}",
+            title=f"{workflow_id}: {label}",
+            state="planned",
+            created_at=created_at,
+            parent_task_id=root_task_id,
+        )
+        workroom = self.create_thread(
+            thread_id=f"thread-workroom-{uuid4().hex[:8]}",
+            kind="group_workroom",
+            created_at=created_at + 1,
+            summary=f"Workroom: {label}",
+            parent_task_id=child_task.id,
+        )
+        return [workroom]
 
     def append_event(
         self,

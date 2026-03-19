@@ -23,6 +23,14 @@ class CompiledWorkflow:
 
 def compile_workflow_definition(definition: DefinitionDocument) -> CompiledWorkflow:
     step_groups = _workflow_step_groups(definition)
+    orchestration = str(definition.metadata.get("orchestration", "sequential"))
+    if orchestration == "group_chat":
+        workflow = _compile_group_chat_workflow(definition, step_groups)
+        return CompiledWorkflow(
+            definition_id=definition.id,
+            workflow=workflow,
+            step_groups=step_groups,
+        )
     root = _executor("workflow-start")
     builder = WorkflowBuilder(
         name=f"workflow-{definition.id}",
@@ -45,6 +53,26 @@ def compile_workflow_definition(definition: DefinitionDocument) -> CompiledWorkf
         workflow=workflow,
         step_groups=step_groups,
     )
+
+
+def _compile_group_chat_workflow(
+    definition: DefinitionDocument,
+    step_groups: tuple[tuple[str, ...], ...],
+):
+    participants = tuple(agent_id for group in step_groups for agent_id in group)
+    if not participants:
+        raise ValueError(f"group chat workflow '{definition.id}' must declare participants")
+    orchestrator = _executor("group_chat_orchestrator")
+    participant_executors = tuple(_executor(agent_id) for agent_id in participants)
+    merge = _merge_executor(participant_executors, (_executor("group_chat_summary"),))
+    builder = WorkflowBuilder(
+        name=f"workflow-{definition.id}",
+        description=str(definition.metadata.get("name", definition.id)),
+        start_executor=orchestrator,
+    )
+    builder.add_fan_out_edges(orchestrator, list(participant_executors))
+    builder.add_fan_in_edges(list(participant_executors), merge)
+    return builder.build()
 
 
 def _connect_group(builder: WorkflowBuilder, previous_group: tuple[object, ...], current_group: tuple[object, ...]) -> None:

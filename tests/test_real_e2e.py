@@ -226,6 +226,46 @@ Be short and concrete.
             self.assertIn("Dockerfile", str(result["result"]))
             self.assertEqual(runtime.list_tool_calls(), [])
 
+    async def test_real_debate_workflow_uses_a_shared_workroom(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            _configure_local_runtime(runtime)
+
+            result = await runtime.run_workflow(
+                workflow_id="debate",
+                goal=(
+                    "The repo is empty and we are designing a new Python CLI from scratch. "
+                    "Debate whether we should prefer Typer or argparse as the default choice. "
+                    "End with one clear recommendation and the top two reasons."
+                ),
+                created_at=1,
+                parent_thread_id=runtime.main_thread_id,
+            )
+
+            self.assertIn(result["status"], {"completed", "blocked"})
+            self.assertTrue(result["review_summary"])
+
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            run_view = runtime.describe_workflow_run(workflow_run.id)
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(len(run_view.steps), 1)
+
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            messages = runtime.list_thread_messages(workroom.id)
+            senders = [message.sender for message in messages]
+            self.assertEqual(senders[0], "workflow")
+            self.assertEqual(senders[1:], ["architect", "brainstormer", "architect", "reviewer"])
+
     async def test_real_orchestrator_can_complete_a_vague_build_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

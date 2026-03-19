@@ -12,6 +12,22 @@ class WorkflowRuntimeTests(unittest.TestCase):
 
         self.assertEqual(verdict, WorkflowReviewVerdict(accepted=True, summary="Ship it."))
 
+    def test_parse_review_verdict_reads_findings_and_replan_fields(self) -> None:
+        verdict = _parse_review_verdict(
+            '{"accepted": false, "summary": "Wrong direction.", "findings": ["Missing CLI output"], "requires_replan": true, "replan_summary": "Replan around a CLI-first flow."}'
+        )
+
+        self.assertEqual(
+            verdict,
+            WorkflowReviewVerdict(
+                accepted=False,
+                summary="Wrong direction.",
+                findings=("Missing CLI output",),
+                requires_replan=True,
+                replan_summary="Replan around a CLI-first flow.",
+            ),
+        )
+
     def test_parse_review_verdict_extracts_fenced_json(self) -> None:
         verdict = _parse_review_verdict('```json\n{"accepted": false, "summary": "Missing tests."}\n```')
 
@@ -25,6 +41,7 @@ class WorkflowRuntimeTests(unittest.TestCase):
     def test_auto_repair_support_is_limited_to_delivery_workflows(self) -> None:
         self.assertTrue(_supports_auto_repair("standard-build"))
         self.assertTrue(_supports_auto_repair("best-of-n"))
+        self.assertTrue(_supports_auto_repair("test-driven-repair"))
         self.assertFalse(_supports_auto_repair("architecture-first"))
 
     def test_required_tool_names_match_execution_roles(self) -> None:

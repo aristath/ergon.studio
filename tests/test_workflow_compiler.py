@@ -53,3 +53,30 @@ Broken.
             definition = load_definition(definition_path)
             with self.assertRaisesRegex(ValueError, "non-empty lists"):
                 compile_workflow_definition(definition)
+
+    def test_compile_workflow_definition_supports_group_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            definition_path = Path(temp_dir) / "debate.md"
+            definition_path.write_text(
+                """---
+id: debate
+name: Debate
+orchestration: group_chat
+step_groups:
+  - [architect, brainstormer, reviewer]
+max_rounds: 6
+---
+## Purpose
+Compare competing approaches.
+""",
+                encoding="utf-8",
+            )
+
+            compiled = compile_workflow_definition(load_definition(definition_path))
+            mermaid = compiled.to_mermaid()
+
+            self.assertEqual(compiled.definition_id, "debate")
+            self.assertIn("group_chat_orchestrator", mermaid)
+            self.assertIn("architect", mermaid)
+            self.assertIn("brainstormer", mermaid)
+            self.assertIn("reviewer", mermaid)

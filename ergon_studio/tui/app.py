@@ -190,9 +190,10 @@ class ErgonStudioApp(App[None]):
     }
     """
 
-    def __init__(self, runtime: RuntimeContext) -> None:
+    def __init__(self, runtime: RuntimeContext, *, open_session_picker_on_mount: bool = False) -> None:
         super().__init__()
         self.runtime = runtime
+        self.open_session_picker_on_mount = open_session_picker_on_mount
         self.selected_workflow_id = "standard-build"
         self.selected_workflow_run_id: str | None = None
         self._target_thread_id: str | None = None
@@ -216,6 +217,8 @@ class ErgonStudioApp(App[None]):
         self._load_existing_threads()
         self._load_existing_approvals()
         self._refresh_info()
+        if self.open_session_picker_on_mount:
+            self._open_session_picker()
 
     def _load_existing_messages(self) -> None:
         chat = self.query_one("#main-chat", RichLog)

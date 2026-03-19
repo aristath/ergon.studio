@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     tui_parser = subparsers.add_parser("tui")
     _add_project_args(tui_parser)
     _add_session_args(tui_parser)
+    _add_pick_session_arg(tui_parser)
 
     eval_parser = subparsers.add_parser("eval")
     _add_project_args(eval_parser)
@@ -70,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "tui":
+        open_session_picker_on_mount = False
+        if args.pick_session and args.session_id is None and not args.new_session:
+            paths = bootstrap_workspace(
+                project_root=args.project_root,
+                home_dir=args.home_dir,
+            )
+            store = SessionStore(paths)
+            open_session_picker_on_mount = len(store.list_sessions()) > 1
         runtime = load_runtime(
             project_root=args.project_root,
             home_dir=args.home_dir,
@@ -77,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
             create_session=args.new_session,
             session_title=args.title,
         )
-        app = ErgonStudioApp(runtime)
+        app = ErgonStudioApp(
+            runtime,
+            open_session_picker_on_mount=open_session_picker_on_mount,
+        )
         app.run()
         return 0
 
@@ -169,4 +181,12 @@ def _add_session_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help="Optional title when creating a new session",
+    )
+
+
+def _add_pick_session_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--pick-session",
+        action="store_true",
+        help="Open the TUI with the session picker when multiple sessions exist",
     )

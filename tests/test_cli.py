@@ -5,8 +5,11 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.cli import main
+from ergon_studio.session_store import SessionStore
 
 
 class CliTests(unittest.TestCase):
@@ -201,3 +204,41 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("Renamed lane", all_stdout.getvalue())
             self.assertIn("archived", all_stdout.getvalue())
+
+    def test_tui_pick_session_opens_picker_when_multiple_sessions_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            store = SessionStore(paths)
+            store.create_session(title="First lane", created_at=10)
+            store.create_session(title="Second lane", created_at=20)
+
+            captured: dict[str, object] = {}
+
+            class FakeApp:
+                def __init__(self, runtime, *, open_session_picker_on_mount=False):
+                    captured["runtime"] = runtime
+                    captured["open_session_picker_on_mount"] = open_session_picker_on_mount
+
+                def run(self) -> None:
+                    captured["ran"] = True
+
+            with patch("ergon_studio.cli.ErgonStudioApp", FakeApp):
+                exit_code = main(
+                    [
+                        "tui",
+                        "--project-root",
+                        str(project_root),
+                        "--home-dir",
+                        str(home_dir),
+                        "--pick-session",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(captured["ran"])
+            self.assertTrue(captured["open_session_picker_on_mount"])

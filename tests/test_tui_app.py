@@ -86,6 +86,19 @@ class TestAppRendering(IsolatedAsyncioTestCase):
             info = app.query_one("#info-bar", InfoBar)
             self.assertIn(runtime.current_session().title, str(info.content))
 
+    async def test_app_can_open_session_picker_on_mount(self):
+        _, runtime, _ = _make_env()
+        load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        app = ErgonStudioApp(runtime, open_session_picker_on_mount=True)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertIsInstance(app.screen, SessionPickerScreen)
+
     async def test_app_renders_existing_messages(self):
         _, runtime, app = _make_env()
         runtime.append_message_to_main_thread(

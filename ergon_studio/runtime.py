@@ -1380,51 +1380,6 @@ class RuntimeContext:
             return False
         return _as_bool(parsed.get("allowed"))
 
-    async def _should_escalate_greenfield_single_agent(
-        self,
-        *,
-        body: str,
-        created_at: int,
-    ) -> bool:
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return False
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return False
-        classifier = Agent(
-            client=client,
-            id="orchestrator-greenfield-escalation-guard",
-            name="Orchestrator Greenfield Escalation Guard",
-            description="Internal guard for greenfield workflow escalation",
-            instructions=_greenfield_single_agent_guard_instructions(),
-        )
-        try:
-            response = await classifier.run(
-                [
-                    Message(
-                        role="user",
-                        text=_greenfield_single_agent_guard_prompt(self, body),
-                        author_name="system",
-                    )
-                ],
-                session=classifier.create_session(session_id=f"main-greenfield-guard:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="orchestrator_greenfield_guard_failed",
-                summary=f"Greenfield escalation guard failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return False
-        try:
-            parsed = _parse_turn_decision_json(response.text.strip())
-        except ValueError:
-            return False
-        return _as_bool(parsed.get("escalate"))
-
     async def _select_delivery_workflow(
         self,
         *,
@@ -2816,24 +2771,6 @@ def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
     )
 
 
-def _greenfield_single_agent_guard_instructions() -> str:
-    return "\n".join(
-        [
-            "You are a narrow internal guard for the orchestrator.",
-            "The planner selected `single-agent-execution` for a greenfield delivery task.",
-            "Decide whether the task should be escalated to `standard-build` instead.",
-            "Output JSON only.",
-            "",
-            "Return:",
-            '{"escalate": false}',
-            "",
-            "Set `escalate` to true when the task is a new app, new subsystem, or from-scratch delivery where separate planning, implementation, testing, and review would materially improve reliability.",
-            "Set `escalate` to false when the task is still a truly tiny, isolated change despite the repo being nearly empty.",
-            "Use the recent conversation and workspace file list, not keyword matching.",
-        ]
-    )
-
-
 def _delivery_workflow_selector_instructions() -> str:
     return "\n".join(
         [
@@ -2903,29 +2840,6 @@ def _delivery_workflow_selector_prompt(
             "",
             "Resolved delivery goal:",
             goal,
-            "",
-            "Current workspace files:",
-            *(workspace_files or ["(no files)"]),
-            "",
-            "Latest user request:",
-            body,
-        ]
-    )
-
-
-def _greenfield_single_agent_guard_prompt(runtime: RuntimeContext, body: str) -> str:
-    recent_messages = runtime.list_main_messages()[-8:]
-    transcript_lines = []
-    for message in recent_messages:
-        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
-        if not text:
-            continue
-        transcript_lines.append(f"{message.sender}: {text}")
-    workspace_files = runtime._workspace_file_list(limit=12)
-    return "\n".join(
-        [
-            "Main thread transcript:",
-            *transcript_lines,
             "",
             "Current workspace files:",
             *(workspace_files or ["(no files)"]),

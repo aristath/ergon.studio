@@ -58,7 +58,7 @@ def build_tool_call_middleware(
             tool_name=context.function.name,
             arguments=_normalize_arguments(context.arguments),
             result=context.result,
-            status="completed",
+            status=_tool_result_status(context.result),
             created_at=created_at,
             thread_id=tool_context.thread_id,
             task_id=tool_context.task_id,
@@ -66,13 +66,13 @@ def build_tool_call_middleware(
         )
         event_store.append_event(
             session_id=tool_context.session_id,
-            event_id=f"event-{uuid4().hex}",
-            kind="tool_call",
-            summary=f"{tool_context.agent_id} called {context.function.name} [completed]",
-            created_at=created_at,
-            thread_id=tool_context.thread_id,
-            task_id=tool_context.task_id,
-        )
+                event_id=f"event-{uuid4().hex}",
+                kind="tool_call",
+                summary=f"{tool_context.agent_id} called {context.function.name} [{record.status}]",
+                created_at=created_at,
+                thread_id=tool_context.thread_id,
+                task_id=tool_context.task_id,
+            )
         context.metadata["tool_call_id"] = record.id
 
     return log_tool_call
@@ -84,3 +84,11 @@ def _normalize_arguments(arguments: object) -> object:
     if hasattr(arguments, "dict"):
         return arguments.dict()
     return arguments
+
+
+def _tool_result_status(result: object) -> str:
+    if isinstance(result, dict):
+        status = result.get("status")
+        if isinstance(status, str) and status.strip():
+            return status.strip()
+    return "completed"

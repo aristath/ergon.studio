@@ -1050,9 +1050,16 @@ class RuntimeContext:
             created_at = int(time.time())
         context = current_tool_execution_context()
         resolved_parent_thread_id = parent_thread_id if parent_thread_id is not None else (context.thread_id if context is not None else None)
+        step_groups = await self._select_initial_workflow_step_groups(
+            workflow_id=workflow_id,
+            goal=goal,
+            created_at=created_at,
+        )
         workflow_run, _ = self.start_workflow_run(
             workflow_id=workflow_id,
             created_at=created_at,
+            goal=goal,
+            step_groups=step_groups,
         )
         review_created_at = created_at + 100
         if workflow_run.root_task_id is not None:
@@ -1099,6 +1106,74 @@ class RuntimeContext:
             "review_accepted": summary.review_accepted,
             "artifact_id": summary.artifact_id,
         }
+
+    async def _select_initial_workflow_step_groups(
+        self,
+        *,
+        workflow_id: str,
+        goal: str,
+        created_at: int,
+    ) -> tuple[tuple[str, ...], ...]:
+        default_groups = self.workflow_step_groups(workflow_id)
+        if self.workflow_orchestration(workflow_id) != "sequential" or not default_groups:
+            return default_groups
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return default_groups
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return default_groups
+        selector = Agent(
+            client=client,
+            id=f"{workflow_id}-staffing-selector",
+            name="Workflow Staffing Selector",
+            description="Chooses the initial specialist sequence for a workflow run",
+            instructions=_workflow_staffing_selector_instructions(
+                workflow_id=workflow_id,
+                available_agents=tuple(
+                    agent_id
+                    for agent_id in self.list_agent_ids()
+                    if agent_id != "orchestrator"
+                ),
+            ),
+        )
+        try:
+            response = await selector.run(
+                [
+                    Message(
+                        role="user",
+                        text=_workflow_staffing_selector_prompt(
+                            workflow_id=workflow_id,
+                            goal=goal,
+                            default_step_groups=default_groups,
+                        ),
+                        author_name="workflow",
+                    )
+                ],
+                session=selector.create_session(session_id=f"workflow-staffing:{workflow_id}:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="workflow_staffing_selector_failed",
+                summary=f"Workflow staffing selector failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return default_groups
+        try:
+            selected_groups = _parse_selected_workflow_step_groups(
+                workflow_id=workflow_id,
+                raw=response.text.strip(),
+                known_agents=tuple(
+                    agent_id
+                    for agent_id in self.list_agent_ids()
+                    if agent_id != "orchestrator"
+                ),
+            )
+        except ValueError:
+            return default_groups
+        return selected_groups or default_groups
 
     def append_message_to_thread(
         self,
@@ -2024,10 +2099,22 @@ class RuntimeContext:
         )
         return task
 
-    def start_workflow_run(self, *, workflow_id: str, created_at: int) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
-        goal = self.latest_main_user_message_body()
+    def start_workflow_run(
+        self,
+        *,
+        workflow_id: str,
+        created_at: int,
+        goal: str | None = None,
+        step_groups: tuple[tuple[str, ...], ...] | None = None,
+    ) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        goal = goal or self.latest_main_user_message_body()
         compiled = compile_workflow_definition(self.registry.workflow_definitions[workflow_id])
-        step_groups = self.workflow_step_groups(workflow_id)
+        default_step_groups = self.workflow_step_groups(workflow_id)
+        resolved_step_groups = default_step_groups if step_groups is None else _validate_runtime_step_groups(
+            workflow_id=workflow_id,
+            step_groups=step_groups,
+            known_agents=tuple(self.registry.agent_definitions.keys()),
+        )
         orchestration = self.workflow_orchestration(workflow_id)
         root_task = self.create_task(
             task_id=f"task-{uuid4().hex[:8]}",
@@ -2040,7 +2127,7 @@ class RuntimeContext:
             updated_at=created_at,
             section_updates={
                 "Goal": goal or f"Workflow: {workflow_id}",
-                "Plan": self._render_workflow_plan(step_groups),
+                "Plan": self._render_workflow_plan(resolved_step_groups),
                 "Acceptance Criteria": self._workflow_acceptance_criteria(workflow_id),
             },
         )
@@ -2056,7 +2143,15 @@ class RuntimeContext:
             artifact_id=f"artifact-{uuid4().hex[:8]}",
             kind="workflow-graph",
             title=f"Workflow Graph: {workflow_id}",
-            content=compiled.to_mermaid(),
+            content=(
+                compiled.to_mermaid()
+                if resolved_step_groups == default_step_groups
+                else _render_runtime_workflow_graph(
+                    workflow_id=workflow_id,
+                    orchestration=orchestration,
+                    step_groups=resolved_step_groups,
+                )
+            ),
             created_at=created_at + 1,
             task_id=root_task.id,
         )
@@ -2070,14 +2165,14 @@ class RuntimeContext:
             threads = self._append_group_workroom_step(
                 workflow_id=workflow_id,
                 root_task_id=root_task.id,
-                participants=tuple(agent_id for group in step_groups for agent_id in group),
+                participants=tuple(agent_id for group in resolved_step_groups for agent_id in group),
                 created_at=created_at + 2,
             )
         else:
             threads = self._append_workflow_steps(
                 workflow_id=workflow_id,
                 root_task_id=root_task.id,
-                step_groups=step_groups,
+                step_groups=resolved_step_groups,
                 created_at=created_at + 2,
             )
         return workflow_run, threads
@@ -2919,10 +3014,130 @@ def _validate_workflow_group(workflow_id: str, group: object) -> tuple[str, ...]
     return tuple(steps)
 
 
+def _validate_runtime_step_groups(
+    *,
+    workflow_id: str,
+    step_groups: tuple[tuple[str, ...], ...],
+    known_agents: tuple[str, ...],
+) -> tuple[tuple[str, ...], ...]:
+    if not step_groups:
+        return ()
+    allowed = set(known_agents)
+    validated: list[tuple[str, ...]] = []
+    for group in step_groups:
+        if not group:
+            raise ValueError(f"workflow '{workflow_id}' step groups must be non-empty")
+        cleaned: list[str] = []
+        for agent_id in group:
+            if agent_id not in allowed:
+                raise ValueError(f"workflow '{workflow_id}' references unknown agent '{agent_id}'")
+            cleaned.append(agent_id)
+        validated.append(tuple(cleaned))
+    return tuple(validated)
+
+
+def _workflow_staffing_selector_instructions(
+    *,
+    workflow_id: str,
+    available_agents: tuple[str, ...],
+) -> str:
+    return "\n".join(
+        [
+            "You are choosing the initial specialist sequence for a workflow run.",
+            f"Workflow id: {workflow_id}.",
+            f"Available specialists: {', '.join(available_agents) or '(none)'}.",
+            "Choose the smallest team that is likely to finish the work cleanly.",
+            "Do not add extra steps unless they materially improve delivery quality.",
+            "Use at most one agent per step for sequential workflows unless parallel specialists are clearly justified.",
+            "Return JSON only with this shape:",
+            '{"step_groups":[["coder"]]}',
+        ]
+    )
+
+
+def _workflow_staffing_selector_prompt(
+    *,
+    workflow_id: str,
+    goal: str,
+    default_step_groups: tuple[tuple[str, ...], ...],
+) -> str:
+    return "\n".join(
+        [
+            f"Workflow: {workflow_id}",
+            "",
+            "Goal:",
+            goal,
+            "",
+            "Default staffing:",
+            _render_workflow_plan_lines(default_step_groups),
+            "",
+            "Choose the initial staffing plan.",
+        ]
+    ).strip()
+
+
+def _parse_selected_workflow_step_groups(
+    *,
+    workflow_id: str,
+    raw: str,
+    known_agents: tuple[str, ...],
+) -> tuple[tuple[str, ...], ...]:
+    payload = _parse_turn_decision_json(raw)
+    raw_step_groups = payload.get("step_groups")
+    if not isinstance(raw_step_groups, list):
+        raise ValueError("step_groups is required")
+    parsed: list[tuple[str, ...]] = []
+    allowed = set(known_agents)
+    for raw_group in raw_step_groups:
+        group = _validate_workflow_group(workflow_id, raw_group)
+        cleaned: list[str] = []
+        for agent_id in group:
+            if agent_id not in allowed or agent_id == "orchestrator":
+                raise ValueError(f"unknown staffing agent: {agent_id}")
+            cleaned.append(agent_id)
+        parsed.append(tuple(cleaned))
+    return tuple(parsed)
+
+
 def _workflow_group_label(group: tuple[str, ...]) -> str:
     if len(set(group)) == 1 and len(group) > 1:
         return f"{group[0]} x{len(group)}"
     return ", ".join(group)
+
+
+def _render_workflow_plan_lines(step_groups: tuple[tuple[str, ...], ...]) -> str:
+    if not step_groups:
+        return "(no steps)"
+    return "\n".join(
+        f"{index}. {' + '.join(group)}"
+        for index, group in enumerate(step_groups, start=1)
+    )
+
+
+def _render_runtime_workflow_graph(
+    *,
+    workflow_id: str,
+    orchestration: str,
+    step_groups: tuple[tuple[str, ...], ...],
+) -> str:
+    if orchestration in {"group_chat", "magentic", "handoff"}:
+        label = " + ".join(agent_id for group in step_groups for agent_id in group) or "workroom"
+        return "\n".join(
+            [
+                "flowchart TD",
+                '    start["Goal"] --> step1["%s: %s"]' % (workflow_id, label),
+                '    step1 --> review["orchestrator review"]',
+            ]
+        )
+    lines = ["flowchart TD", '    start["Goal"]']
+    previous = "start"
+    for index, group in enumerate(step_groups, start=1):
+        node = f"step{index}"
+        label = _workflow_group_label(group)
+        lines.append(f'    {previous} --> {node}["{label}"]')
+        previous = node
+    lines.append(f'    {previous} --> review["orchestrator review"]')
+    return "\n".join(lines)
 
 
 def _workflow_artifact_priority(kind: str) -> int:

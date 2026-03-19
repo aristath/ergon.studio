@@ -80,6 +80,12 @@ class TestAppRendering(IsolatedAsyncioTestCase):
             info = app.query_one("#info-bar", InfoBar)
             self.assertIsNotNone(info)
 
+    async def test_info_bar_shows_current_session_title(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            info = app.query_one("#info-bar", InfoBar)
+            self.assertIn("Main Session", str(info.content))
+
     async def test_app_renders_existing_messages(self):
         _, runtime, app = _make_env()
         runtime.append_message_to_main_thread(
@@ -258,8 +264,83 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             await pilot.press("enter")
             await pilot.pause()
             text = _richlog_text(app)
+            self.assertIn("/session", text)
+            self.assertIn("/sessions", text)
             self.assertIn("/config", text)
             self.assertIn("/workflows", text)
+
+    async def test_session_shows_current_session(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/session"
+            await pilot.press("enter")
+            await pilot.pause()
+            text = _richlog_text(app)
+            self.assertIn("Main Session", text)
+            self.assertIn("session-main", text)
+
+    async def test_sessions_lists_project_sessions(self):
+        _, runtime, app = _make_env()
+        second = load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        self.assertNotEqual(second.main_session_id, runtime.main_session_id)
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/sessions"
+            await pilot.press("enter")
+            await pilot.pause()
+            text = _richlog_text(app)
+            self.assertIn("Main Session", text)
+            self.assertIn("Parallel lane", text)
+
+    async def test_new_session_creates_and_switches_runtime(self):
+        _, runtime, app = _make_env()
+        original_session_id = runtime.main_session_id
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/new-session Parallel lane"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotEqual(app.runtime.main_session_id, original_session_id)
+            self.assertEqual(app.runtime.current_session().title, "Parallel lane")
+            text = _richlog_text(app)
+            self.assertIn("Switched", text)
+            self.assertIn("Parallel lane", text)
+
+    async def test_switch_session_reopens_specific_session(self):
+        _, runtime, app = _make_env()
+        first_session_id = runtime.main_session_id
+        runtime.append_message_to_main_thread(
+            message_id="msg-main",
+            sender="user",
+            kind="text",
+            body="main session message",
+            created_at=10,
+        )
+        second = load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        async with app.run_test() as pilot:
+            app._replace_runtime(second)
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = f"/switch-session {first_session_id}"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.runtime.main_session_id, first_session_id)
+            text = _richlog_text(app)
+            self.assertIn("main session message", text)
 
     async def test_workflows_lists_inline(self):
         _, runtime, app = _make_env()

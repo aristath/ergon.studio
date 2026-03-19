@@ -12,11 +12,15 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Collapsible, OptionList, RichLog, Static, TextArea
 
-from ergon_studio.runtime import RuntimeContext
+from ergon_studio.runtime import RuntimeContext, load_runtime
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, SideThreadBlock
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/help", "Show available commands"),
+    ("/session", "Show the current session"),
+    ("/sessions", "List project sessions"),
+    ("/new-session", "Create and switch to a new session"),
+    ("/switch-session", "Switch to an existing session"),
     ("/config", "Open configuration wizard"),
     ("/workflows", "List workflow definitions"),
     ("/workflow", "Select a workflow by name"),
@@ -166,8 +170,13 @@ class ErgonStudioApp(App[None]):
         chat = self.query_one("#main-chat", RichLog)
         messages = self.runtime.list_main_messages()
         if not messages:
+            session = self.runtime.current_session()
+            session_line = ""
+            if session is not None:
+                session_line = f"Session: {session.title} ({session.id})\n"
             chat.write(
                 f"[dim]Project: {self.runtime.paths.project_uuid}\n"
+                f"{session_line}"
                 f"Workspace: {self.runtime.paths.project_root}\n"
                 "Type a message to start.[/dim]"
             )
@@ -243,14 +252,14 @@ class ErgonStudioApp(App[None]):
         cmd = text.split()[0] if text else ""
         inp = self.query_one("#composer-input", ComposerTextArea)
         # If command takes args, put cursor after it with a space
-        if cmd in ("/workflow", "/agent"):
+        if cmd in ("/workflow", "/agent", "/new-session", "/switch-session"):
             inp.value = cmd + " "
         else:
             inp.value = cmd
         event.option_list.remove_class("visible")
         self.set_focus(inp)
         # Auto-submit commands that don't need args
-        if cmd not in ("/workflow", "/agent"):
+        if cmd not in ("/workflow", "/agent", "/new-session", "/switch-session"):
             inp.post_message(ComposerTextArea.Submitted(inp, cmd))
 
     def on_key(self, event) -> None:
@@ -323,13 +332,69 @@ class ErgonStudioApp(App[None]):
             chat.write(
                 "[bold]Available commands:[/bold]\n"
                 "  /help              Show this help\n"
+                "  /session           Show the current session\n"
+                "  /sessions          List project sessions\n"
+                "  /new-session [t]   Create and switch to a new session\n"
+                "  /switch-session i  Switch to an existing session\n"
                 "  /config            Edit global configuration\n"
                 "  /workflows         List workflow definitions\n"
-                "  /workflow <name>   Select a workflow (F5 to start)\n"
+                "  /workflow <name>   Select a workflow\n"
                 "  /agent <name>      Open a direct thread with an agent\n"
                 "  /memory            Show memory facts\n"
                 "  /threads           List all threads"
             )
+        elif command == "/session":
+            session = self.runtime.current_session()
+            if session is None:
+                chat.write("[dim]No active session.[/dim]")
+            else:
+                chat.write(
+                    f"[bold]Session:[/bold] {session.title}\n"
+                    f"[dim]{session.id}[/dim]"
+                )
+        elif command == "/sessions":
+            sessions = self.runtime.list_sessions(include_archived=True)
+            if not sessions:
+                chat.write("[dim]No sessions yet.[/dim]")
+            else:
+                lines = ["[bold]Sessions:[/bold]"]
+                for session in sessions:
+                    marker = ">" if session.id == self.runtime.main_session_id else " "
+                    archived = " archived" if session.archived_at is not None else ""
+                    lines.append(
+                        f"  {marker} {session.title} [dim]({session.id})[/dim]{archived}"
+                    )
+                chat.write("\n".join(lines))
+        elif command == "/new-session":
+            title = args.strip() or None
+            new_runtime = load_runtime(
+                project_root=self.runtime.paths.project_root,
+                home_dir=self.runtime.paths.home_dir,
+                create_session=True,
+                session_title=title,
+            )
+            self._replace_runtime(
+                new_runtime,
+                notice=f"[green]Switched[/green] to session {new_runtime.current_session().title}",
+            )
+        elif command == "/switch-session":
+            target = args.strip()
+            if not target:
+                chat.write("[red]Usage: /switch-session <id>[/red]")
+            else:
+                try:
+                    new_runtime = load_runtime(
+                        project_root=self.runtime.paths.project_root,
+                        home_dir=self.runtime.paths.home_dir,
+                        session_id=target,
+                    )
+                except ValueError:
+                    chat.write(f"[red]Unknown session:[/red] {target}")
+                else:
+                    self._replace_runtime(
+                        new_runtime,
+                        notice=f"[green]Switched[/green] to session {new_runtime.current_session().title}",
+                    )
         elif command == "/config":
             self._open_config_wizard()
         elif command == "/workflows":
@@ -522,6 +587,34 @@ class ErgonStudioApp(App[None]):
             selected_workflow_id=self.selected_workflow_id,
         )
         self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
+
+    def _replace_runtime(self, runtime: RuntimeContext, *, notice: str | None = None) -> None:
+        self.runtime = runtime
+        self.selected_workflow_run_id = None
+        self._target_thread_id = None
+        self._chat_message_count = 0
+        self._known_thread_ids = set()
+        self._known_approval_ids = set()
+        self._time_cursor = int(time.time())
+
+        self.query_one("#main-chat", RichLog).clear()
+        self.query_one("#side-threads", Vertical).remove_children()
+
+        status_bar = self.query_one("#agent-status-bar", AgentStatusBar)
+        status_bar.runtime = self.runtime
+        status_bar._agent_states = {}
+
+        info_bar = self.query_one("#info-bar", InfoBar)
+        info_bar.runtime = self.runtime
+
+        self._load_existing_messages()
+        self._load_existing_threads()
+        self._load_existing_approvals()
+        self._update_composer_placeholder()
+        self._refresh_info()
+
+        if notice:
+            self.query_one("#main-chat", RichLog).write(notice)
 
     def _update_composer_placeholder(self) -> None:
         if not self.is_mounted:

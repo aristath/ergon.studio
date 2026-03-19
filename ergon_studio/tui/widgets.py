@@ -175,6 +175,10 @@ class InfoBar(Static):
         workflow_id: str | None,
     ) -> str:
         parts: list[str] = []
+        session = self.runtime.current_session()
+
+        if session is not None:
+            parts.append(f"session: {session.title}")
 
         if workflow_run_id is not None:
             run_view = self.runtime.describe_workflow_run(workflow_run_id)

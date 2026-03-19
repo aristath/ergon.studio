@@ -1,0 +1,195 @@
+"""Custom widgets for the ergon.studio TUI."""
+
+from __future__ import annotations
+
+from rich.text import Text
+
+from textual.widgets import Collapsible, Static
+
+from ergon_studio.runtime import RuntimeContext
+from ergon_studio.storage.models import ThreadRecord
+
+AGENT_SPRITES: dict[str, str] = {
+    "orchestrator": "⢺⡗",
+    "architect": "⣎⣱",
+    "coder": "⡢⢔",
+    "reviewer": "⠺⢗",
+    "fixer": "⢹⡀",
+    "researcher": "⣑⣄",
+    "tester": "⢄⠊",
+    "documenter": "⣏⡇",
+    "brainstormer": "⡱⢎",
+    "designer": "⡠⠃",
+    "user": "⢘⡃",
+}
+
+AGENT_COLORS: dict[str, str] = {
+    "orchestrator": "bright_cyan",
+    "architect": "bright_blue",
+    "coder": "bright_green",
+    "reviewer": "bright_yellow",
+    "fixer": "rgb(255,165,0)",
+    "researcher": "bright_magenta",
+    "tester": "rgb(0,255,128)",
+    "documenter": "grey70",
+    "brainstormer": "bright_red",
+    "designer": "rgb(255,100,255)",
+    "user": "bright_white",
+}
+
+STATE_COLORS: dict[str, str] = {
+    "idle": "grey35",
+    "ready": "grey62",
+    "active": "bright_green",
+    "working": "bright_cyan",
+    "waiting": "yellow",
+    "error": "bright_red",
+}
+
+
+class AgentStatusBar(Static):
+    """Single-line status bar showing braille sprites for each agent."""
+
+    DEFAULT_CSS = """
+    AgentStatusBar {
+        height: 1;
+        dock: top;
+        background: $surface;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, runtime: RuntimeContext, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.runtime = runtime
+        self._agent_states: dict[str, str] = {}
+
+    def on_mount(self) -> None:
+        self.refresh_from_runtime()
+
+    def refresh_from_runtime(self) -> None:
+        agent_ids = self.runtime.list_agent_ids()
+        for agent_id in agent_ids:
+            if agent_id not in self._agent_states:
+                summary = self.runtime.agent_status_summary(agent_id)
+                if "not configured" in summary or "error" in summary:
+                    self._agent_states[agent_id] = "error"
+                elif "ready" in summary:
+                    self._agent_states[agent_id] = "ready"
+                else:
+                    self._agent_states[agent_id] = "idle"
+        self._agent_states.setdefault("user", "ready")
+        self.update(self._build_bar())
+
+    def set_agent_state(self, agent_id: str, state: str) -> None:
+        self._agent_states[agent_id] = state
+        self.update(self._build_bar())
+
+    def _build_bar(self) -> Text:
+        text = Text()
+        agent_ids = list(AGENT_SPRITES.keys())
+        for i, agent_id in enumerate(agent_ids):
+            sprite = AGENT_SPRITES[agent_id]
+            state = self._agent_states.get(agent_id, "idle")
+            if state in ("active", "working"):
+                color = AGENT_COLORS.get(agent_id, "white")
+            else:
+                color = STATE_COLORS.get(state, "grey35")
+            text.append(sprite, style=color)
+            if i < len(agent_ids) - 1:
+                text.append(" ")
+        return text
+
+
+class SideThreadBlock(Collapsible):
+    """Collapsible block showing a side thread's messages."""
+
+    DEFAULT_CSS = """
+    SideThreadBlock {
+        height: auto;
+        margin: 0;
+        padding: 0;
+    }
+    """
+
+    def __init__(self, thread: ThreadRecord, runtime: RuntimeContext, **kwargs) -> None:
+        self._thread = thread
+        self._runtime = runtime
+        self._message_count = len(runtime.list_thread_messages(thread.id))
+        title = self._build_title()
+        self._content_widget = Static("", classes="thread-content")
+        super().__init__(self._content_widget, title=title, collapsed=True, **kwargs)
+
+    def _build_title(self) -> str:
+        agent = self._thread.assigned_agent_id or self._thread.kind
+        sprite = AGENT_SPRITES.get(agent, "")
+        summary = self._thread.summary or self._thread.kind
+        return f"{sprite} {agent} › {summary} [{self._message_count} msgs]"
+
+    def refresh_messages(self) -> None:
+        messages = self._runtime.list_thread_messages(self._thread.id)
+        self._message_count = len(messages)
+        self.title = self._build_title()
+        if not messages:
+            self._content_widget.update("No messages yet.")
+            return
+        lines = []
+        for msg in messages:
+            body = self._runtime.conversation_store.read_message_body(msg).rstrip("\n")
+            lines.append(f"[bold]{msg.sender}[/bold] {body}")
+        self._content_widget.update("\n".join(lines))
+
+
+class InfoBar(Static):
+    """Two-line bottom bar with workflow state and command hints."""
+
+    DEFAULT_CSS = """
+    InfoBar {
+        height: 2;
+        background: $surface;
+        padding: 0 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, runtime: RuntimeContext, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.runtime = runtime
+
+    def on_mount(self) -> None:
+        self.refresh_from_runtime()
+
+    def refresh_from_runtime(
+        self,
+        selected_workflow_run_id: str | None = None,
+        selected_workflow_id: str | None = None,
+    ) -> None:
+        line1 = self._build_status_line(selected_workflow_run_id, selected_workflow_id)
+        line2 = "/help /config /workflows /agent <name> /memory /threads"
+        self.update(f"{line1}\n{line2}")
+
+    def _build_status_line(
+        self,
+        workflow_run_id: str | None,
+        workflow_id: str | None,
+    ) -> str:
+        parts: list[str] = []
+
+        if workflow_run_id is not None:
+            run_view = self.runtime.describe_workflow_run(workflow_run_id)
+            if run_view is not None:
+                run = run_view.workflow_run
+                step = run.current_step_index
+                total = len(run_view.steps)
+                filled = "▪" * step
+                empty = "○" * max(0, total - step)
+                parts.append(f"{run.workflow_id} step {step}/{total} {filled}{empty} [{run.state}]")
+        elif workflow_id:
+            parts.append(f"workflow: {workflow_id} (F5 to start)")
+
+        pending = self.runtime.list_pending_approvals()
+        if pending:
+            count = len(pending)
+            parts.append(f"{count} pending approval{'s' if count != 1 else ''} (Ctrl+Y/R)")
+
+        return " │ ".join(parts) if parts else "No active workflow"

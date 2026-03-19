@@ -27,11 +27,11 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.paths.project_root, project_root)
             self.assertIn("orchestrator", runtime.registry.agent_definitions)
             self.assertIn("read_file", runtime.tool_registry)
-            self.assertEqual(runtime.main_session_id, "session-main")
-            self.assertEqual(runtime.main_thread_id, "thread-main")
+            self.assertTrue(runtime.main_session_id.startswith("session-"))
+            self.assertTrue(runtime.main_thread_id.startswith("thread-main-session-"))
             self.assertEqual(runtime.list_tasks(), [])
             self.assertEqual(runtime.list_workflow_runs(), [])
-            self.assertEqual([thread.id for thread in runtime.list_threads()], ["thread-main"])
+            self.assertEqual([thread.id for thread in runtime.list_threads()], [runtime.main_thread_id])
             self.assertEqual(runtime.list_main_messages(), [])
             self.assertEqual(runtime.list_events(), [])
             self.assertEqual(runtime.list_approvals(), [])
@@ -58,8 +58,8 @@ class RuntimeTests(unittest.TestCase):
                 session_title="Parallel lane",
             )
 
-            self.assertEqual(first.main_session_id, "session-main")
-            self.assertEqual(first.main_thread_id, "thread-main")
+            self.assertTrue(first.main_session_id.startswith("session-"))
+            self.assertTrue(first.main_thread_id.startswith("thread-main-session-"))
             self.assertNotEqual(second.main_session_id, first.main_session_id)
             self.assertTrue(second.main_thread_id.startswith("thread-main-session-"))
             self.assertEqual(second.current_session().title, "Parallel lane")
@@ -104,7 +104,7 @@ class RuntimeTests(unittest.TestCase):
             reloaded_first = load_runtime(
                 project_root=project_root,
                 home_dir=home_dir,
-                session_id="session-main",
+                session_id=first.main_session_id,
             )
 
             self.assertEqual(
@@ -136,7 +136,6 @@ class RuntimeTests(unittest.TestCase):
 
             resumed = load_runtime(project_root=project_root, home_dir=home_dir)
 
-            self.assertEqual(first.main_session_id, "session-main")
             self.assertEqual(resumed.main_session_id, second.main_session_id)
             self.assertEqual(resumed.current_session().title, "Latest lane")
 
@@ -166,7 +165,7 @@ class RuntimeTests(unittest.TestCase):
 
             self.assertEqual(reopened.main_session_id, first.main_session_id)
             self.assertNotEqual(reopened.main_session_id, second.main_session_id)
-            self.assertEqual(reopened.current_session().title, "Main Session")
+            self.assertEqual(reopened.current_session().title, first.current_session().title)
 
     def test_load_runtime_creates_fresh_session_when_only_archived_sessions_exist(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -739,7 +738,7 @@ Agents receive whiteboard context before each run.
 
             self.assertEqual(
                 [thread.id for thread in threads],
-                ["thread-main", "thread-review-1"],
+                [runtime.main_thread_id, "thread-review-1"],
             )
             self.assertIsNone(threads[0].assigned_agent_id)
             self.assertEqual(
@@ -1399,10 +1398,14 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     created_at=1_710_755_200,
                 )
 
-            session_path = runtime.paths.session_agent_sessions_dir(runtime.main_session_id) / "thread-main" / "orchestrator.json"
+            session_path = (
+                runtime.paths.session_agent_sessions_dir(runtime.main_session_id)
+                / runtime.main_thread_id
+                / "orchestrator.json"
+            )
             self.assertTrue(session_path.exists())
-            self.assertEqual(first_agent.created_session_ids, ["thread-main:orchestrator"])
-            self.assertEqual(first_agent.seen_session_ids, ["thread-main:orchestrator"])
+            self.assertEqual(first_agent.created_session_ids, [f"{runtime.main_thread_id}:orchestrator"])
+            self.assertEqual(first_agent.seen_session_ids, [f"{runtime.main_thread_id}:orchestrator"])
             self.assertEqual(
                 [message.sender for message in runtime.list_main_messages()],
                 ["user", "orchestrator"],
@@ -1417,7 +1420,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             self.assertEqual(second_agent.created_session_ids, [])
-            self.assertEqual(second_agent.seen_session_ids, ["thread-main:orchestrator"])
+            self.assertEqual(second_agent.seen_session_ids, [f"{runtime.main_thread_id}:orchestrator"])
             self.assertEqual(
                 [message.sender for message in reloaded_runtime.list_main_messages()],
                 ["user", "orchestrator", "user", "orchestrator"],

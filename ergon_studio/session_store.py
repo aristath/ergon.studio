@@ -97,4 +97,9 @@ class SessionStore:
 def default_session_title(*, session_id: str, created_at: int) -> str:
     if session_id == "session-main":
         return "Main Session"
-    return f"Session {created_at}"
+    if session_id.startswith("session-"):
+        suffix = session_id.removeprefix("session-")
+    else:
+        suffix = session_id
+    suffix = suffix.strip() or str(created_at)
+    return f"Session {suffix}"

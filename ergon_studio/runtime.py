@@ -2922,13 +2922,7 @@ def _resolve_runtime_session(
     latest = session_store.latest_session()
     if latest is not None:
         return latest
-    if session_store.get_session(MAIN_SESSION_ID) is not None:
-        return session_store.create_session(
-            title=session_title,
-            created_at=now,
-        )
     return session_store.create_session(
-        session_id=MAIN_SESSION_ID,
         title=session_title,
         created_at=now,
     )

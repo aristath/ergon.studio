@@ -37,6 +37,20 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual([session.id for session in all_sessions], [first.id, second.id])
             self.assertEqual(archived.archived_at, 40)
 
+    def test_default_titles_use_session_suffix_for_generated_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            store = SessionStore(paths)
+
+            created = store.create_session(session_id="session-abc12345", created_at=10)
+
+            self.assertEqual(created.title, "Session abc12345")
+
     def test_latest_session_prefers_most_recent_update(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

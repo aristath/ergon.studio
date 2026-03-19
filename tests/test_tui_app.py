@@ -84,7 +84,7 @@ class TestAppRendering(IsolatedAsyncioTestCase):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
             info = app.query_one("#info-bar", InfoBar)
-            self.assertIn("Main Session", str(info.content))
+            self.assertIn(runtime.current_session().title, str(info.content))
 
     async def test_app_renders_existing_messages(self):
         _, runtime, app = _make_env()
@@ -286,8 +286,8 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             await pilot.press("enter")
             await pilot.pause()
             text = _richlog_text(app)
-            self.assertIn("Main Session", text)
-            self.assertIn("session-main", text)
+            self.assertIn(runtime.current_session().title, text)
+            self.assertIn(runtime.main_session_id, text)
 
     async def test_sessions_lists_project_sessions(self):
         _, runtime, app = _make_env()
@@ -305,7 +305,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             await pilot.press("enter")
             await pilot.pause()
             text = _richlog_text(app)
-            self.assertIn("Main Session", text)
+            self.assertIn(runtime.current_session().title, text)
             self.assertIn("Parallel lane", text)
 
     async def test_new_session_creates_and_switches_runtime(self):

@@ -7,10 +7,9 @@ import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
-from textual.widgets import Input
-
 from ergon_studio.config import save_global_config
 from ergon_studio.runtime import load_runtime
+from ergon_studio.tui.widgets import ComposerTextArea
 
 
 MODEL_ID = "qwen3-coder-next-q40"
@@ -153,12 +152,14 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
             app = ErgonStudioApp(runtime)
 
             async with app.run_test() as pilot:
-                composer = app.query_one("#composer-input", Input)
+                composer = app.query_one("#composer-input", ComposerTextArea)
                 composer.value = (
                     "We are starting from scratch. Build a tiny Python CLI calculator app. "
                     "First decide the approach, then implement it in this repo."
                 )
-                await app.on_input_submitted(SimpleNamespace(value=composer.value, input=composer))
+                await app.on_composer_text_area_submitted(
+                    SimpleNamespace(value=composer.value, text_area=composer)
+                )
                 await self._wait_for(
                     lambda: self._workflow_finished(runtime),
                     pilot,

@@ -226,6 +226,78 @@ Be short and concrete.
             self.assertIn("Dockerfile", str(result["result"]))
             self.assertEqual(runtime.list_tool_calls(), [])
 
+    async def test_real_sessions_share_workspace_but_not_chat_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            _configure_local_runtime(first)
+
+            created = await first.delegate_to_agent(
+                agent_id="coder",
+                request=(
+                    "Create a file named session_note.txt in the repo root with exactly this content: "
+                    "shared workspace proof\\n. Use the file tools."
+                ),
+                title="Session one write",
+                created_at=1,
+                parent_thread_id=first.main_thread_id,
+            )
+
+            self.assertEqual(created["status"], "completed")
+            self.assertTrue((project_root / "session_note.txt").exists())
+            self.assertEqual(len(first.list_main_messages()), 0)
+
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Parallel lane",
+            )
+            _configure_local_runtime(second)
+
+            self.assertNotEqual(second.main_session_id, first.main_session_id)
+            self.assertEqual(second.list_main_messages(), [])
+
+            second.save_agent_definition_text(
+                agent_id="researcher",
+                text="""---
+id: researcher
+name: Researcher
+role: researcher
+temperature: 0.0
+---
+## Identity
+You are the research specialist for the AI firm.
+
+## Responsibilities
+Answer questions from the available project context.
+
+## Rules
+Rely on the provided context. Do not invent files.
+
+## Output Style
+Be short and concrete.
+""",
+                created_at=2,
+            )
+
+            result = await second.delegate_to_agent(
+                agent_id="researcher",
+                request="Which file contains the text 'shared workspace proof'? Reply with the filename only.",
+                title="Cross-session retrieval lookup",
+                created_at=3,
+                parent_thread_id=second.main_thread_id,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertIn("session_note.txt", str(result["result"]))
+            self.assertEqual(second.list_main_messages(), [])
+
     async def test_real_debate_workflow_uses_a_shared_workroom(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

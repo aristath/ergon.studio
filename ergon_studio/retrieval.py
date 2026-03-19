@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha1
 import json
@@ -9,6 +10,7 @@ from uuid import NAMESPACE_URL
 from uuid import uuid5
 import time
 
+import portalocker
 from qdrant_client import QdrantClient
 from qdrant_client import models
 
@@ -77,14 +79,15 @@ class RetrievalIndex:
         self.artifact_store = ArtifactStore(paths)
         self.index_path = self.paths.indexes_dir / "qdrant"
         self.index_path.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.paths.indexes_dir / "qdrant-client.lock"
         self.manifest_path = self.paths.indexes_dir / "qdrant-manifest.json"
         self.embedding_cache_dir = Path.home() / ".ergon.studio" / "cache" / "fastembed"
         self.embedding_cache_dir.mkdir(parents=True, exist_ok=True)
-        self._client: QdrantClient | None = None
 
-    @property
-    def client(self) -> QdrantClient:
-        if self._client is None:
+    @contextmanager
+    def _client_session(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with portalocker.Lock(self.lock_path, timeout=60):
             client = QdrantClient(path=str(self.index_path))
             client.set_model(
                 self.embedding_model,
@@ -93,13 +96,60 @@ class RetrievalIndex:
                 providers=["CPUExecutionProvider"],
                 lazy_load=True,
             )
-            self._client = client
-        return self._client
+            try:
+                yield client
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
 
     def rebuild_workspace_index(self) -> int:
+        with self._client_session() as client:
+            return self._rebuild_workspace_index(client)
+
+    def ensure_workspace_index(self, *, force: bool = False) -> int:
+        with self._client_session() as client:
+            return self._ensure_workspace_index(client, force=force)
+
+    def query(self, text: str, *, limit: int = 5) -> list[RetrievalResult]:
+        return self.query_many([text], limit=limit)
+
+    def query_many(self, texts: list[str], *, limit: int = 5) -> list[RetrievalResult]:
+        queries = _normalize_queries(texts)
+        if not queries:
+            return []
+        with self._client_session() as client:
+            self._ensure_workspace_index(client)
+            if not client.collection_exists(COLLECTION_NAME):
+                return []
+            merged: dict[str, RetrievalResult] = {}
+            per_query_limit = max(limit, 4)
+            for query in queries:
+                responses = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=models.Document(
+                        text=query,
+                        model=self.embedding_model,
+                    ),
+                    using=client.get_vector_field_name(),
+                    limit=per_query_limit,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for item in responses.points:
+                    result = _result_from_payload(item.payload or {}, score=float(item.score))
+                    current = merged.get(result.chunk_id)
+                    if current is None or result.score > current.score:
+                        merged[result.chunk_id] = result
+            return sorted(
+                merged.values(),
+                key=lambda item: (-item.score, item.path, item.chunk_id),
+            )[:limit]
+
+    def _rebuild_workspace_index(self, client: QdrantClient) -> int:
         sources = self._collect_sources()
-        if self.client.collection_exists(COLLECTION_NAME):
-            self.client.delete_collection(COLLECTION_NAME)
+        if client.collection_exists(COLLECTION_NAME):
+            client.delete_collection(COLLECTION_NAME)
         if not sources:
             self._write_manifest(
                 workspace_fingerprint=self._sources_fingerprint({}),
@@ -109,10 +159,10 @@ class RetrievalIndex:
             )
             return 0
 
-        self._ensure_collection()
+        self._ensure_collection(client)
         source_entries: dict[str, dict[str, Any]] = {}
         for source in sources.values():
-            point_ids = self._index_source(source)
+            point_ids = self._index_source(client, source)
             source_entries[source.key] = self._manifest_source_entry(source, point_ids)
         chunk_count = sum(len(entry["point_ids"]) for entry in source_entries.values())
         self._write_manifest(
@@ -123,15 +173,15 @@ class RetrievalIndex:
         )
         return chunk_count
 
-    def ensure_workspace_index(self, *, force: bool = False) -> int:
+    def _ensure_workspace_index(self, client: QdrantClient, *, force: bool = False) -> int:
         sources = self._collect_sources()
         workspace_fingerprint = self._sources_fingerprint(sources)
         manifest = self._read_manifest()
         if force:
-            return self.rebuild_workspace_index()
+            return self._rebuild_workspace_index(client)
         if not sources:
-            if self.client.collection_exists(COLLECTION_NAME):
-                self.client.delete_collection(COLLECTION_NAME)
+            if client.collection_exists(COLLECTION_NAME):
+                client.delete_collection(COLLECTION_NAME)
             self._write_manifest(
                 workspace_fingerprint=workspace_fingerprint,
                 chunk_count=0,
@@ -139,48 +189,14 @@ class RetrievalIndex:
                 source_entries={},
             )
             return 0
-        if not self.client.collection_exists(COLLECTION_NAME) or manifest is None:
-            return self.rebuild_workspace_index()
+        if not client.collection_exists(COLLECTION_NAME) or manifest is None:
+            return self._rebuild_workspace_index(client)
         if manifest.get("embedding_model") != self.embedding_model:
-            return self.rebuild_workspace_index()
+            return self._rebuild_workspace_index(client)
         if manifest.get("workspace_fingerprint") == workspace_fingerprint:
             chunk_count = manifest.get("chunk_count", 0)
             return int(chunk_count) if isinstance(chunk_count, int) else 0
-        return self._sync_workspace_index(sources=sources, manifest=manifest)
-
-    def query(self, text: str, *, limit: int = 5) -> list[RetrievalResult]:
-        return self.query_many([text], limit=limit)
-
-    def query_many(self, texts: list[str], *, limit: int = 5) -> list[RetrievalResult]:
-        queries = _normalize_queries(texts)
-        if not queries:
-            return []
-        self.ensure_workspace_index()
-        if not self.client.collection_exists(COLLECTION_NAME):
-            return []
-        merged: dict[str, RetrievalResult] = {}
-        per_query_limit = max(limit, 4)
-        for query in queries:
-            responses = self.client.query_points(
-                collection_name=COLLECTION_NAME,
-                query=models.Document(
-                    text=query,
-                    model=self.embedding_model,
-                ),
-                using=self.client.get_vector_field_name(),
-                limit=per_query_limit,
-                with_payload=True,
-                with_vectors=False,
-            )
-            for item in responses.points:
-                result = _result_from_payload(item.payload or {}, score=float(item.score))
-                current = merged.get(result.chunk_id)
-                if current is None or result.score > current.score:
-                    merged[result.chunk_id] = result
-        return sorted(
-            merged.values(),
-            key=lambda item: (-item.score, item.path, item.chunk_id),
-        )[:limit]
+        return self._sync_workspace_index(client=client, sources=sources, manifest=manifest)
 
     def workspace_fingerprint(self) -> str:
         return self._sources_fingerprint(self._collect_sources())
@@ -281,11 +297,17 @@ class RetrievalIndex:
             )
         return sources
 
-    def _sync_workspace_index(self, *, sources: dict[str, _IndexSource], manifest: dict[str, object]) -> int:
-        self._ensure_collection()
+    def _sync_workspace_index(
+        self,
+        *,
+        client: QdrantClient,
+        sources: dict[str, _IndexSource],
+        manifest: dict[str, object],
+    ) -> int:
+        self._ensure_collection(client)
         old_entries = manifest.get("sources", {})
         if not isinstance(old_entries, dict):
-            return self.rebuild_workspace_index()
+            return self._rebuild_workspace_index(client)
 
         removed_keys = sorted(set(old_entries) - set(sources))
         changed_keys = sorted(
@@ -296,17 +318,17 @@ class RetrievalIndex:
         )
 
         for key in removed_keys + changed_keys:
-            self._delete_point_ids(_manifest_point_ids(old_entries.get(key)))
+            self._delete_point_ids(client, _manifest_point_ids(old_entries.get(key)))
 
         source_entries: dict[str, dict[str, Any]] = {}
         for key, source in sources.items():
             if key in changed_keys:
-                point_ids = self._index_source(source)
+                point_ids = self._index_source(client, source)
                 source_entries[key] = self._manifest_source_entry(source, point_ids)
                 continue
             entry = old_entries.get(key)
             if not isinstance(entry, dict):
-                point_ids = self._index_source(source)
+                point_ids = self._index_source(client, source)
                 source_entries[key] = self._manifest_source_entry(source, point_ids)
                 continue
             source_entries[key] = entry
@@ -320,22 +342,22 @@ class RetrievalIndex:
         )
         return chunk_count
 
-    def _ensure_collection(self) -> None:
-        if self.client.collection_exists(COLLECTION_NAME):
+    def _ensure_collection(self, client: QdrantClient) -> None:
+        if client.collection_exists(COLLECTION_NAME):
             return
-        self.client.create_collection(
+        client.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=self.client.get_fastembed_vector_params(on_disk=True),
+            vectors_config=client.get_fastembed_vector_params(on_disk=True),
         )
 
-    def _index_source(self, source: _IndexSource) -> list[str]:
+    def _index_source(self, client: QdrantClient, source: _IndexSource) -> list[str]:
         chunks = _chunk_text(source.text)
         if not chunks:
             return []
         ids: list[str] = []
         metadata: list[dict[str, object]] = []
         vectors: list[dict[str, models.Document]] = []
-        vector_name = self.client.get_vector_field_name()
+        vector_name = client.get_vector_field_name()
         for chunk_number, chunk in enumerate(chunks, start=1):
             chunk_id = _chunk_id(source.key, chunk_number, chunk.text)
             point_id = _point_id(chunk_id)
@@ -361,7 +383,7 @@ class RetrievalIndex:
             if source.title is not None:
                 payload["title"] = source.title
             metadata.append(payload)
-        self.client.upload_collection(
+        client.upload_collection(
             collection_name=COLLECTION_NAME,
             vectors=vectors,
             payload=metadata,
@@ -372,10 +394,10 @@ class RetrievalIndex:
         )
         return ids
 
-    def _delete_point_ids(self, point_ids: list[str]) -> None:
+    def _delete_point_ids(self, client: QdrantClient, point_ids: list[str]) -> None:
         if not point_ids:
             return
-        self.client.delete(
+        client.delete(
             collection_name=COLLECTION_NAME,
             points_selector=models.PointIdsList(points=point_ids),
             wait=True,

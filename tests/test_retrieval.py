@@ -221,3 +221,24 @@ class RetrievalIndexTests(unittest.TestCase):
 
             self.assertTrue(any(result.source_type == "memory" and result.source_id == "fact-1" for result in memory_results))
             self.assertTrue(any(result.source_type == "artifact" and result.source_id == "artifact-1" for result in artifact_results))
+
+    def test_retrieval_index_can_be_reopened_by_multiple_runtime_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            (project_root / "calc.py").write_text(
+                "def add(a, b):\n    return a + b\n",
+                encoding="utf-8",
+            )
+
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            first = RetrievalIndex(paths)
+            second = RetrievalIndex(paths)
+
+            self.assertGreaterEqual(first.ensure_workspace_index(force=True), 1)
+            results = second.query("add function", limit=3)
+
+            self.assertTrue(any(result.path == "calc.py" for result in results))

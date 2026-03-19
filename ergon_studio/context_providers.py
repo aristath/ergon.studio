@@ -167,29 +167,43 @@ class ArtifactContextProvider(BaseContextProvider):
 
 
 class RetrievalContextProvider(BaseContextProvider):
-    def __init__(self, retrieval_index: RetrievalIndex, event_store: EventStore) -> None:
+    def __init__(
+        self,
+        retrieval_index: RetrievalIndex,
+        event_store: EventStore,
+        *,
+        conversation_store: ConversationStore | None = None,
+        whiteboard_store: WhiteboardStore | None = None,
+    ) -> None:
         super().__init__("workspace_retrieval")
         self.retrieval_index = retrieval_index
         self.event_store = event_store
+        self.conversation_store = conversation_store
+        self.whiteboard_store = whiteboard_store
 
     async def before_run(self, *, agent, session, context, state) -> None:
         workspace_state = _workspace_state_from_session(session)
         if workspace_state is None:
             return
 
-        query = _latest_input_text(context.input_messages)
-        if not query:
+        query_texts = self._build_query_texts(workspace_state=workspace_state, context=context)
+        if not query_texts:
             return
 
-        results = self.retrieval_index.query(query, limit=4)
+        results = self.retrieval_index.query_many(query_texts, limit=_adaptive_retrieval_limit(query_texts))
         if not results:
             return
 
         lines = ["Relevant workspace retrieval results:"]
         for result in results:
+            heading = result.path
+            if result.title:
+                heading = f"{heading} - {result.title}"
+            if result.source_type == "workspace":
+                heading = f"{heading}:{result.start_line}-{result.end_line}"
             lines.extend(
                 [
-                    f"### {result.path}:{result.start_line}-{result.end_line}",
+                    f"### {heading}",
                     result.text,
                     "",
                 ]
@@ -201,6 +215,37 @@ class RetrievalContextProvider(BaseContextProvider):
             kind="retrieval_loaded",
             summary=f"Loaded {len(results)} semantic retrieval chunks",
         )
+
+    def _build_query_texts(self, *, workspace_state: WorkspaceState, context) -> list[str]:
+        latest_input = _latest_input_text(context.input_messages)
+        query_texts: list[str] = []
+        if latest_input:
+            query_texts.append(latest_input)
+
+        if self.conversation_store is not None:
+            records = self.conversation_store.list_messages(workspace_state.thread_id)
+            prior_user_messages = [
+                self.conversation_store.read_message_body(record).strip()
+                for record in records
+                if record.sender == "user" and record.id not in _input_message_ids(context.input_messages)
+            ]
+            if prior_user_messages:
+                query_texts.append("\n".join(prior_user_messages[-2:]))
+
+        if self.whiteboard_store is not None and workspace_state.task_id is not None:
+            whiteboard = self.whiteboard_store.read_task_whiteboard(workspace_state.task_id)
+            if whiteboard is not None:
+                sections: list[str] = []
+                for title in ("Goal", "Decisions", "Acceptance Criteria"):
+                    value = whiteboard.sections.get(title, "").strip()
+                    if value:
+                        sections.append(f"{title}: {value}")
+                if sections:
+                    query_texts.append("\n".join(sections))
+                    if latest_input:
+                        query_texts.append(f"{latest_input}\n\n" + "\n".join(sections))
+
+        return _dedupe_texts(query_texts)
 
 
 class AgentProfileContextProvider(BaseContextProvider):
@@ -301,6 +346,26 @@ def _latest_input_text(input_messages: list[Message]) -> str:
         if text:
             return text
     return ""
+
+
+def _input_message_ids(messages: list[Message]) -> set[str]:
+    return {message.message_id for message in messages if message.message_id}
+
+
+def _dedupe_texts(values: list[str]) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = value.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _adaptive_retrieval_limit(query_texts: list[str]) -> int:
+    return min(8, 4 + max(0, len(query_texts) - 1) * 2)
 
 
 def _append_provider_event(

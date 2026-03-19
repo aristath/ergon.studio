@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.artifact_store import ArtifactStore
+from ergon_studio.memory_store import MemoryStore
 from ergon_studio.retrieval import RetrievalIndex
 
 
@@ -110,3 +113,111 @@ class RetrievalIndexTests(unittest.TestCase):
             retrieval = RetrievalIndex(paths)
 
             self.assertEqual(retrieval.query(""), [])
+
+    def test_retrieval_index_updates_changed_sources_incrementally(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            keep_path = project_root / "keep.py"
+            change_path = project_root / "change.py"
+            keep_path.write_text(
+                "def keep_feature():\n    return 'keep feature'\n",
+                encoding="utf-8",
+            )
+            change_path.write_text(
+                "def old_feature():\n    return 'old behavior'\n",
+                encoding="utf-8",
+            )
+
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            retrieval = RetrievalIndex(paths)
+            first_count = retrieval.ensure_workspace_index(force=True)
+            first_manifest = json.loads(retrieval.manifest_path.read_text(encoding="utf-8"))
+            first_keep_points = list(first_manifest["sources"]["workspace:keep.py"]["point_ids"])
+            first_change_points = list(first_manifest["sources"]["workspace:change.py"]["point_ids"])
+
+            change_path.write_text(
+                "def new_feature():\n    return 'new behavior'\n",
+                encoding="utf-8",
+            )
+            second_count = retrieval.ensure_workspace_index()
+            second_manifest = json.loads(retrieval.manifest_path.read_text(encoding="utf-8"))
+            second_keep_points = list(second_manifest["sources"]["workspace:keep.py"]["point_ids"])
+            second_change_points = list(second_manifest["sources"]["workspace:change.py"]["point_ids"])
+
+            self.assertEqual(first_count, second_count)
+            self.assertEqual(first_keep_points, second_keep_points)
+            self.assertNotEqual(first_change_points, second_change_points)
+            self.assertTrue(any(result.path == "change.py" for result in retrieval.query("new behavior", limit=5)))
+            self.assertFalse(any(result.path == "change.py" and "old behavior" in result.text for result in retrieval.query("old behavior", limit=5)))
+
+    def test_retrieval_index_removes_deleted_sources_without_full_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            retained_path = project_root / "retained.py"
+            removed_path = project_root / "removed.py"
+            retained_path.write_text(
+                "def retained_feature():\n    return 'still here'\n",
+                encoding="utf-8",
+            )
+            removed_path.write_text(
+                "def removed_feature():\n    return 'gone now'\n",
+                encoding="utf-8",
+            )
+
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            retrieval = RetrievalIndex(paths)
+            retrieval.ensure_workspace_index(force=True)
+            first_manifest = json.loads(retrieval.manifest_path.read_text(encoding="utf-8"))
+            retained_points = list(first_manifest["sources"]["workspace:retained.py"]["point_ids"])
+
+            removed_path.unlink()
+            retrieval.ensure_workspace_index()
+            second_manifest = json.loads(retrieval.manifest_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(retained_points, second_manifest["sources"]["workspace:retained.py"]["point_ids"])
+            self.assertNotIn("workspace:removed.py", second_manifest["sources"])
+            self.assertFalse(any(result.path == "removed.py" for result in retrieval.query("gone now", limit=5)))
+
+    def test_retrieval_index_can_query_memory_facts_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
+            memory_store = MemoryStore(paths)
+            artifact_store = ArtifactStore(paths)
+            memory_store.add_fact(
+                fact_id="fact-1",
+                scope="project",
+                kind="decision",
+                content="Use cedar token signing for all session cookies.",
+                source="architecture-note",
+                created_at=10,
+                tags=("auth", "security"),
+            )
+            artifact_store.create_artifact(
+                session_id="session-main",
+                artifact_id="artifact-1",
+                kind="workflow-report",
+                title="Signup Flow Notes",
+                content="The signup flow must validate invite codes before creating users.",
+                created_at=20,
+            )
+
+            retrieval = RetrievalIndex(paths)
+            retrieval.ensure_workspace_index(force=True)
+            memory_results = retrieval.query("cedar token signing session cookies", limit=5)
+            artifact_results = retrieval.query("validate invite codes before creating users", limit=5)
+
+            self.assertTrue(any(result.source_type == "memory" and result.source_id == "fact-1" for result in memory_results))
+            self.assertTrue(any(result.source_type == "artifact" and result.source_id == "artifact-1" for result in artifact_results))

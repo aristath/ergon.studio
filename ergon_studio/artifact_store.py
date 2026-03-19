@@ -53,6 +53,9 @@ class ArtifactStore:
     def list_artifacts(self, session_id: str) -> list[ArtifactRecord]:
         return self.metadata.list_artifacts(session_id)
 
+    def list_all_artifacts(self) -> list[ArtifactRecord]:
+        return self.metadata.list_all_artifacts()
+
     def read_artifact_body(self, artifact: ArtifactRecord) -> str:
         return Path(artifact.file_path).read_text(encoding="utf-8")
 

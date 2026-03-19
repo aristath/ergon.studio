@@ -789,6 +789,29 @@ class MetadataStore:
             for row in rows
         ]
 
+    def list_all_artifacts(self) -> list[ArtifactRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, kind, title, file_path, created_at, thread_id, task_id
+                FROM artifacts
+                ORDER BY created_at ASC, id ASC
+                """
+            ).fetchall()
+        return [
+            ArtifactRecord(
+                id=row[0],
+                session_id=row[1],
+                kind=row[2],
+                title=row[3],
+                file_path=Path(row[4]),
+                created_at=row[5],
+                thread_id=row[6],
+                task_id=row[7],
+            )
+            for row in rows
+        ]
+
     def insert_command_run(self, record: CommandRunRecord) -> None:
         with self._connect() as connection:
             connection.execute(

@@ -231,5 +231,12 @@ def _build_context_providers(
     if artifact_store is not None and event_store is not None:
         providers.append(ArtifactContextProvider(artifact_store, event_store))
     if retrieval_index is not None and event_store is not None:
-        providers.append(RetrievalContextProvider(retrieval_index, event_store))
+        providers.append(
+            RetrievalContextProvider(
+                retrieval_index,
+                event_store,
+                conversation_store=conversation_store,
+                whiteboard_store=whiteboard_store,
+            )
+        )
     return providers

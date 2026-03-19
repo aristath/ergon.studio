@@ -10,10 +10,10 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Collapsible, Input, OptionList, RichLog, Static, TextArea
+from textual.widgets import Collapsible, OptionList, RichLog, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext
-from ergon_studio.tui.widgets import AgentStatusBar, InfoBar, SideThreadBlock
+from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, SideThreadBlock
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/help", "Show available commands"),
@@ -86,7 +86,7 @@ class ErgonStudioApp(App[None]):
         ("ctrl+g", "edit_global_config", "Edit Config"),
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
         ("ctrl+x", "run_workspace_command", "Run Command"),
-        ("f5", "start_selected_workflow", "Start Workflow"),
+        ("ctrl+c", "quit", "Quit"),
     ]
     CSS = """
     Screen {
@@ -104,11 +104,16 @@ class ErgonStudioApp(App[None]):
 
     #main-chat {
       height: 1fr;
+      padding: 0 1;
     }
 
     #composer-input {
       height: auto;
+      max-height: 10;
+      min-height: 3;
       margin: 0 1;
+      padding: 0 1;
+      border: none;
     }
 
     .thread-content {
@@ -147,11 +152,11 @@ class ErgonStudioApp(App[None]):
             yield Vertical(id="side-threads")
             yield RichLog(id="main-chat", markup=True, auto_scroll=True, wrap=True)
         yield OptionList(id="slash-commands")
-        yield Input(placeholder="Message the orchestrator...", id="composer-input")
+        yield ComposerTextArea(placeholder="❯ Message the orchestrator...", id="composer-input")
         yield InfoBar(self.runtime, id="info-bar")
 
     def on_mount(self) -> None:
-        self.set_focus(self.query_one("#composer-input", Input))
+        self.set_focus(self.query_one("#composer-input", ComposerTextArea))
         self._load_existing_messages()
         self._load_existing_threads()
         self._load_existing_approvals()
@@ -207,10 +212,10 @@ class ErgonStudioApp(App[None]):
                 self._target_thread_id = None
                 self._update_composer_placeholder()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id != "composer-input":
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id != "composer-input":
             return
-        value = event.value
+        value = event.text_area.text
         cmd_list = self.query_one("#slash-commands", OptionList)
         if value.startswith("/") and " " not in value:
             prefix = value.lower()
@@ -236,7 +241,7 @@ class ErgonStudioApp(App[None]):
         # Extract the command from "  /cmd  description"
         text = str(event.option.prompt).strip()
         cmd = text.split()[0] if text else ""
-        inp = self.query_one("#composer-input", Input)
+        inp = self.query_one("#composer-input", ComposerTextArea)
         # If command takes args, put cursor after it with a space
         if cmd in ("/workflow", "/agent"):
             inp.value = cmd + " "
@@ -246,14 +251,14 @@ class ErgonStudioApp(App[None]):
         self.set_focus(inp)
         # Auto-submit commands that don't need args
         if cmd not in ("/workflow", "/agent"):
-            inp.action_submit()
+            inp.post_message(ComposerTextArea.Submitted(inp, cmd))
 
     def on_key(self, event) -> None:
         """Route arrow keys to the command list when it's visible."""
         cmd_list = self.query_one("#slash-commands", OptionList)
         if not cmd_list.has_class("visible"):
             return
-        inp = self.query_one("#composer-input", Input)
+        inp = self.query_one("#composer-input", ComposerTextArea)
         if self.focused is inp and event.key in ("up", "down"):
             self.set_focus(cmd_list)
             event.prevent_default()
@@ -262,16 +267,16 @@ class ErgonStudioApp(App[None]):
             self.set_focus(inp)
             event.prevent_default()
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
+    async def on_composer_text_area_submitted(self, event: ComposerTextArea.Submitted) -> None:
         # Hide command list on submit
         self.query_one("#slash-commands", OptionList).remove_class("visible")
 
         text = event.value.strip()
         if not text:
-            event.input.value = ""
+            event.text_area.value = ""
             return
 
-        event.input.disabled = True
+        event.text_area.disabled = True
         try:
             if text.startswith("/"):
                 self._handle_slash_command(text)
@@ -279,9 +284,9 @@ class ErgonStudioApp(App[None]):
                 await self._send_to_thread(self._target_thread_id, text)
             else:
                 await self._send_to_orchestrator(text)
-            event.input.value = ""
+            event.text_area.value = ""
         finally:
-            event.input.disabled = False
+            event.text_area.disabled = False
 
     async def _send_to_orchestrator(self, body: str) -> None:
         chat = self.query_one("#main-chat", RichLog)
@@ -338,7 +343,7 @@ class ErgonStudioApp(App[None]):
                 chat.write("[red]Usage: /workflow <name>[/red]")
             elif args in self.runtime.list_workflow_ids():
                 self.selected_workflow_id = args
-                chat.write(f"[dim]Selected workflow: {args} (F5 to start)[/dim]")
+                chat.write(f"[dim]Selected workflow: {args}[/dim]")
                 self._refresh_info()
             else:
                 chat.write(f"[red]Unknown workflow: {args}[/red]")
@@ -416,17 +421,6 @@ class ErgonStudioApp(App[None]):
         chat = self.query_one("#main-chat", RichLog)
         chat.write(f"[red]Rejected[/red] {approval.action} by {approval.requester}")
         self._refresh_info()
-
-    async def action_start_selected_workflow(self) -> None:
-        chat = self.query_one("#main-chat", RichLog)
-        created_at = self._next_timestamp()
-        workflow_run, threads = self.runtime.start_workflow_run(
-            workflow_id=self.selected_workflow_id,
-            created_at=created_at,
-        )
-        self.selected_workflow_run_id = workflow_run.id
-        chat.write(f"[bold]Started workflow:[/bold] {self.selected_workflow_id}")
-        self._refresh_chat()
 
     def action_edit_global_config(self) -> None:
         self._open_config_wizard()
@@ -532,14 +526,14 @@ class ErgonStudioApp(App[None]):
     def _update_composer_placeholder(self) -> None:
         if not self.is_mounted:
             return
-        composer = self.query_one("#composer-input", Input)
+        composer = self.query_one("#composer-input", ComposerTextArea)
         if self._target_thread_id is not None:
             thread = self.runtime.get_thread(self._target_thread_id)
             if thread is not None:
                 label = thread.assigned_agent_id or thread.kind
-                composer.placeholder = f"Message {label} directly..."
+                composer.placeholder = f"❯ Message {label} directly..."
                 return
-        composer.placeholder = "Message the orchestrator..."
+        composer.placeholder = "❯ Message the orchestrator..."
 
     @staticmethod
     def _format_message(sender: str, body: str):

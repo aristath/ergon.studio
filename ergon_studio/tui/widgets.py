@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from rich.text import Text
 
-from textual.widgets import Collapsible, Static
+from textual.message import Message
+from textual.widgets import Collapsible, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext
 from ergon_studio.storage.models import ThreadRecord
@@ -185,7 +186,7 @@ class InfoBar(Static):
                 empty = "○" * max(0, total - step)
                 parts.append(f"{run.workflow_id} step {step}/{total} {filled}{empty} [{run.state}]")
         elif workflow_id:
-            parts.append(f"workflow: {workflow_id} (F5 to start)")
+            parts.append(f"workflow: {workflow_id}")
 
         pending = self.runtime.list_pending_approvals()
         if pending:
@@ -193,3 +194,55 @@ class InfoBar(Static):
             parts.append(f"{count} pending approval{'s' if count != 1 else ''} (Ctrl+Y/R)")
 
         return " │ ".join(parts) if parts else "No active workflow"
+
+
+class ComposerTextArea(TextArea):
+    """Multi-line text input. Enter submits, Shift+Enter inserts newline."""
+
+    class Submitted(Message):
+        """Posted when the user presses Enter to submit."""
+
+        def __init__(self, text_area: ComposerTextArea, value: str) -> None:
+            super().__init__()
+            self.text_area = text_area
+            self.value = value
+
+    DEFAULT_CSS = """
+    ComposerTextArea {
+        height: auto;
+        max-height: 10;
+        min-height: 3;
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, placeholder: str = "", **kwargs) -> None:
+        super().__init__("", show_line_numbers=False, placeholder=placeholder, **kwargs)
+
+    @property
+    def value(self) -> str:
+        return self.text
+
+    @value.setter
+    def value(self, new_value: str) -> None:
+        self.clear()
+        if new_value:
+            self.insert(new_value)
+
+    async def _on_key(self, event) -> None:
+        if event.key == "enter":
+            event.prevent_default()
+            text = self.text.strip()
+            if text:
+                self.post_message(self.Submitted(self, text))
+            return
+        if event.key == "alt+enter":
+            event.prevent_default()
+            self.insert("\n")
+            return
+        if event.key == "escape":
+            event.prevent_default()
+            if self.text:
+                self.clear()
+            return
+        await super()._on_key(event)

@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from textual.widgets import Collapsible, Input, RichLog, Static
 
+from ergon_studio.tui.widgets import ComposerTextArea
+
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp
 from ergon_studio.tui.widgets import AgentStatusBar, InfoBar, SideThreadBlock
@@ -72,9 +74,9 @@ class TestAppRendering(IsolatedAsyncioTestCase):
     async def test_app_renders_input_and_info_bar(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             self.assertIsNotNone(inp)
-            self.assertIn("orchestrator", inp.placeholder)
+            self.assertIn("orchestrator", str(inp.placeholder))
             info = app.query_one("#info-bar", InfoBar)
             self.assertIsNotNone(info)
 
@@ -108,7 +110,7 @@ class TestMessages(IsolatedAsyncioTestCase):
     async def test_submitting_input_persists_message(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "test message"
             with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
@@ -124,7 +126,7 @@ class TestMessages(IsolatedAsyncioTestCase):
     async def test_submitting_input_renders_orchestrator_reply(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "hello"
             with patch.object(type(runtime), "build_agent", return_value=FakeAgent("orchestrator says hi")):
@@ -136,8 +138,8 @@ class TestMessages(IsolatedAsyncioTestCase):
     async def test_input_placeholder_shows_orchestrator_target(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
-            self.assertIn("orchestrator", inp.placeholder)
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            self.assertIn("orchestrator", str(inp.placeholder))
 
 
 class TestApprovals(IsolatedAsyncioTestCase):
@@ -246,31 +248,11 @@ class TestSideThreads(IsolatedAsyncioTestCase):
             await pilot.pause()
 
 
-class TestWorkflows(IsolatedAsyncioTestCase):
-    async def test_start_workflow_via_f5(self):
-        _, runtime, app = _make_env()
-        async with app.run_test() as pilot:
-            await app.action_start_selected_workflow()
-            await pilot.pause()
-            runs = runtime.list_workflow_runs()
-            self.assertTrue(len(runs) >= 1)
-            text = _richlog_text(app)
-            self.assertIn("Started workflow", text)
-
-    async def test_workflow_progress_in_info_bar(self):
-        _, runtime, app = _make_env()
-        async with app.run_test() as pilot:
-            await app.action_start_selected_workflow()
-            await pilot.pause()
-            info = app.query_one("#info-bar", InfoBar)
-            self.assertIsNotNone(info)
-
-
 class TestSlashCommands(IsolatedAsyncioTestCase):
     async def test_help_shows_commands(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/help"
             await pilot.press("enter")
@@ -282,7 +264,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
     async def test_workflows_lists_inline(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/workflows"
             await pilot.press("enter")
@@ -295,7 +277,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             wf_ids = runtime.list_workflow_ids()
             if wf_ids:
-                inp = app.query_one("#composer-input", Input)
+                inp = app.query_one("#composer-input", ComposerTextArea)
                 app.set_focus(inp)
                 inp.value = f"/workflow {wf_ids[0]}"
                 await pilot.press("enter")
@@ -307,7 +289,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             agent_ids = runtime.list_agent_ids()
             if agent_ids:
-                inp = app.query_one("#composer-input", Input)
+                inp = app.query_one("#composer-input", ComposerTextArea)
                 app.set_focus(inp)
                 inp.value = f"/agent {agent_ids[0]}"
                 await pilot.press("enter")
@@ -318,7 +300,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
     async def test_unknown_command_shows_error(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/nonexistent"
             await pilot.press("enter")
@@ -331,7 +313,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
 
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/"
             await pilot.pause()
@@ -344,7 +326,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
 
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/con"
             await pilot.pause()
@@ -358,7 +340,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
 
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/workflow "
             await pilot.pause()
@@ -399,7 +381,7 @@ class TestEditorModals(IsolatedAsyncioTestCase):
 
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
-            inp = app.query_one("#composer-input", Input)
+            inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
             inp.value = "/config"
             await pilot.press("enter")
@@ -512,8 +494,8 @@ class TestThreadTargeting(IsolatedAsyncioTestCase):
             app.on_collapsible_expanded(Collapsible.Expanded(block))
             await pilot.pause()
             self.assertEqual(app._target_thread_id, "t-arch")
-            inp = app.query_one("#composer-input", Input)
-            self.assertIn("architect", inp.placeholder)
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            self.assertIn("architect", str(inp.placeholder))
 
     async def test_collapsing_thread_resets_to_main(self):
         _, runtime, app = _make_env()
@@ -527,5 +509,5 @@ class TestThreadTargeting(IsolatedAsyncioTestCase):
             app.on_collapsible_collapsed(Collapsible.Collapsed(block))
             await pilot.pause()
             self.assertIsNone(app._target_thread_id)
-            inp = app.query_one("#composer-input", Input)
-            self.assertIn("orchestrator", inp.placeholder)
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            self.assertIn("orchestrator", str(inp.placeholder))

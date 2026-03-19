@@ -1558,14 +1558,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(user_message.sender, "user")
             self.assertIsNone(orchestrator_message)
             self.assertEqual(len(runtime.list_main_messages()), 1)
-            event_kinds = [event.kind for event in runtime.list_events()]
-            self.assertCountEqual(
-                event_kinds[:2],
-                ["message_created", "session_titled"],
-            )
             self.assertEqual(
-                event_kinds[2:],
-                ["orchestrator_turn_planned", "agent_unavailable"],
+                [event.kind for event in runtime.list_events()],
+                ["message_created", "session_titled", "orchestrator_turn_planned", "agent_unavailable"],
             )
 
     async def test_runtime_rejects_non_delivery_workflow_for_implementation_turns(self) -> None:

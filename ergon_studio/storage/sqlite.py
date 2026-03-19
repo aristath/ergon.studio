@@ -639,7 +639,7 @@ class MetadataStore:
                 SELECT id, session_id, kind, summary, created_at, thread_id, task_id
                 FROM events
                 WHERE session_id = ?
-                ORDER BY created_at ASC, id ASC
+                ORDER BY created_at ASC, rowid ASC
                 """,
                 (session_id,),
             ).fetchall()

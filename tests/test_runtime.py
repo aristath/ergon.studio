@@ -2424,6 +2424,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             "orchestrator": FakeAgent(
                 [
                     '{"accepted": false, "summary": "The implementation still fails verification.", "findings": ["The tester reported a failing verification step."], "requires_replan": false, "replan_summary": ""}',
+                    '{"action": "repair", "summary": "Run one focused repair cycle before escalating.", "tool_mode": "default"}',
                     '{"accepted": true, "summary": "The repair resolved the issue and the workflow can be accepted.", "findings": [], "requires_replan": false, "replan_summary": ""}',
                 ]
             ),
@@ -2493,6 +2494,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             "orchestrator": FakeAgent(
                 [
                     '{"accepted": false, "summary": "The approach is structurally off.", "findings": ["The current structure does not match the goal cleanly."], "requires_replan": true, "replan_summary": "Replan around a simpler architecture before continuing."}',
+                    '{"action": "replan", "summary": "Restart from architecture before continuing.", "tool_mode": "default"}',
                     '{"accepted": true, "summary": "The replanned approach now fits the goal.", "findings": [], "requires_replan": false, "replan_summary": ""}',
                 ]
             ),
@@ -2537,6 +2539,80 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             )
             body = runtime.read_artifact_body(report.id)
             self.assertIn("Automatic replanning cycles: 1", body)
+
+    async def test_runtime_clarifies_with_relevant_agent_before_replanning(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture ready."),
+            "coder": FakeAgent("Implementation ready."),
+            "tester": FakeAgent(
+                [
+                    "I ran the CLI and it worked, but I did not include the concrete command in the first summary.",
+                    "Concrete evidence: `python3 calculator.py 5 + 3` returned `8`.",
+                ]
+            ),
+            "reviewer": FakeAgent("Review complete."),
+            "fixer": FakeAgent("Not used."),
+            "orchestrator": FakeAgent(
+                [
+                    '{"accepted": false, "summary": "The implementation may be fine, but I need concrete verification evidence.", "findings": ["The current review summary does not show one concrete successful command run."], "requires_replan": false, "replan_summary": ""}',
+                    '{"action": "clarify", "summary": "Ask the tester for one concrete successful command run before escalating.", "agent_id": "tester", "request": "Run one concrete successful command against the actual deliverable and report the exact command plus output.", "tool_mode": "none"}',
+                    '{"accepted": true, "summary": "The added tester evidence resolves the gap and the workflow can be accepted.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.current_step_index, 5)
+            team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
+            self.assertEqual(team[-2:], ["orchestrator", "tester"])
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_clarification_requested", event_kinds)
+            self.assertIn("workflow_clarification_cycle_requested", event_kinds)
+            report = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(workflow_run.id)
+                if artifact.kind == "workflow-report"
+            )
+            body = runtime.read_artifact_body(report.id)
+            self.assertIn("Clarification cycles: 1", body)
 
     def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
         from ergon_studio.runtime import load_runtime

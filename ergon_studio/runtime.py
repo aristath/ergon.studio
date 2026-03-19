@@ -1501,7 +1501,7 @@ class RuntimeContext:
                     Message(
                         role="user",
                         text=body,
-                        author_name=prompt_sender,
+                        author_name="workflow",
                     )
                 ],
                 session=agent.create_session(session_id=f"{thread_id}:{agent_id}:no-tools:{created_at}"),

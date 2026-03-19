@@ -38,6 +38,7 @@ class WorkflowExecutionSummary:
 class _ExecutionTracker:
     completed_step_indices: set[int] = field(default_factory=set)
     thread_outputs: dict[str, str] = field(default_factory=dict)
+    thread_tool_modes: dict[str, str] = field(default_factory=dict)
     blocked_step_index: int | None = None
     blocked_thread_id: str | None = None
     failed: bool = False
@@ -47,6 +48,7 @@ class _ExecutionTracker:
     artifact_id: str | None = None
     repair_cycles: int = 0
     replan_cycles: int = 0
+    clarification_cycles: int = 0
     review_findings: tuple[str, ...] = ()
     review_requires_replan: bool = False
     review_replan_summary: str | None = None
@@ -59,6 +61,25 @@ class WorkflowReviewVerdict:
     findings: tuple[str, ...] = ()
     requires_replan: bool = False
     replan_summary: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowFollowupPlan:
+    cycle_kind: str
+    step_groups: tuple[tuple[str, ...], ...]
+    event_kind: str
+    event_summary: str
+    payload: str
+    tool_mode: str = "default"
+
+
+@dataclass(frozen=True)
+class WorkflowFollowupDecision:
+    action: str
+    summary: str
+    agent_id: str | None = None
+    request: str | None = None
+    tool_mode: str = "default"
 
 
 class _TimestampCursor:
@@ -165,6 +186,9 @@ class _ThreadExecutor(Executor):
         reply_body: str,
         before_tool_ids: set[str],
     ):
+        tool_mode = self.tracker.thread_tool_modes.get(self.thread.id, "default")
+        if tool_mode == "none":
+            return reply, reply_body
         required_tools = _required_tool_names(self.thread.assigned_agent_id or "")
         if not required_tools:
             return reply, reply_body
@@ -581,26 +605,37 @@ async def execute_defined_workflow(
             break
         if tracker.review_accepted is not False:
             break
-        followup = _next_followup_cycle(runtime=runtime, workflow_id=active_workflow_run.workflow_id, tracker=tracker)
+        followup = await _decide_followup_action(
+            runtime=runtime,
+            workflow_run=active_workflow_run,
+            run_view=active_run_view,
+            goal=goal,
+            review_thread=review_thread,
+            cursor=cursor,
+            tracker=tracker,
+        )
+        if followup is None:
+            followup = _next_followup_cycle(
+                runtime=runtime,
+                workflow_id=active_workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=active_run_view,
+            )
         if followup is None:
             break
-        cycle_kind, step_groups, event_kind, event_summary = followup
-        followup_payload = _render_followup_payload(
-            runtime=runtime,
-            workflow_id=active_workflow_run.workflow_id,
-            goal=goal,
-            tracker=tracker,
-            run_view=active_run_view,
-            cycle_kind=cycle_kind,
-        )
         runtime.append_event(
-            kind=event_kind,
-            summary=event_summary,
+            kind=followup.event_kind,
+            summary=followup.event_summary,
             created_at=cursor.next(),
             thread_id=review_thread.id,
             task_id=active_workflow_run.root_task_id,
         )
-        next_state = "repairing" if cycle_kind == "repair" else "replanning"
+        next_state = {
+            "repair": "repairing",
+            "replan": "replanning",
+            "clarify": "clarifying",
+        }.get(followup.cycle_kind, "in_progress")
         active_workflow_run = type(active_workflow_run)(
             id=active_workflow_run.id,
             session_id=active_workflow_run.session_id,
@@ -613,21 +648,28 @@ async def execute_defined_workflow(
             last_thread_id=tracker.last_thread_id,
         )
         runtime.workflow_store.update_workflow_run(active_workflow_run)
-        active_workflow_run, _ = runtime.request_workflow_followup_cycle(
+        active_workflow_run, new_threads = runtime.request_workflow_followup_cycle(
             workflow_run_id=active_workflow_run.id,
             created_at=cursor.next(),
-            step_groups=step_groups,
+            step_groups=followup.step_groups,
             state=next_state,
-            event_kind=f"workflow_{cycle_kind}_cycle_requested",
-            event_summary=event_summary,
+            event_kind=(
+                "workflow_clarification_cycle_requested"
+                if followup.cycle_kind == "clarify"
+                else f"workflow_{followup.cycle_kind}_cycle_requested"
+            ),
+            event_summary=followup.event_summary,
         )
+        if followup.tool_mode != "default":
+            for thread in new_threads:
+                tracker.thread_tool_modes[thread.id] = followup.tool_mode
         refreshed_view = runtime.describe_workflow_run(active_workflow_run.id)
         if refreshed_view is None:
             tracker.failed = True
             break
         start_step_index = len(active_run_view.steps)
         active_run_view = refreshed_view
-        initial_payload = followup_payload
+        initial_payload = followup.payload
 
     return _finalize_workflow_run(
         runtime=runtime,
@@ -1712,6 +1754,10 @@ def _max_replan_cycles(runtime: RuntimeContext, workflow_id: str) -> int:
     return max(0, _workflow_int_metadata(runtime, workflow_id, "max_replan_cycles", 0))
 
 
+def _max_clarification_cycles(runtime: RuntimeContext, workflow_id: str) -> int:
+    return max(0, _workflow_int_metadata(runtime, workflow_id, "max_clarification_cycles", 2))
+
+
 def _repair_step_groups(runtime: RuntimeContext, workflow_id: str) -> tuple[tuple[str, ...], ...]:
     groups = _workflow_step_group_metadata(runtime, workflow_id, "repair_step_groups")
     if groups:
@@ -1723,37 +1769,170 @@ def _replan_step_groups(runtime: RuntimeContext, workflow_id: str) -> tuple[tupl
     return _workflow_step_group_metadata(runtime, workflow_id, "replan_step_groups")
 
 
+async def _decide_followup_action(
+    *,
+    runtime: RuntimeContext,
+    workflow_run: WorkflowRunRecord,
+    run_view: WorkflowRunView,
+    goal: str,
+    review_thread: ThreadRecord,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+) -> WorkflowFollowupPlan | None:
+    response = await runtime.generate_agent_text_without_tools(
+        agent_id="orchestrator",
+        body=_workflow_followup_decision_prompt(
+            runtime=runtime,
+            workflow_id=workflow_run.workflow_id,
+            goal=goal,
+            tracker=tracker,
+            run_view=run_view,
+        ),
+        created_at=cursor.next(),
+        thread_id=review_thread.id,
+        extra_instructions=_workflow_followup_decision_instructions(),
+    )
+    if not response:
+        return None
+    try:
+        decision = _parse_followup_decision(response)
+    except ValueError:
+        return None
+
+    if decision.action == "stop":
+        return None
+
+    if decision.action == "clarify":
+        if tracker.clarification_cycles >= _max_clarification_cycles(runtime, workflow_run.workflow_id):
+            return None
+        if decision.agent_id is None or decision.request is None:
+            return None
+        if decision.agent_id not in runtime.registry.agent_definitions:
+            return None
+        tracker.clarification_cycles += 1
+        summary = decision.summary or f"Requesting clarification from {decision.agent_id}"
+        return WorkflowFollowupPlan(
+            cycle_kind="clarify",
+            step_groups=((decision.agent_id,),),
+            event_kind="workflow_clarification_requested",
+            event_summary=summary,
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
+                cycle_kind="clarify",
+                custom_request=decision.request,
+            ),
+            tool_mode=decision.tool_mode,
+        )
+
+    if decision.action == "repair":
+        repair_groups = _repair_step_groups(runtime, workflow_run.workflow_id)
+        if not repair_groups or tracker.repair_cycles >= _max_repair_cycles(runtime, workflow_run.workflow_id):
+            return None
+        tracker.repair_cycles += 1
+        return WorkflowFollowupPlan(
+            cycle_kind="repair",
+            step_groups=repair_groups,
+            event_kind="workflow_auto_repair_started",
+            event_summary=decision.summary or f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_run.workflow_id}",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
+                cycle_kind="repair",
+            ),
+        )
+
+    if decision.action == "replan":
+        replan_groups = _replan_step_groups(runtime, workflow_run.workflow_id)
+        if not replan_groups or tracker.replan_cycles >= _max_replan_cycles(runtime, workflow_run.workflow_id):
+            return None
+        tracker.replan_cycles += 1
+        return WorkflowFollowupPlan(
+            cycle_kind="replan",
+            step_groups=replan_groups,
+            event_kind="workflow_auto_replan_started",
+            event_summary=decision.summary or tracker.review_replan_summary or f"Escalating {workflow_run.workflow_id} to replanning",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
+                cycle_kind="replan",
+            ),
+        )
+
+    return None
+
+
 def _next_followup_cycle(
     *,
     runtime: RuntimeContext,
     workflow_id: str,
+    goal: str,
     tracker: _ExecutionTracker,
-) -> tuple[str, tuple[tuple[str, ...], ...], str, str] | None:
+    run_view: WorkflowRunView | None,
+) -> WorkflowFollowupPlan | None:
     if tracker.review_requires_replan:
         replan_groups = _replan_step_groups(runtime, workflow_id)
         if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
             tracker.replan_cycles += 1
             summary = tracker.review_replan_summary or f"Starting replanning cycle {tracker.replan_cycles} for {workflow_id}"
-            return ("replan", replan_groups, "workflow_auto_replan_started", summary)
+            return WorkflowFollowupPlan(
+                cycle_kind="replan",
+                step_groups=replan_groups,
+                event_kind="workflow_auto_replan_started",
+                event_summary=summary,
+                payload=_render_followup_payload(
+                    runtime=runtime,
+                    workflow_id=workflow_id,
+                    goal=goal,
+                    tracker=tracker,
+                    run_view=run_view,
+                    cycle_kind="replan",
+                ),
+            )
 
     repair_groups = _repair_step_groups(runtime, workflow_id)
     if repair_groups and tracker.repair_cycles < _max_repair_cycles(runtime, workflow_id):
         tracker.repair_cycles += 1
-        return (
-            "repair",
-            repair_groups,
-            "workflow_auto_repair_started",
-            f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_id}",
+        return WorkflowFollowupPlan(
+            cycle_kind="repair",
+            step_groups=repair_groups,
+            event_kind="workflow_auto_repair_started",
+            event_summary=f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_id}",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
+                cycle_kind="repair",
+            ),
         )
 
     replan_groups = _replan_step_groups(runtime, workflow_id)
     if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
         tracker.replan_cycles += 1
-        return (
-            "replan",
-            replan_groups,
-            "workflow_auto_replan_started",
-            f"Escalating {workflow_id} to replanning after the current approach was rejected",
+        return WorkflowFollowupPlan(
+            cycle_kind="replan",
+            step_groups=replan_groups,
+            event_kind="workflow_auto_replan_started",
+            event_summary=f"Escalating {workflow_id} to replanning after the current approach was rejected",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
+                cycle_kind="replan",
+            ),
         )
 
     return None
@@ -1765,10 +1944,11 @@ def _render_followup_payload(
     workflow_id: str,
     goal: str,
     tracker: _ExecutionTracker,
-    run_view: WorkflowRunView,
+    run_view: WorkflowRunView | None,
     cycle_kind: str,
+    custom_request: str | None = None,
 ) -> str:
-    changed_files = runtime._workflow_changed_files(run_view.workflow_run.id)
+    changed_files = runtime._workflow_changed_files(run_view.workflow_run.id) if run_view is not None else []
     lines = [
         f"Workflow: {workflow_id}",
         f"Follow-up: {cycle_kind}",
@@ -1784,11 +1964,21 @@ def _render_followup_payload(
     if changed_files:
         lines.extend(["", "Files touched so far:"])
         lines.extend(f"- {path}" for path in changed_files)
-    step_outputs = _recent_step_outputs(run_view=run_view, tracker=tracker, limit=3)
+    step_outputs = _recent_step_outputs(run_view=run_view, tracker=tracker, limit=3) if run_view is not None else []
     if step_outputs:
         lines.extend(["", "Recent workflow evidence:"])
         lines.extend(step_outputs)
-    if cycle_kind == "replan":
+    if cycle_kind == "clarify":
+        if custom_request:
+            lines.extend(["", "Clarification needed:", custom_request])
+        lines.extend(
+            [
+                "",
+                "Answer the clarification directly from the current state. Provide concrete evidence if you have it. "
+                "Do not redo unrelated work.",
+            ]
+        )
+    elif cycle_kind == "replan":
         lines.extend(
             [
                 "",
@@ -2092,6 +2282,8 @@ def _render_workflow_report(
     lines.extend(["## Orchestrator Review", tracker.review_summary or "(no review summary)"])
     if tracker.review_findings:
         lines.extend(["", "## Findings", *[f"- {finding}" for finding in tracker.review_findings]])
+    if tracker.clarification_cycles:
+        lines.extend(["", f"- Clarification cycles: {tracker.clarification_cycles}"])
     if tracker.repair_cycles:
         lines.extend(["", f"- Automatic repair cycles: {tracker.repair_cycles}"])
     if tracker.replan_cycles:
@@ -2178,6 +2370,65 @@ def _orchestrator_review_instructions() -> str:
     )
 
 
+def _workflow_followup_decision_instructions() -> str:
+    return "\n".join(
+        [
+            "You are deciding the next workflow move after a rejected orchestrator review.",
+            "Prefer the smallest action that can resolve the rejection.",
+            "Use `clarify` when the work may already be acceptable but evidence or explanation is missing.",
+            "Use `repair` when the underlying work needs a focused fix.",
+            "Use `replan` when the current approach is wrong enough that another narrow fix is wasteful.",
+            "Use `stop` when no safe automatic follow-up is justified.",
+            "For `clarify`, provide both `agent_id` and a specific `request`.",
+            "Set `tool_mode` to `none` only when the clarification should be explanation-only and should not require fresh tool evidence.",
+            "Return JSON only with this shape:",
+            '{"action":"clarify","summary":"one concise sentence","agent_id":"tester","request":"Run one concrete command and report the result.","tool_mode":"default"}',
+        ]
+    )
+
+
+def _workflow_followup_decision_prompt(
+    *,
+    runtime: RuntimeContext,
+    workflow_id: str,
+    goal: str,
+    tracker: _ExecutionTracker,
+    run_view: WorkflowRunView | None,
+) -> str:
+    changed_files = runtime._workflow_changed_files(run_view.workflow_run.id) if run_view is not None else []
+    lines = [
+        f"Workflow: {workflow_id}",
+        "",
+        "Goal:",
+        _truncate_text(goal, 800),
+        "",
+        "Latest orchestrator review:",
+        tracker.review_summary or "(no review summary)",
+    ]
+    if tracker.review_findings:
+        lines.extend(["", "Current findings:"])
+        lines.extend(f"- {finding}" for finding in tracker.review_findings)
+    if changed_files:
+        lines.extend(["", "Files touched so far:"])
+        lines.extend(f"- {path}" for path in changed_files)
+    step_outputs = _recent_step_outputs(run_view=run_view, tracker=tracker, limit=4) if run_view is not None else []
+    if step_outputs:
+        lines.extend(["", "Recent workflow evidence:"])
+        lines.extend(step_outputs)
+    lines.extend(
+        [
+            "",
+            "Cycles used:",
+            f"- clarification: {tracker.clarification_cycles}",
+            f"- repair: {tracker.repair_cycles}",
+            f"- replan: {tracker.replan_cycles}",
+            "",
+            "Decide the next move.",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
 def _truncate_text(value: str, limit: int) -> str:
     text = value.strip()
     if len(text) <= limit:
@@ -2219,6 +2470,37 @@ def _parse_review_verdict(raw: str) -> WorkflowReviewVerdict:
         findings=tuple(findings),
         requires_replan=requires_replan,
         replan_summary=replan_summary,
+    )
+
+
+def _parse_followup_decision(raw: str) -> WorkflowFollowupDecision:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    if not text.startswith("{"):
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match is None:
+            raise ValueError("no JSON object found in followup decision")
+        text = match.group(0)
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("followup decision must be an object")
+    action = str(payload.get("action", "")).strip().lower()
+    if action not in {"clarify", "repair", "replan", "stop"}:
+        raise ValueError("invalid followup action")
+    summary = str(payload.get("summary", "")).strip()
+    agent_id_raw = payload.get("agent_id")
+    request_raw = payload.get("request")
+    tool_mode = str(payload.get("tool_mode", "default")).strip().lower() or "default"
+    if tool_mode not in {"default", "none"}:
+        tool_mode = "default"
+    return WorkflowFollowupDecision(
+        action=action,
+        summary=summary,
+        agent_id=str(agent_id_raw).strip() if isinstance(agent_id_raw, str) and str(agent_id_raw).strip() else None,
+        request=str(request_raw).strip() if isinstance(request_raw, str) and str(request_raw).strip() else None,
+        tool_mode=tool_mode,
     )
 
 

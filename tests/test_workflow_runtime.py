@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from ergon_studio.workflow_runtime import WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _parse_review_verdict, _required_tool_names, _supports_auto_repair
+from ergon_studio.workflow_runtime import WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _supports_auto_repair
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
@@ -37,6 +37,22 @@ class WorkflowRuntimeTests(unittest.TestCase):
         summary = _format_review_summary(WorkflowReviewVerdict(accepted=False, summary="Implementation is incomplete."))
 
         self.assertEqual(summary, "REJECTED: Implementation is incomplete.")
+
+    def test_parse_followup_decision_reads_clarification_request(self) -> None:
+        decision = _parse_followup_decision(
+            '{"action": "clarify", "summary": "Ask the tester for proof.", "agent_id": "tester", "request": "Run one concrete command and report the output.", "tool_mode": "default"}'
+        )
+
+        self.assertEqual(
+            decision,
+            WorkflowFollowupDecision(
+                action="clarify",
+                summary="Ask the tester for proof.",
+                agent_id="tester",
+                request="Run one concrete command and report the output.",
+                tool_mode="default",
+            ),
+        )
 
     def test_auto_repair_support_is_limited_to_delivery_workflows(self) -> None:
         self.assertTrue(_supports_auto_repair("standard-build"))

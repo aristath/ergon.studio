@@ -9,6 +9,7 @@ from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
+from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.whiteboard_store import WhiteboardStore
 
@@ -165,6 +166,43 @@ class ArtifactContextProvider(BaseContextProvider):
         )
 
 
+class RetrievalContextProvider(BaseContextProvider):
+    def __init__(self, retrieval_index: RetrievalIndex, event_store: EventStore) -> None:
+        super().__init__("workspace_retrieval")
+        self.retrieval_index = retrieval_index
+        self.event_store = event_store
+
+    async def before_run(self, *, agent, session, context, state) -> None:
+        workspace_state = _workspace_state_from_session(session)
+        if workspace_state is None:
+            return
+
+        query = _latest_input_text(context.input_messages)
+        if not query:
+            return
+
+        results = self.retrieval_index.query(query, limit=4)
+        if not results:
+            return
+
+        lines = ["Relevant workspace retrieval results:"]
+        for result in results:
+            lines.extend(
+                [
+                    f"### {result.path}:{result.start_line}-{result.end_line}",
+                    result.text,
+                    "",
+                ]
+            )
+        context.extend_instructions(self.source_id, "\n".join(lines).strip())
+        _append_provider_event(
+            event_store=self.event_store,
+            workspace_state=workspace_state,
+            kind="retrieval_loaded",
+            summary=f"Loaded {len(results)} semantic retrieval chunks",
+        )
+
+
 class AgentProfileContextProvider(BaseContextProvider):
     def __init__(
         self,
@@ -255,6 +293,14 @@ def _trim_duplicate_input(messages: list[Message], input_messages: list[Message]
     if last_message.text != last_input.text:
         return messages
     return messages[:-1]
+
+
+def _latest_input_text(input_messages: list[Message]) -> str:
+    for message in reversed(input_messages):
+        text = message.text.strip()
+        if text:
+            return text
+    return ""
 
 
 def _append_provider_event(

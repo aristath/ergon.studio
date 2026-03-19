@@ -12,6 +12,7 @@ dependencies = [
   "agent-framework-core",
   "agent-framework-orchestrations",
   "PyYAML",
+  "qdrant-client[fastembed]",
   "textual",
 ]
 

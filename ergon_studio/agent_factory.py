@@ -8,11 +8,12 @@ from agent_framework import Agent, MCPStdioTool, MCPStreamableHTTPTool, MCPWebso
 from agent_framework.openai import OpenAIChatClient
 
 from ergon_studio.artifact_store import ArtifactStore
-from ergon_studio.context_providers import AgentProfileContextProvider, ArtifactContextProvider, ConversationHistoryProvider, ProjectMemoryContextProvider, TaskWhiteboardContextProvider
+from ergon_studio.context_providers import AgentProfileContextProvider, ArtifactContextProvider, ConversationHistoryProvider, ProjectMemoryContextProvider, RetrievalContextProvider, TaskWhiteboardContextProvider
 from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
+from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.tool_call_logging import build_tool_call_middleware
 from ergon_studio.tool_call_store import ToolCallStore
@@ -30,6 +31,7 @@ def build_agent(
     whiteboard_store: WhiteboardStore | None = None,
     event_store: EventStore | None = None,
     tool_call_store: ToolCallStore | None = None,
+    retrieval_index: RetrievalIndex | None = None,
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
@@ -55,6 +57,7 @@ def build_agent(
         artifact_store=artifact_store,
         whiteboard_store=whiteboard_store,
         event_store=event_store,
+        retrieval_index=retrieval_index,
     )
 
     default_options: dict[str, Any] = {}
@@ -209,6 +212,7 @@ def _build_context_providers(
     artifact_store: ArtifactStore | None,
     whiteboard_store: WhiteboardStore | None,
     event_store: EventStore | None,
+    retrieval_index: RetrievalIndex | None,
 ) -> list[object]:
     providers: list[object] = [
         AgentProfileContextProvider(
@@ -226,4 +230,6 @@ def _build_context_providers(
         providers.append(ProjectMemoryContextProvider(memory_store, event_store))
     if artifact_store is not None and event_store is not None:
         providers.append(ArtifactContextProvider(artifact_store, event_store))
+    if retrieval_index is not None and event_store is not None:
+        providers.append(RetrievalContextProvider(retrieval_index, event_store))
     return providers

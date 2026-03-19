@@ -177,6 +177,55 @@ class RealE2ETests(unittest.IsolatedAsyncioTestCase):
                 [("write_file", "completed", "coder")],
             )
 
+    async def test_real_researcher_can_answer_from_retrieval_without_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            (project_root / "Dockerfile").write_text(
+                "FROM python:3.12-slim\nRUN echo ready\n",
+                encoding="utf-8",
+            )
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            _configure_local_runtime(runtime)
+            runtime.save_agent_definition_text(
+                agent_id="researcher",
+                text="""---
+id: researcher
+name: Researcher
+role: researcher
+temperature: 0.0
+---
+## Identity
+You are the research specialist for the AI firm.
+
+## Responsibilities
+Answer questions from the available project context.
+
+## Rules
+Rely on the provided context. Do not invent files.
+
+## Output Style
+Be short and concrete.
+""",
+                created_at=1,
+            )
+
+            result = await runtime.delegate_to_agent(
+                agent_id="researcher",
+                request="Which file uses the python:3.12-slim base image? Reply with the filename only.",
+                title="Retrieval-only lookup",
+                created_at=2,
+                parent_thread_id=runtime.main_thread_id,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertIn("Dockerfile", str(result["result"]))
+            self.assertEqual(runtime.list_tool_calls(), [])
+
     async def test_real_orchestrator_can_complete_a_vague_build_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

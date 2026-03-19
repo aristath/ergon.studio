@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 
-from ergon_studio.context_providers import AgentProfileContextProvider, ArtifactContextProvider, ConversationHistoryProvider, ProjectMemoryContextProvider, TaskWhiteboardContextProvider
+from ergon_studio.context_providers import AgentProfileContextProvider, ArtifactContextProvider, ConversationHistoryProvider, ProjectMemoryContextProvider, RetrievalContextProvider, TaskWhiteboardContextProvider
 from ergon_studio.runtime import RuntimeContext
 from ergon_studio.workflow_compiler import compile_workflow_definition
 
@@ -120,6 +120,7 @@ def _context_provider_wiring_eval(runtime: RuntimeContext) -> EvalResult:
         TaskWhiteboardContextProvider,
         ProjectMemoryContextProvider,
         ArtifactContextProvider,
+        RetrievalContextProvider,
     }
     missing = [provider_type.__name__ for provider_type in expected if provider_type not in provider_types]
     if missing:

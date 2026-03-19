@@ -24,6 +24,7 @@ from ergon_studio.definitions import DefinitionDocument, parse_definition_text, 
 from ergon_studio.event_store import EventStore
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
+from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry, load_registry
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
@@ -81,6 +82,7 @@ class RuntimeContext:
     artifact_store: ArtifactStore
     command_store: CommandStore
     tool_call_store: ToolCallStore
+    retrieval_index: RetrievalIndex
     main_session_id: str = MAIN_SESSION_ID
     main_thread_id: str = MAIN_THREAD_ID
 
@@ -95,6 +97,7 @@ class RuntimeContext:
             whiteboard_store=self.whiteboard_store,
             event_store=self.event_store,
             tool_call_store=self.tool_call_store,
+            retrieval_index=self.retrieval_index,
         )
 
     def reload_registry(self) -> None:
@@ -798,7 +801,36 @@ class RuntimeContext:
                 )
         resolved_goal = decision.goal or self.recent_main_user_context(limit=4) or body
         resolved_request = decision.request or resolved_goal
-        if decision.deliverable_expected and decision.mode == "workflow" and decision.workflow_id in {
+        if (
+            decision.mode == "workflow"
+            and decision.workflow_id in {
+                "architecture-first",
+                "research-then-decide",
+                "debate",
+            }
+            and not await self._allow_non_delivery_workflow(
+                body=body,
+                workflow_id=decision.workflow_id,
+                created_at=created_at + 1,
+            )
+        ):
+            decision = OrchestratorTurnDecision(
+                mode="workflow",
+                reply=decision.reply,
+                workflow_id="single-agent-execution",
+                agent_id=decision.agent_id,
+                title=decision.title,
+                request=resolved_request,
+                goal=resolved_goal,
+                deliverable_expected=True,
+            )
+            self.append_event(
+                kind="orchestrator_non_delivery_rejected",
+                summary="Rejected a non-delivery workflow for an implementation turn",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+        elif decision.deliverable_expected and decision.mode == "workflow" and decision.workflow_id in {
             "architecture-first",
             "research-then-decide",
             "debate",
@@ -1300,6 +1332,52 @@ class RuntimeContext:
         except ValueError:
             return False
         return _as_bool(parsed.get("deliverable_expected"))
+
+    async def _allow_non_delivery_workflow(
+        self,
+        *,
+        body: str,
+        workflow_id: str,
+        created_at: int,
+    ) -> bool:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return False
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return False
+        classifier = Agent(
+            client=client,
+            id="orchestrator-non-delivery-guard",
+            name="Orchestrator Non-Delivery Guard",
+            description="Internal non-delivery workflow guard",
+            instructions=_non_delivery_workflow_guard_instructions(workflow_id),
+        )
+        try:
+            response = await classifier.run(
+                [
+                    Message(
+                        role="user",
+                        text=_deliverable_classifier_prompt(self, body),
+                        author_name="system",
+                    )
+                ],
+                session=classifier.create_session(session_id=f"main-non-delivery:{created_at}:{workflow_id}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_non_delivery_guard_failed",
+                summary=f"Non-delivery guard failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return False
+        try:
+            parsed = _parse_turn_decision_json(response.text.strip())
+        except ValueError:
+            return False
+        return _as_bool(parsed.get("allowed"))
 
     async def generate_agent_text_without_tools(
         self,
@@ -2314,6 +2392,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
     artifact_store = ArtifactStore(paths)
     command_store = CommandStore(paths)
     tool_call_store = ToolCallStore(paths)
+    retrieval_index = RetrievalIndex(paths)
     runtime = RuntimeContext(
         paths=paths,
         registry=registry,
@@ -2329,6 +2408,7 @@ def load_runtime(project_root: Path, home_dir: Path) -> RuntimeContext:
         artifact_store=artifact_store,
         command_store=command_store,
         tool_call_store=tool_call_store,
+        retrieval_index=retrieval_index,
     )
     object.__setattr__(
         runtime,
@@ -2438,6 +2518,25 @@ def _deliverable_classifier_instructions() -> str:
             "Set `deliverable_expected` to true when the recent conversation already settled the direction and the latest user turn is approval to proceed.",
             "Set it to false for discussion-only, brainstorming-only, or planning-only turns.",
             "Use the whole recent conversation, not just the latest short acknowledgment.",
+        ]
+    )
+
+
+def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal guard for the orchestrator.",
+            f"The planner selected the non-delivery workflow `{workflow_id}`.",
+            "Decide whether it is acceptable to stop at planning, research, or debate for this turn.",
+            "Output JSON only.",
+            "",
+            "Return:",
+            '{"allowed": false}',
+            "",
+            "Set `allowed` to true only when the user explicitly wants discussion-only, planning-only, research-only, or design-only work for this turn.",
+            "Set `allowed` to false when the user expects implementation, repo changes, runnable code, or completed delivery in the same turn.",
+            "If the user asked to discuss or plan first and then implement in the same turn, set `allowed` to false.",
+            "Use the whole recent conversation, not just the latest line.",
         ]
     )
 

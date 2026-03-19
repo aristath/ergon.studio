@@ -83,6 +83,46 @@ class RuntimeTests(unittest.TestCase):
                 {"tool_calling": True, "structured_output": True},
             )
 
+    def test_runtime_builds_agents_with_retrieval_context_provider(self) -> None:
+        from ergon_studio.context_providers import RetrievalContextProvider
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            (project_root / "index.php").write_text(
+                "<?php\necho 'hello from php';\n",
+                encoding="utf-8",
+            )
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            save_global_config(
+                runtime.paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                        }
+                    },
+                    "role_assignments": {"orchestrator": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+            runtime.reload_registry()
+
+            agent = runtime.build_agent("orchestrator")
+
+            self.assertTrue(
+                any(isinstance(provider, RetrievalContextProvider) for provider in agent.context_providers)
+            )
+
     def test_runtime_can_reload_registry_after_config_changes(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1127,6 +1167,67 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [event.kind for event in runtime.list_events()],
                 ["message_created", "orchestrator_turn_planned", "agent_unavailable"],
+            )
+
+    async def test_runtime_rejects_non_delivery_workflow_for_implementation_turns(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="architecture-first",
+                    goal=body,
+                    deliverable_expected=False,
+                )
+
+            async def classify(_runtime, *, body: str, created_at: int) -> bool:
+                return False
+
+            async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
+                return False
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
+                patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                _, reply = await runtime.send_user_message_to_orchestrator(
+                    body="Build the feature from scratch. First decide the approach, then implement it here.",
+                    created_at=10,
+                )
+
+            self.assertIsNotNone(reply)
+            assert reply is not None
+            self.assertIn("single-agent-execution", runtime.conversation_store.read_message_body(reply))
+            self.assertIn(
+                "orchestrator_non_delivery_rejected",
+                [event.kind for event in runtime.list_events()],
             )
 
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:

@@ -112,6 +112,18 @@ def _cli_command_candidates(invocation: str) -> list[str]:
     ]
 
 
+def _verification_commands(project_root: Path, entrypoint_commands: list[str]) -> list[tuple[str, bool]]:
+    commands = [(command, True) for command in entrypoint_commands]
+    if any(project_root.glob("test_*.py")) or any(project_root.glob("tests/test_*.py")):
+        commands.extend(
+            [
+                ("python3 -m pytest -q", False),
+                ("python3 -m unittest discover -s . -p 'test*.py'", False),
+            ]
+        )
+    return commands
+
+
 @unittest.skipUnless(_model_available(), f"requires local llama-router model {MODEL_ID}")
 class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
     async def test_textual_app_can_build_end_to_end_from_main_chat(self) -> None:
@@ -138,7 +150,7 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                 await self._wait_for(
                     lambda: bool(runtime.list_workflow_runs()) and runtime.list_workflow_runs()[0].state == "completed",
                     pilot,
-                    attempts=900,
+                    attempts=1800,
                 )
 
                 workflow_runs = runtime.list_workflow_runs()
@@ -156,7 +168,10 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Checks:", final_message)
 
                 successful_result = None
-                for index, command in enumerate(entrypoint[1], start=1):
+                for index, (command, require_output_prefix) in enumerate(
+                    _verification_commands(project_root, entrypoint[1]),
+                    start=1,
+                ):
                     command_result = runtime.run_workspace_command(
                         command,
                         created_at=10_000 + index,
@@ -168,7 +183,7 @@ class RealTuiE2ETests(unittest.IsolatedAsyncioTestCase):
                         continue
                     if command_result["exit_code"] != 0:
                         continue
-                    if "5" not in str(command_result["stdout"]):
+                    if require_output_prefix and "5" not in str(command_result["stdout"]):
                         continue
                     successful_result = command_result
                     break

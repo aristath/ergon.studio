@@ -413,6 +413,21 @@ Return reviewed code and a clear summary.
             self.assertEqual(capped["status"], "budget_exhausted")
             self.assertIn("Command budget exhausted", str(capped["stderr"]))
             self.assertIn("command_budget_exhausted", [event.kind for event in runtime.list_events()])
+            command_run_count = len(runtime.list_command_runs())
+            event_count = len(runtime.list_events())
+
+            repeated = runtime.run_workspace_command(
+                "pwd",
+                created_at=1_710_755_221,
+                thread_id=thread.id,
+                agent_id="reviewer",
+                require_approval=False,
+            )
+
+            self.assertEqual(repeated["status"], "budget_exhausted")
+            self.assertEqual(len(runtime.list_command_runs()), command_run_count)
+            self.assertEqual(len(runtime.list_events()), event_count)
+            self.assertEqual(repeated["command_run_id"], capped["command_run_id"])
 
     def test_runtime_can_append_and_read_main_thread_messages(self) -> None:
         from ergon_studio.runtime import load_runtime

@@ -1799,6 +1799,20 @@ class RuntimeContext:
                     f"Command budget exhausted for {resolved_agent_id} in {resolved_thread_id}. "
                     "Reuse the existing verification evidence instead of running more commands."
                 )
+                previous_budget_run = self._latest_budget_exhausted_command_run(
+                    thread_id=resolved_thread_id,
+                    agent_id=resolved_agent_id,
+                )
+                if previous_budget_run is not None:
+                    return {
+                        "command": command,
+                        "cwd": str(workspace_root),
+                        "exit_code": previous_budget_run.exit_code,
+                        "stdout": "",
+                        "stderr": stderr,
+                        "status": "budget_exhausted",
+                        "command_run_id": previous_budget_run.id,
+                    }
                 command_run = self.command_store.create_command_run(
                     session_id=session_id,
                     command_run_id=f"command-run-{uuid4().hex[:8]}",
@@ -1954,6 +1968,25 @@ class RuntimeContext:
             "reviewer": 3,
         }
         return budgets.get(agent_id)
+
+    def _latest_budget_exhausted_command_run(
+        self,
+        *,
+        thread_id: str | None,
+        agent_id: str | None,
+    ) -> CommandRunRecord | None:
+        if thread_id is None or agent_id is None:
+            return None
+        matches = [
+            command_run
+            for command_run in self.list_command_runs()
+            if command_run.thread_id == thread_id
+            and command_run.agent_id == agent_id
+            and command_run.status == "budget_exhausted"
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda record: record.created_at)
 
     def _workflow_threads_for_run(self, workflow_run: WorkflowRunRecord) -> list[ThreadRecord]:
         if workflow_run.root_task_id is None:

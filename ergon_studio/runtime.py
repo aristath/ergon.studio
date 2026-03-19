@@ -839,7 +839,8 @@ class RuntimeContext:
         if (
             decision.deliverable_expected
             and decision.mode == "workflow"
-            and decision.workflow_id == "single-agent-execution"
+            and decision.workflow_id is not None
+            and self._workflow_is_single_specialist_delivery(decision.workflow_id)
             and self._workspace_is_greenfield()
         ):
             requires_delivery_workflow = True
@@ -1521,6 +1522,17 @@ class RuntimeContext:
         if definition is None:
             return False
         return str(definition.metadata.get("acceptance_mode", "delivery")) != "delivery"
+
+    def _workflow_is_single_specialist_delivery(self, workflow_id: str) -> bool:
+        if self._workflow_is_non_delivery(workflow_id):
+            return False
+        step_groups = self.workflow_step_groups(workflow_id)
+        participants = {
+            agent_id
+            for group in step_groups
+            for agent_id in group
+        }
+        return len(participants) == 1
 
     def _delivery_candidate_workflow_ids(self) -> tuple[str, ...]:
         configured: list[str] = []

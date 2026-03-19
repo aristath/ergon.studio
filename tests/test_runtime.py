@@ -2845,6 +2845,169 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(graph.id)
             self.assertIn('step1["researcher"]', body)
 
+    async def test_runtime_uses_orchestrator_selected_dynamic_participants(self) -> None:
+        import ergon_studio.workflow_runtime as workflow_runtime
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        class FakeWorkflowResult(list):
+            def __init__(self, events, outputs) -> None:
+                super().__init__(events)
+                self._outputs = outputs
+
+            def get_outputs(self):
+                return self._outputs
+
+            def get_final_state(self):
+                return "completed"
+
+            def get_request_info_events(self):
+                return []
+
+        class DummyCtx:
+            def __init__(self) -> None:
+                self.output = None
+
+            async def yield_output(self, value) -> None:
+                self.output = value
+
+            async def send_message(self, value, target_id=None) -> None:
+                del target_id
+                self.output = value
+
+        class FakeBuiltMagenticWorkflow:
+            def __init__(self, participants) -> None:
+                self.participants = participants
+
+            async def run(self, goal, include_status_events=True):
+                del include_status_events
+                participant_map = {participant.id: participant for participant in self.participants}
+                opening = workflow_runtime.GroupChatParticipantMessage(
+                    messages=[Message(role="user", text=goal, author_name="workflow")]
+                )
+                for participant in self.participants:
+                    await participant.sync_messages(opening, DummyCtx())
+
+                responses = []
+                for agent_id in ("researcher", "coder"):
+                    participant = participant_map[agent_id]
+                    ctx = DummyCtx()
+                    await participant.handle_request(
+                        workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
+                        ctx,
+                    )
+                    response = ctx.output.message
+                    responses.append(response)
+                    broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
+                    for peer in self.participants:
+                        if peer.id == agent_id:
+                            continue
+                        await peer.sync_messages(broadcast, DummyCtx())
+
+                return FakeWorkflowResult(
+                    events=[
+                        SimpleNamespace(
+                            type="magentic_orchestrator",
+                            data=SimpleNamespace(
+                                event_type="PLAN_CREATED",
+                                content=Message(
+                                    role="assistant",
+                                    text="Plan: researcher -> coder",
+                                    author_name="magentic_manager",
+                                ),
+                            ),
+                        )
+                    ],
+                    outputs=[[
+                        Message(
+                            role="assistant",
+                            text="Dynamic workflow complete.",
+                            author_name="magentic_manager",
+                        )
+                    ]],
+                )
+
+        class FakeMagenticBuilder:
+            def __init__(self, *, participants, manager_agent=None, max_round_count=None, enable_plan_review=False) -> None:
+                del manager_agent, max_round_count, enable_plan_review
+                self.participants = participants
+
+            def build(self):
+                return FakeBuiltMagenticWorkflow(self.participants)
+
+        fake_agents = {
+            "researcher": FakeAgent("I found the relevant constraints and API shape."),
+            "coder": FakeAgent("I implemented the first useful version."),
+            "orchestrator": FakeAgent('{"accepted": true, "summary": "The smaller adaptive team completed the work cleanly."}'),
+        }
+
+        async def fake_select(_runtime, *, workflow_id: str, goal: str, created_at: int):
+            self.assertEqual(workflow_id, "dynamic-open-ended")
+            self.assertEqual(goal, "Build the feature adaptively.")
+            self.assertEqual(created_at, 1_710_755_200)
+            return (("researcher",), ("coder",))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "_select_initial_workflow_step_groups",
+                autospec=True,
+                side_effect=fake_select,
+            ), patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime.MagenticBuilder",
+                FakeMagenticBuilder,
+            ), patch(
+                "ergon_studio.workflow_runtime._build_magentic_manager_agent",
+                return_value=SimpleNamespace(),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="dynamic-open-ended",
+                    goal="Build the feature adaptively.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            run_view = runtime.describe_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            workroom = run_view.steps[0].threads[0]
+            self.assertEqual(workroom.kind, "group_workroom")
+            self.assertIn("researcher + coder", workroom.summary or "")
+            thread_messages = runtime.list_thread_messages(workroom.id)
+            senders = [message.sender for message in thread_messages]
+            self.assertEqual(
+                senders,
+                ["workflow", "researcher", "coder", "magentic_manager", "magentic_manager"],
+            )
+            graph = next(
+                artifact for artifact in runtime.list_artifacts_for_workflow_run(run_view.workflow_run.id)
+                if artifact.kind == "workflow-graph"
+            )
+            self.assertIn("researcher + coder", runtime.read_artifact_body(graph.id))
+
     def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
         from ergon_studio.runtime import load_runtime
 

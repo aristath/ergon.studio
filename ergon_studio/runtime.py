@@ -1115,7 +1115,12 @@ class RuntimeContext:
         created_at: int,
     ) -> tuple[tuple[str, ...], ...]:
         default_groups = self.workflow_step_groups(workflow_id)
-        if self.workflow_orchestration(workflow_id) != "sequential" or not default_groups:
+        orchestration = self.workflow_orchestration(workflow_id)
+        if not _workflow_supports_adaptive_staffing(
+            workflow_id=workflow_id,
+            orchestration=orchestration,
+            default_step_groups=default_groups,
+        ):
             return default_groups
         try:
             orchestrator = self.build_agent("orchestrator")
@@ -1131,6 +1136,7 @@ class RuntimeContext:
             description="Chooses the initial specialist sequence for a workflow run",
             instructions=_workflow_staffing_selector_instructions(
                 workflow_id=workflow_id,
+                orchestration=orchestration,
                 available_agents=tuple(
                     agent_id
                     for agent_id in self.list_agent_ids()
@@ -1145,6 +1151,7 @@ class RuntimeContext:
                         role="user",
                         text=_workflow_staffing_selector_prompt(
                             workflow_id=workflow_id,
+                            orchestration=orchestration,
                             goal=goal,
                             default_step_groups=default_groups,
                         ),
@@ -3036,19 +3043,52 @@ def _validate_runtime_step_groups(
     return tuple(validated)
 
 
+def _workflow_supports_adaptive_staffing(
+    *,
+    workflow_id: str,
+    orchestration: str,
+    default_step_groups: tuple[tuple[str, ...], ...],
+) -> bool:
+    if not default_step_groups:
+        return False
+    if orchestration not in {"sequential", "magentic", "handoff"}:
+        return False
+    participants = {
+        agent_id
+        for group in default_step_groups
+        for agent_id in group
+    }
+    if len(participants) <= 1:
+        return False
+    if workflow_id == "architecture-first":
+        return False
+    return True
+
+
 def _workflow_staffing_selector_instructions(
     *,
     workflow_id: str,
+    orchestration: str,
     available_agents: tuple[str, ...],
 ) -> str:
+    if orchestration in {"magentic", "handoff"}:
+        staffing_rule = (
+            "Choose the smallest useful participant set for the shared specialist room. "
+            "List agents in the order they are most likely to matter first."
+        )
+    else:
+        staffing_rule = (
+            "Choose the smallest team that is likely to finish the work cleanly. "
+            "Do not add extra steps unless they materially improve delivery quality. "
+            "Use at most one agent per step for staged workflows unless parallel specialists are clearly justified."
+        )
     return "\n".join(
         [
             "You are choosing the initial specialist sequence for a workflow run.",
             f"Workflow id: {workflow_id}.",
+            f"Orchestration style: {orchestration}.",
             f"Available specialists: {', '.join(available_agents) or '(none)'}.",
-            "Choose the smallest team that is likely to finish the work cleanly.",
-            "Do not add extra steps unless they materially improve delivery quality.",
-            "Use at most one agent per step for sequential workflows unless parallel specialists are clearly justified.",
+            staffing_rule,
             "Return JSON only with this shape:",
             '{"step_groups":[["coder"]]}',
         ]
@@ -3058,12 +3098,14 @@ def _workflow_staffing_selector_instructions(
 def _workflow_staffing_selector_prompt(
     *,
     workflow_id: str,
+    orchestration: str,
     goal: str,
     default_step_groups: tuple[tuple[str, ...], ...],
 ) -> str:
     return "\n".join(
         [
             f"Workflow: {workflow_id}",
+            f"Orchestration: {orchestration}",
             "",
             "Goal:",
             goal,

@@ -26,7 +26,7 @@ from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.session_store import SessionStore
+from ergon_studio.session_store import SessionStore, default_session_title
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
 from ergon_studio.tool_call_store import ToolCallStore
@@ -813,6 +813,10 @@ class RuntimeContext:
             body=body,
             created_at=created_at,
         )
+        self._refresh_session_title_from_user_turn(
+            body=body,
+            created_at=created_at,
+        )
         decision = await self._decide_orchestrator_turn(body=body, created_at=created_at + 1)
         if not decision.deliverable_expected:
             deliverable_expected = await self._classify_deliverable_intent(
@@ -971,6 +975,34 @@ class RuntimeContext:
             record_prompt=False,
         )
         return user_message, reply
+
+    def _refresh_session_title_from_user_turn(self, *, body: str, created_at: int) -> None:
+        session = self.current_session()
+        if session is None:
+            return
+        fallback_title = default_session_title(
+            session_id=session.id,
+            created_at=session.created_at,
+        )
+        if session.title != fallback_title:
+            return
+        user_messages = [message for message in self.list_main_messages() if message.sender == "user"]
+        if len(user_messages) != 1:
+            return
+        suggested = _session_title_from_message(body)
+        if suggested == fallback_title:
+            return
+        updated = self.session_store.rename_session(
+            session_id=session.id,
+            title=suggested,
+            updated_at=created_at,
+        )
+        self.append_event(
+            kind="session_titled",
+            summary=f"Updated session title to {updated.title}",
+            created_at=created_at,
+            thread_id=self.main_thread_id,
+        )
 
     async def send_message_to_agent_thread(
         self,
@@ -1238,6 +1270,10 @@ class RuntimeContext:
             kind=kind,
             body=body,
             created_at=created_at,
+        )
+        self.session_store.touch_session(
+            session_id=self.main_session_id,
+            updated_at=created_at,
         )
         self.append_event(
             kind="message_created",
@@ -2932,6 +2968,16 @@ def _main_thread_id_for_session(session_id: str) -> str:
     if session_id == MAIN_SESSION_ID:
         return MAIN_THREAD_ID
     return f"{MAIN_THREAD_ID}-{session_id}"
+
+
+def _session_title_from_message(body: str, *, limit: int = 60) -> str:
+    normalized = " ".join(body.split()).strip()
+    if not normalized:
+        return "Untitled Session"
+    if len(normalized) <= limit:
+        return normalized
+    trimmed = normalized[: limit - 1].rstrip()
+    return f"{trimmed}…"
 
 
 def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:

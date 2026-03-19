@@ -189,6 +189,31 @@ class RuntimeTests(unittest.TestCase):
             self.assertIsNone(resumed.current_session().archived_at)
             self.assertTrue(resumed.main_session_id.startswith("session-"))
 
+    def test_appending_messages_updates_session_timestamp(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            created = runtime.current_session().created_at
+
+            runtime.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="hello",
+                created_at=created + 25,
+            )
+
+            self.assertEqual(runtime.current_session().updated_at, created + 25)
+            resumed = load_runtime(project_root=project_root, home_dir=home_dir)
+            self.assertEqual(resumed.main_session_id, runtime.main_session_id)
+
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1426,6 +1451,69 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 ["user", "orchestrator", "user", "orchestrator"],
             )
 
+    async def test_runtime_auto_titles_default_session_from_first_user_turn(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text="I can take it from here.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            original_title = runtime.current_session().title
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                await runtime.send_user_message_to_orchestrator(
+                    body="Build a calculator CLI with tests",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertNotEqual(runtime.current_session().title, original_title)
+            self.assertEqual(runtime.current_session().title, "Build a calculator CLI with tests")
+            self.assertIn("session_titled", [event.kind for event in runtime.list_events()])
+
+    async def test_runtime_preserves_explicit_session_title_from_first_user_turn(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                return SimpleNamespace(text="Working on it.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Focus lane",
+            )
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                await runtime.send_user_message_to_orchestrator(
+                    body="Build a calculator CLI with tests",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(runtime.current_session().title, "Focus lane")
+            self.assertNotIn("session_titled", [event.kind for event in runtime.list_events()])
+
     async def test_runtime_logs_unavailable_orchestrator_without_crashing(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1448,7 +1536,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(runtime.list_main_messages()), 1)
             self.assertEqual(
                 [event.kind for event in runtime.list_events()],
-                ["message_created", "orchestrator_turn_planned", "agent_unavailable"],
+                ["message_created", "session_titled", "orchestrator_turn_planned", "agent_unavailable"],
             )
 
     async def test_runtime_rejects_non_delivery_workflow_for_implementation_turns(self) -> None:

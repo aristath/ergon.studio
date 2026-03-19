@@ -1151,6 +1151,29 @@ Selected tasks show their whiteboard in the TUI.
                     self.assertIn("[orchestrator] Design the next component.", selected_thread.body)
                     self.assertIn("[architect] Architecture outline ready.", selected_thread.body)
 
+    async def test_composer_placeholder_tracks_selected_thread(self) -> None:
+        from textual.widgets import Input
+
+        from ergon_studio.tui.app import ErgonStudioApp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            app = ErgonStudioApp(runtime)
+            app.selected_agent_id = "architect"
+
+            async with app.run_test():
+                composer = app.query_one("#composer-input", Input)
+                self.assertEqual(composer.placeholder, "Message the orchestrator...")
+
+                app.action_open_selected_agent_thread()
+                composer = app.query_one("#composer-input", Input)
+                self.assertIn("Message architect directly", composer.placeholder)
+
     async def test_app_can_edit_orchestrator_definition(self) -> None:
         from textual.widgets import TextArea
 

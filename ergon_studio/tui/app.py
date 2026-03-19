@@ -229,6 +229,9 @@ class ErgonStudioApp(App[None]):
         yield Input(placeholder="Message the orchestrator...", id="composer-input")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self._update_composer_placeholder()
+
     def _render_threads_body(self) -> str:
         if self.selected_workflow_run_id is not None:
             run_view = self.runtime.describe_workflow_run(self.selected_workflow_run_id)
@@ -502,6 +505,7 @@ class ErgonStudioApp(App[None]):
             f"Workflows Dir: {self.runtime.paths.workflows_dir}\n"
             f"Orchestrator: {orchestrator_status}\n"
             "Primary flow: message the orchestrator in the main chat. Internal panels are for transparency first.\n"
+            "Composer target follows the selected thread so you can PM a worker directly when needed.\n"
             "Manual controls: Esc clear run focus, F3/F4 runs, F5 run selected workflow, F6 advance legacy run, F10 fix cycle, Ctrl+N/P team, Ctrl+A thread, Ctrl+T agent, F7/F8 workflow, F9 edit workflow, Ctrl+G config\n"
             "Run Command: Ctrl+X\n"
             "Approvals: F1/F2 select, Ctrl+Y approve, Ctrl+R reject\n"
@@ -1150,10 +1154,22 @@ class ErgonStudioApp(App[None]):
         self.query_one("#tool-calls", Panel).set_body(self._render_tool_calls_body())
         self.query_one("#memory", Panel).set_body(self._render_memory_body())
         self.query_one("#settings", Panel).set_body(self._render_settings_body())
+        self._update_composer_placeholder()
 
     def _next_timestamp(self) -> int:
         self._time_cursor += 1
         return self._time_cursor
+
+    def _update_composer_placeholder(self) -> None:
+        if not self.is_mounted:
+            return
+        composer = self.query_one("#composer-input", Input)
+        thread = self.runtime.get_thread(self.selected_thread_id)
+        if thread is None or thread.id == self.runtime.main_thread_id:
+            composer.placeholder = "Message the orchestrator..."
+            return
+        label = thread.assigned_agent_id or thread.kind
+        composer.placeholder = f"Message {label} directly in {thread.id}..."
 
     def _normalize_selected_approval(self) -> None:
         approval_ids = [approval.id for approval in self._visible_approvals()]

@@ -476,6 +476,15 @@ Agents receive whiteboard context before each run.
                 [workflow_run.id],
             )
             self.assertIn("workflow_started", [event.kind for event in runtime.list_events()])
+            whiteboard = runtime.get_task_whiteboard(workflow_run.root_task_id)
+            self.assertIsNotNone(whiteboard)
+            assert whiteboard is not None
+            self.assertEqual(whiteboard.sections["Goal"], "Workflow: standard-build")
+            self.assertEqual(
+                whiteboard.sections["Plan"],
+                "1. architect\n2. coder\n3. tester\n4. reviewer",
+            )
+            self.assertIn("minimal working result", whiteboard.sections["Acceptance Criteria"])
 
     def test_runtime_uses_workflow_definition_steps(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -1733,3 +1742,57 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(report.id)
             self.assertIn("## Orchestrator Review", body)
             self.assertIn("ACCEPTED: This matches the goal", body)
+
+    def test_runtime_formats_workflow_summary_with_team_files_and_checks(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            workflow_run, threads = runtime.start_workflow_run(
+                workflow_id="single-agent-execution",
+                created_at=1_710_755_200,
+            )
+            thread = threads[0]
+            runtime.tool_call_store.record_tool_call(
+                session_id=runtime.main_session_id,
+                tool_call_id="tool-call-1",
+                tool_name="write_file",
+                arguments={"path": "calc.py", "content": "print(5)\n"},
+                result={"path": "calc.py", "status": "written"},
+                status="completed",
+                created_at=1_710_755_201,
+                thread_id=thread.id,
+                task_id=thread.parent_task_id,
+                agent_id="coder",
+            )
+            (project_root / "calc.py").write_text("print(5)\n", encoding="utf-8")
+            runtime.run_workspace_command(
+                "python3 calc.py",
+                created_at=1_710_755_202,
+                thread_id=thread.id,
+                task_id=thread.parent_task_id,
+                agent_id="tester",
+                require_approval=False,
+            )
+
+            summary = runtime._format_workflow_summary(
+                workflow_id="single-agent-execution",
+                result={
+                    "workflow_run_id": workflow_run.id,
+                    "status": "completed",
+                    "review_summary": "ACCEPTED: Minimal working delivery.",
+                },
+            )
+
+            self.assertIn("I used the `single-agent-execution` workflow.", summary)
+            self.assertIn("Team: coder", summary)
+            self.assertIn("Changed files:", summary)
+            self.assertIn("- calc.py", summary)
+            self.assertIn("Checks:", summary)
+            self.assertIn("- python3 calc.py", summary)

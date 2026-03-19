@@ -1407,16 +1407,30 @@ class RuntimeContext:
         return prompt_message, reply_message
 
     def _format_workflow_summary(self, *, workflow_id: str, result: dict[str, object]) -> str:
-        lines = [f"I chose the `{workflow_id}` workflow and ran it end to end."]
+        lines = [f"I used the `{workflow_id}` workflow."]
+        workflow_run_id = result.get("workflow_run_id")
+        if isinstance(workflow_run_id, str):
+            team = self._workflow_team_summary(workflow_run_id)
+            if team:
+                lines.append(f"Team: {' -> '.join(team)}")
         review_summary = result.get("review_summary")
         if isinstance(review_summary, str) and review_summary.strip():
             lines.extend(["", review_summary.strip()])
         status = result.get("status")
         if isinstance(status, str) and status != "completed":
             lines.extend(["", f"Status: {status}"])
-        created_files = self._workspace_file_list(limit=12)
-        if created_files:
-            lines.extend(["", "Current workspace files:", *[f"- {path}" for path in created_files]])
+        if isinstance(workflow_run_id, str):
+            changed_files = self._workflow_changed_files(workflow_run_id)
+            if changed_files:
+                lines.extend(["", "Changed files:", *[f"- {path}" for path in changed_files]])
+            checks = self._workflow_check_summaries(workflow_run_id)
+            if checks:
+                lines.extend(["", "Checks:", *[f"- {line}" for line in checks]])
+        if len(lines) <= 3:
+            created_files = self._workspace_file_list(limit=8)
+            if created_files:
+                lines.extend(["", "Workspace files:", *[f"- {path}" for path in created_files]])
+        lines.extend(["", "If you want changes, tell me here and I’ll handle the team."])
         return "\n".join(lines)
 
     def _format_delegation_summary(self, *, agent_id: str, result: dict[str, object]) -> str:
@@ -1437,6 +1451,56 @@ class RuntimeContext:
             if path.is_file() and ".ergon.studio" not in path.parts
         ]
         return files[:limit]
+
+    def _workflow_team_summary(self, workflow_run_id: str) -> list[str]:
+        run_view = self.describe_workflow_run(workflow_run_id)
+        if run_view is None:
+            return []
+        labels: list[str] = []
+        for step in run_view.steps:
+            participants = [thread.assigned_agent_id or thread.id for thread in step.threads]
+            if participants:
+                labels.append(" + ".join(participants))
+        return labels
+
+    def _workflow_changed_files(self, workflow_run_id: str) -> list[str]:
+        paths: set[str] = set()
+        for tool_call in self.list_tool_calls_for_workflow_run(workflow_run_id):
+            if tool_call.status != "completed":
+                continue
+            if tool_call.tool_name not in {"write_file", "patch_file"}:
+                continue
+            path = self._tool_call_value(tool_call, key="path")
+            if isinstance(path, str) and path.strip():
+                paths.add(path.strip())
+        return sorted(paths)[:8]
+
+    def _workflow_check_summaries(self, workflow_run_id: str) -> list[str]:
+        summaries: list[str] = []
+        for command_run in self.list_command_runs_for_workflow_run(workflow_run_id):
+            if command_run.status != "completed" or command_run.exit_code != 0:
+                continue
+            command = command_run.command.strip()
+            if not command:
+                continue
+            summaries.append(command)
+        return summaries[-3:]
+
+    def _tool_call_value(self, tool_call: ToolCallRecord, *, key: str) -> object | None:
+        for payload_text in (
+            self.tool_call_store.read_response(tool_call) if tool_call.response_path is not None else "",
+            self.tool_call_store.read_request(tool_call),
+        ):
+            if not payload_text.strip():
+                continue
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            return payload.get(key)
+        return None
 
     def run_workspace_command(
         self,
@@ -1735,7 +1799,11 @@ class RuntimeContext:
         self.whiteboard_store.update_task_whiteboard(
             task_id=root_task.id,
             updated_at=created_at,
-            section_updates={"Goal": goal or f"Workflow: {workflow_id}"},
+            section_updates={
+                "Goal": goal or f"Workflow: {workflow_id}",
+                "Plan": self._render_workflow_plan(step_groups),
+                "Acceptance Criteria": "Deliver a minimal working result that satisfies the goal and passes orchestrator review.",
+            },
         )
         workflow_run = self.workflow_store.create_workflow_run(
             session_id=self.main_session_id,
@@ -1766,6 +1834,15 @@ class RuntimeContext:
             created_at=created_at + 2,
         )
         return workflow_run, threads
+
+    def _render_workflow_plan(self, step_groups: tuple[tuple[str, ...], ...]) -> str:
+        if not step_groups:
+            return "Handle the work directly and produce a final answer."
+        lines: list[str] = []
+        for index, group in enumerate(step_groups, start=1):
+            participants = " + ".join(group)
+            lines.append(f"{index}. {participants}")
+        return "\n".join(lines)
 
     def request_workflow_fix_cycle(
         self,

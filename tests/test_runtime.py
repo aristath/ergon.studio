@@ -214,6 +214,30 @@ class RuntimeTests(unittest.TestCase):
             resumed = load_runtime(project_root=project_root, home_dir=home_dir)
             self.assertEqual(resumed.main_session_id, runtime.main_session_id)
 
+    def test_non_message_activity_updates_session_timestamp(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            created = runtime.current_session().created_at
+
+            runtime.create_task(
+                task_id="task-1",
+                title="Background work",
+                state="in_progress",
+                created_at=created + 30,
+            )
+
+            self.assertEqual(runtime.current_session().updated_at, created + 30)
+            resumed = load_runtime(project_root=project_root, home_dir=home_dir)
+            self.assertEqual(resumed.main_session_id, runtime.main_session_id)
+
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1534,9 +1558,14 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(user_message.sender, "user")
             self.assertIsNone(orchestrator_message)
             self.assertEqual(len(runtime.list_main_messages()), 1)
+            event_kinds = [event.kind for event in runtime.list_events()]
+            self.assertCountEqual(
+                event_kinds[:2],
+                ["message_created", "session_titled"],
+            )
             self.assertEqual(
-                [event.kind for event in runtime.list_events()],
-                ["message_created", "session_titled", "orchestrator_turn_planned", "agent_unavailable"],
+                event_kinds[2:],
+                ["orchestrator_turn_planned", "agent_unavailable"],
             )
 
     async def test_runtime_rejects_non_delivery_workflow_for_implementation_turns(self) -> None:

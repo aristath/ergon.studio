@@ -1271,10 +1271,6 @@ class RuntimeContext:
             body=body,
             created_at=created_at,
         )
-        self.session_store.touch_session(
-            session_id=self.main_session_id,
-            updated_at=created_at,
-        )
         self.append_event(
             kind="message_created",
             summary=f"{sender} posted to {thread_id}",
@@ -2630,6 +2626,10 @@ class RuntimeContext:
         thread_id: str | None = None,
         task_id: str | None = None,
     ) -> EventRecord:
+        self.session_store.touch_session(
+            session_id=self.main_session_id,
+            updated_at=created_at,
+        )
         return self.event_store.append_event(
             session_id=self.main_session_id,
             event_id=f"event-{uuid4().hex}",

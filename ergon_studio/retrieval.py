@@ -15,7 +15,7 @@ from ergon_studio.paths import StudioPaths
 
 
 COLLECTION_NAME = "workspace_chunks"
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_EMBEDDING_MODEL = "jinaai/jina-embeddings-v2-base-code"
 IGNORED_DIRECTORY_NAMES = {
     ".ergon.studio",
     ".git",

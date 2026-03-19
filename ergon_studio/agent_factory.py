@@ -125,10 +125,15 @@ def _build_client(
             )
         )
 
+    api_key = provider_config.get("api_key")
+    base_url = provider_config.get("base_url")
+    if not api_key and base_url:
+        api_key = "not-needed"
+
     return OpenAIChatClient(
         model_id=model_id,
-        api_key=provider_config.get("api_key"),
-        base_url=provider_config.get("base_url"),
+        api_key=api_key,
+        base_url=base_url,
         instruction_role=provider_config.get("instruction_role"),
         middleware=middleware or None,
     )

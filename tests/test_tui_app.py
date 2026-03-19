@@ -531,6 +531,19 @@ class TestStatusBar(IsolatedAsyncioTestCase):
 
 
 class TestEditorModals(IsolatedAsyncioTestCase):
+    async def test_open_session_picker_binding(self):
+        _, runtime, app = _make_env()
+        load_runtime(
+            project_root=runtime.paths.project_root,
+            home_dir=runtime.paths.home_dir,
+            create_session=True,
+            session_title="Parallel lane",
+        )
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, SessionPickerScreen)
+
     async def test_edit_global_config_opens_wizard(self):
         from ergon_studio.tui.config_wizard import ConfigWizardScreen
 

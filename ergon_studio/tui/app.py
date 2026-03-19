@@ -136,6 +136,7 @@ class SessionPickerScreen(ModalScreen[str | None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("ctrl+o", "open_session_picker", "Sessions"),
         ("ctrl+y", "approve_pending", "Approve"),
         ("ctrl+r", "reject_pending", "Reject"),
         ("ctrl+g", "edit_global_config", "Edit Config"),
@@ -591,6 +592,9 @@ class ErgonStudioApp(App[None]):
 
     def action_edit_global_config(self) -> None:
         self._open_config_wizard()
+
+    def action_open_session_picker(self) -> None:
+        self._open_session_picker()
 
     def _open_config_wizard(self) -> None:
         from ergon_studio.tui.config_wizard import ConfigWizardScreen

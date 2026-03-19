@@ -2626,10 +2626,6 @@ class RuntimeContext:
         thread_id: str | None = None,
         task_id: str | None = None,
     ) -> EventRecord:
-        self.session_store.touch_session(
-            session_id=self.main_session_id,
-            updated_at=created_at,
-        )
         return self.event_store.append_event(
             session_id=self.main_session_id,
             event_id=f"event-{uuid4().hex}",

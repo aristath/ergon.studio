@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from ergon_studio.live_runtime import LiveMessageDraft
 from ergon_studio.runtime import RuntimeContext
 from ergon_studio.storage.models import ApprovalRecord, MessageRecord, ThreadRecord
 from ergon_studio.tui.timeline_models import ApprovalItem, ChatTurnItem, NoticeItem, TimelineItem, TimelineThreadMessage, WorkroomSegmentItem
@@ -63,6 +64,16 @@ def build_session_timeline(
             )
         )
 
+    for draft in runtime.list_live_message_drafts():
+        entries.append(
+            _TimelineEntry(
+                kind="live_draft",
+                created_at=draft.created_at,
+                sort_id=draft.draft_id,
+                payload=draft,
+            )
+        )
+
     for notice in notices:
         entries.append(
             _TimelineEntry(
@@ -111,6 +122,21 @@ def build_session_timeline(
                 active_thread = thread
             active_messages.append(_timeline_thread_message(runtime, message))
             continue
+        if entry.kind == "live_draft":
+            draft = entry.payload
+            assert isinstance(draft, LiveMessageDraft)
+            if draft.thread_id == runtime.main_thread_id:
+                flush_segment()
+                items.append(_live_chat_turn_item(draft))
+                continue
+            thread = runtime.get_thread(draft.thread_id)
+            if thread is None:
+                continue
+            if active_thread is None or active_thread.id != thread.id:
+                flush_segment()
+                active_thread = thread
+            active_messages.append(_live_timeline_thread_message(draft))
+            continue
 
         flush_segment()
         if entry.kind == "main_message":
@@ -143,6 +169,7 @@ def _chat_turn_item(runtime: RuntimeContext, message: MessageRecord) -> ChatTurn
         kind=message.kind,
         body=body,
         created_at=message.created_at,
+        is_live=False,
     )
 
 
@@ -154,6 +181,30 @@ def _timeline_thread_message(runtime: RuntimeContext, message: MessageRecord) ->
         kind=message.kind,
         body=body,
         created_at=message.created_at,
+        is_live=False,
+    )
+
+
+def _live_chat_turn_item(draft: LiveMessageDraft) -> ChatTurnItem:
+    return ChatTurnItem(
+        item_id=f"live-chat-{draft.draft_id}",
+        message_id=draft.draft_id,
+        sender=draft.sender,
+        kind=draft.kind,
+        body=draft.body,
+        created_at=draft.created_at,
+        is_live=True,
+    )
+
+
+def _live_timeline_thread_message(draft: LiveMessageDraft) -> TimelineThreadMessage:
+    return TimelineThreadMessage(
+        message_id=draft.draft_id,
+        sender=draft.sender,
+        kind=draft.kind,
+        body=draft.body,
+        created_at=draft.created_at,
+        is_live=True,
     )
 
 
@@ -187,7 +238,8 @@ def _kind_priority(kind: str) -> int:
     order = {
         "main_message": 0,
         "thread_message": 1,
-        "approval": 2,
-        "notice": 3,
+        "live_draft": 2,
+        "approval": 3,
+        "notice": 4,
     }
     return order.get(kind, 99)

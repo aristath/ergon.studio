@@ -11,6 +11,7 @@ class TimelineThreadMessage:
     kind: str
     body: str
     created_at: int
+    is_live: bool = False
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class ChatTurnItem:
     kind: str
     body: str
     created_at: int
+    is_live: bool = False
 
 
 @dataclass(frozen=True)

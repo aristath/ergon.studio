@@ -59,10 +59,11 @@ class TimelineChatTurnWidget(Static, _TimelineItemWidget):
     def __init__(self, item: ChatTurnItem, **kwargs) -> None:
         super().__init__(**kwargs)
         self.item = item
-        self.update(_message_renderable(item.sender, item.body))
+        self.update(_message_renderable(item.sender, item.body, is_live=item.is_live))
 
     def plain_text(self) -> str:
-        return f"{self.item.sender}: {self.item.body}".strip()
+        suffix = " <live>" if self.item.is_live else ""
+        return f"{self.item.sender}: {self.item.body}{suffix}".strip()
 
 
 class TimelineNoticeWidget(Static, _TimelineItemWidget):
@@ -149,7 +150,7 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
     def __init__(self, item: WorkroomSegmentItem, **kwargs) -> None:
         self.item = item
         body_text = "\n\n".join(
-            _message_markup(message.sender, message.body)
+            _message_markup(message.sender, message.body, is_live=message.is_live)
             for message in item.messages
         )
         body = Static(body_text, classes="timeline-workroom-body")
@@ -158,7 +159,8 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
     def plain_text(self) -> str:
         lines = [self.item.title]
         for message in self.item.messages:
-            lines.append(f"{message.sender}: {message.body}")
+            suffix = " <live>" if message.is_live else ""
+            lines.append(f"{message.sender}: {message.body}{suffix}")
         return "\n".join(lines)
 
 
@@ -174,13 +176,15 @@ def _widget_for_item(item: TimelineItem) -> _TimelineItemWidget:
     raise TypeError(f"unsupported timeline item: {type(item)!r}")
 
 
-def _message_renderable(sender: str, body: str):
+def _message_renderable(sender: str, body: str, *, is_live: bool = False):
     label = "you" if sender == "user" else sender
+    live_suffix = "\n\n[dim]▌[/dim]" if is_live else ""
     if "```" in body or "\n#" in body:
-        return Markdown(f"**{label}**\n\n{body}")
-    return _message_markup(sender, body)
+        return Markdown(f"**{label}**\n\n{body}{live_suffix}")
+    return _message_markup(sender, body, is_live=is_live)
 
 
-def _message_markup(sender: str, body: str) -> str:
+def _message_markup(sender: str, body: str, *, is_live: bool = False) -> str:
     label = "you" if sender == "user" else sender
-    return f"[bold]{label}[/bold] {body}"
+    suffix = " [dim]▌[/dim]" if is_live else ""
+    return f"[bold]{label}[/bold] {body}{suffix}"

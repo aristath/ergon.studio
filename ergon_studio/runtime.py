@@ -22,6 +22,7 @@ from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.context_providers import WORKSPACE_STATE_KEY
 from ergon_studio.definitions import DefinitionDocument, parse_definition_text, save_definition_text
 from ergon_studio.event_store import EventStore
+from ergon_studio.live_runtime import LiveMessageDraft, LiveRuntimeState
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
@@ -124,6 +125,7 @@ class RuntimeContext:
     command_store: CommandStore
     tool_call_store: ToolCallStore
     retrieval_index: RetrievalIndex
+    live_state: LiveRuntimeState
     main_session_id: str
     main_thread_id: str
     _accumulated_tokens: int
@@ -819,6 +821,9 @@ class RuntimeContext:
 
     def list_thread_messages(self, thread_id: str) -> list[MessageRecord]:
         return self.conversation_store.list_messages(thread_id)
+
+    def list_live_message_drafts(self) -> tuple[LiveMessageDraft, ...]:
+        return self.live_state.list_drafts()
 
     def append_message_to_main_thread(
         self,
@@ -3150,6 +3155,7 @@ def load_runtime(
         command_store=command_store,
         tool_call_store=tool_call_store,
         retrieval_index=retrieval_index,
+        live_state=LiveRuntimeState(),
         main_session_id=resolved_session.id,
         main_thread_id=_main_thread_id_for_session(resolved_session.id),
         _accumulated_tokens=0,

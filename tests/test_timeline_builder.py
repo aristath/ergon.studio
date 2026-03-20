@@ -10,6 +10,60 @@ from ergon_studio.tui.timeline_models import ApprovalItem, ChatTurnItem, NoticeI
 
 
 class TimelineBuilderTests(unittest.TestCase):
+    def test_builder_includes_live_main_chat_draft(self) -> None:
+        runtime = _make_runtime(self)
+        runtime.live_state.start_draft(
+            draft_id="draft-1",
+            thread_id=runtime.main_thread_id,
+            sender="orchestrator",
+            kind="chat",
+            created_at=10,
+        )
+        runtime.live_state.append_delta(
+            draft_id="draft-1",
+            delta="Working on it",
+            created_at=11,
+        )
+
+        items = build_session_timeline(runtime)
+
+        self.assertEqual(len(items), 1)
+        self.assertIsInstance(items[0], ChatTurnItem)
+        assert isinstance(items[0], ChatTurnItem)
+        self.assertTrue(items[0].is_live)
+        self.assertEqual(items[0].body, "Working on it")
+
+    def test_builder_includes_live_workroom_draft_inside_segment(self) -> None:
+        runtime = _make_runtime(self)
+        thread = runtime.create_thread(
+            thread_id="thread-coder",
+            kind="agent_direct",
+            created_at=10,
+            assigned_agent_id="coder",
+            summary="Implementation",
+        )
+        runtime.live_state.start_draft(
+            draft_id="draft-1",
+            thread_id=thread.id,
+            sender="coder",
+            kind="chat",
+            created_at=11,
+        )
+        runtime.live_state.append_delta(
+            draft_id="draft-1",
+            delta="Implementing B",
+            created_at=12,
+        )
+
+        items = build_session_timeline(runtime)
+
+        self.assertEqual(len(items), 1)
+        self.assertIsInstance(items[0], WorkroomSegmentItem)
+        assert isinstance(items[0], WorkroomSegmentItem)
+        self.assertEqual(len(items[0].messages), 1)
+        self.assertTrue(items[0].messages[0].is_live)
+        self.assertEqual(items[0].messages[0].body, "Implementing B")
+
     def test_builder_keeps_main_chat_turns_as_individual_items(self) -> None:
         runtime = _make_runtime(self)
         runtime.append_message_to_main_thread(

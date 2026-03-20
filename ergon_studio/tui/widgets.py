@@ -193,8 +193,9 @@ class InfoBar(Static):
         self,
         selected_workflow_run_id: str | None = None,
         selected_workflow_id: str | None = None,
+        permission_mode: str = "default",
     ) -> None:
-        line1 = self._build_status_line(selected_workflow_run_id, selected_workflow_id)
+        line1 = self._build_status_line(selected_workflow_run_id, selected_workflow_id, permission_mode)
         line2 = "/help /config /workflows /agent <name> /memory /threads"
         self.update(f"{line1}\n{line2}")
 
@@ -202,6 +203,7 @@ class InfoBar(Static):
         self,
         workflow_run_id: str | None,
         workflow_id: str | None,
+        permission_mode: str = "default",
     ) -> str:
         parts: list[str] = []
         session = self.runtime.current_session()
@@ -225,6 +227,10 @@ class InfoBar(Static):
         if pending:
             count = len(pending)
             parts.append(f"{count} pending approval{'s' if count != 1 else ''} (Ctrl+Y/R)")
+
+        if permission_mode != "default":
+            mode_labels = {"auto-approve": "auto", "plan": "plan"}
+            parts.append(f"mode: {mode_labels.get(permission_mode, permission_mode)}")
 
         return " │ ".join(parts) if parts else "No active workflow"
 

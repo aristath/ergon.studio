@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from uuid import uuid4
 
@@ -157,6 +158,8 @@ class ErgonStudioApp(App[None]):
         ("ctrl+e", "edit_orchestrator_definition", "Edit Orchestrator"),
         ("ctrl+x", "run_workspace_command", "Run Command"),
         ("ctrl+c", "quit", "Quit"),
+        ("shift+tab", "cycle_permission_mode", "Permission Mode"),
+        ("ctrl+b", "background_current", "Background"),
     ]
     CSS = """
     Screen {
@@ -219,6 +222,8 @@ class ErgonStudioApp(App[None]):
         self._known_approval_ids: set[str] = set()
         self._time_cursor = int(time.time())
         self._last_escape_time: float = 0.0
+        self._permission_mode: str = "default"  # default, auto-approve, plan
+        self._background_tasks: dict[str, asyncio.Task] = {}
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
@@ -729,6 +734,38 @@ class ErgonStudioApp(App[None]):
         chat.write(f"[red]Rejected[/red] {approval.action} by {approval.requester}")
         self._refresh_info()
 
+    def action_background_current(self) -> None:
+        """Move the current thinking operation to background."""
+        thinking = self.query_one("#thinking", ThinkingIndicator)
+        if not thinking.has_class("visible"):
+            chat = self.query_one("#main-chat", RichLog)
+            chat.write("[dim]Nothing is running to background.[/dim]")
+            return
+        # The operation is already running async — just notify the user
+        chat = self.query_one("#main-chat", RichLog)
+        chat.write("[dim]Operation continues in background. You can keep typing.[/dim]")
+        self.set_focus(self.query_one("#composer-input", ComposerTextArea))
+
+    def action_cycle_permission_mode(self) -> None:
+        modes = ["default", "auto-approve", "plan"]
+        current_idx = modes.index(self._permission_mode) if self._permission_mode in modes else 0
+        self._permission_mode = modes[(current_idx + 1) % len(modes)]
+        config = self.runtime.registry.config
+        if self._permission_mode == "default":
+            config["approvals"] = {"default": "ask"}
+        elif self._permission_mode == "auto-approve":
+            config["approvals"] = {"default": "auto"}
+        elif self._permission_mode == "plan":
+            config["approvals"] = {"default": "block"}
+        mode_labels = {
+            "default": "[yellow]Default[/yellow] (ask for approvals)",
+            "auto-approve": "[green]Auto-approve[/green] (approve all automatically)",
+            "plan": "[red]Plan mode[/red] (block all write operations)",
+        }
+        chat = self.query_one("#main-chat", RichLog)
+        chat.write(f"[dim]Permission mode:[/dim] {mode_labels[self._permission_mode]}")
+        self._refresh_info()
+
     def action_edit_global_config(self) -> None:
         self._open_config_wizard()
 
@@ -859,6 +896,7 @@ class ErgonStudioApp(App[None]):
         self.query_one("#info-bar", InfoBar).refresh_from_runtime(
             selected_workflow_run_id=self.selected_workflow_run_id,
             selected_workflow_id=self.selected_workflow_id,
+            permission_mode=self._permission_mode,
         )
         self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
 

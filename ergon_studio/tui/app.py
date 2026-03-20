@@ -155,6 +155,7 @@ class ErgonStudioApp(App[None]):
 
     #chat-area {
       height: 1fr;
+      background: transparent;
     }
 
     #side-threads {
@@ -165,6 +166,7 @@ class ErgonStudioApp(App[None]):
     #main-chat {
       height: 1fr;
       padding: 0 1;
+      background: transparent;
     }
 
     #composer-input {

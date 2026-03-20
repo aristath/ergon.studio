@@ -72,7 +72,7 @@ class CliTests(unittest.TestCase):
             project_root.mkdir()
             home_dir.mkdir()
 
-            with patch("ergon_studio.cli.serve_proxy") as serve_proxy:
+            with patch("ergon_studio.cli.run_proxy_server", return_value=0) as run_proxy_server:
                 exit_code = main(
                     [
                         "serve",
@@ -90,12 +90,13 @@ class CliTests(unittest.TestCase):
                 )
 
             self.assertEqual(exit_code, 0)
-            serve_proxy.assert_called_once()
-            _, kwargs = serve_proxy.call_args
-            self.assertEqual(kwargs["host"], "0.0.0.0")
-            self.assertEqual(kwargs["port"], 4242)
-            self.assertEqual(kwargs["model_id"], "ergon-proxy")
-            self.assertFalse((project_root / ".ergon.studio" / "project.json").exists())
+            run_proxy_server.assert_called_once_with(
+                home_dir=home_dir,
+                host="0.0.0.0",
+                port=4242,
+                model_id="ergon-proxy",
+                check=False,
+            )
 
     def test_serve_check_fails_fast_when_orchestrator_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -106,7 +107,7 @@ class CliTests(unittest.TestCase):
             home_dir.mkdir()
             stdout = io.StringIO()
 
-            with patch("ergon_studio.cli.serve_proxy") as serve_proxy:
+            with patch("ergon_studio.cli.run_proxy_server", return_value=1) as run_proxy_server:
                 with redirect_stdout(stdout):
                     exit_code = main(
                         [
@@ -120,8 +121,14 @@ class CliTests(unittest.TestCase):
                     )
 
             self.assertEqual(exit_code, 1)
-            self.assertIn("ok=false", stdout.getvalue())
-            serve_proxy.assert_not_called()
+            self.assertEqual(stdout.getvalue(), "")
+            run_proxy_server.assert_called_once_with(
+                home_dir=home_dir,
+                host="127.0.0.1",
+                port=4000,
+                model_id="ergon",
+                check=True,
+            )
 
     def test_sessions_new_and_list_commands_manage_project_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

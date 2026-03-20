@@ -4,11 +4,8 @@ import argparse
 from pathlib import Path
 import time
 
-from ergon_studio.bootstrap import bootstrap_proxy_home, bootstrap_workspace
-from ergon_studio.proxy.core import ProxyOrchestrationCore
-from ergon_studio.proxy.health import build_proxy_health_snapshot
-from ergon_studio.proxy.server import serve_proxy
-from ergon_studio.registry import load_registry_from_global_paths
+from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.proxy_cli import run_proxy_server
 
 
 def _load_runtime_loader():
@@ -24,7 +21,12 @@ def _load_session_store_class():
 
 
 def _load_tui_app_class():
-    from ergon_studio.tui.app import ErgonStudioApp
+    try:
+        from ergon_studio.tui.app import ErgonStudioApp
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            raise RuntimeError("TUI support is not installed. Install the 'native' extra to use `ergon-studio tui`.") from exc
+        raise
 
     return ErgonStudioApp
 
@@ -154,29 +156,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
-        proxy_paths = bootstrap_proxy_home(args.home_dir)
-        registry = load_registry_from_global_paths(proxy_paths)
-        if args.check:
-            health = build_proxy_health_snapshot(registry)
-            print(f"ok={str(health['ok']).lower()}")
-            for provider in health["providers"]:
-                status = "ok" if provider["ok"] else "error"
-                detail = provider["error"] or provider["model"]
-                print(f"provider[{provider['name']}]={status}:{detail}")
-            for agent in health["agents"]:
-                status = "ok" if agent["ok"] else "error"
-                detail = agent["error"] or agent["summary"]
-                print(f"agent[{agent['name']}]={status}:{detail}")
-            if not health["ok"]:
-                return 1
-        core = ProxyOrchestrationCore(registry)
-        serve_proxy(
+        return run_proxy_server(
+            home_dir=args.home_dir,
             host=args.host,
             port=args.port,
-            core=core,
             model_id=args.model_id,
+            check=args.check,
         )
-        return 0
 
     if args.command == "sessions":
         SessionStore = _load_session_store_class()

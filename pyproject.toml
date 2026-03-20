@@ -13,17 +13,21 @@ dependencies = [
   "agent-framework-orchestrations",
   "PyYAML",
   "qdrant-client[fastembed]",
-  "textual",
 ]
 
 [project.optional-dependencies]
+native = [
+  "textual",
+]
 dev = [
   "pytest",
   "pytest-cov",
+  "textual",
 ]
 
 [project.scripts]
 ergon-studio = "ergon_studio.cli:main"
+ergon-studio-proxy = "ergon_studio.proxy_cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

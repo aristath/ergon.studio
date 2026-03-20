@@ -8,7 +8,7 @@ import re
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agent_framework import Agent, Executor, Message, WorkflowBuilder, WorkflowContext, handler
+from agent_framework import Agent, AgentResponse, Executor, Message, WorkflowBuilder, WorkflowContext, handler
 from agent_framework.orchestrations import GroupChatBuilder, HandoffBuilder, MagenticBuilder, clean_conversation_for_handoff
 from agent_framework_orchestrations._base_group_chat_orchestrator import GroupChatParticipantMessage, GroupChatRequestMessage, GroupChatResponseMessage
 
@@ -1703,6 +1703,9 @@ def _append_output_messages_to_thread(
 def _collect_output_messages(outputs: list[object]) -> list[Message]:
     messages: list[Message] = []
     for output in outputs:
+        if isinstance(output, AgentResponse):
+            messages.extend(message for message in output.messages if isinstance(message, Message))
+            continue
         if isinstance(output, Message):
             messages.append(output)
             continue

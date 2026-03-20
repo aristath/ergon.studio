@@ -1177,8 +1177,8 @@ class RuntimeContext:
                 task_id=thread.parent_task_id,
             )
             return DelegationReviewVerdict(
-                accepted=True,
-                summary="Accepted without structured review because the orchestrator review agent was unavailable.",
+                accepted=False,
+                summary="I could not complete a reliable acceptance review for the delegated result.",
             )
         try:
             return _parse_delegation_review_verdict(raw)
@@ -1191,8 +1191,8 @@ class RuntimeContext:
                 task_id=thread.parent_task_id,
             )
             return DelegationReviewVerdict(
-                accepted=True,
-                summary="Accepted without structured review because the orchestrator review output was invalid.",
+                accepted=False,
+                summary="I could not produce a structured acceptance review for the delegated result.",
             )
 
     async def _run_structured_delegation_review(

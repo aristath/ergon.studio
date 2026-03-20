@@ -4,123 +4,15 @@ import json
 import re
 import tempfile
 import unittest
-import urllib.request
 from pathlib import Path
 
-from ergon_studio.config import save_global_config
 from ergon_studio.runtime import load_runtime
-
-
-MODEL_ID = "qwen3-coder-next-q40"
-ALL_ROLES = {
-    "orchestrator": "local",
-    "architect": "local",
-    "coder": "local",
-    "reviewer": "local",
-    "fixer": "local",
-    "researcher": "local",
-    "tester": "local",
-    "documenter": "local",
-    "brainstormer": "local",
-    "designer": "local",
-}
-
-
-def _model_available() -> bool:
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:8080/v1/models", timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return False
-    models = payload.get("data", [])
-    if not isinstance(models, list):
-        return False
-    return any(isinstance(model, dict) and model.get("id") == MODEL_ID for model in models)
-
-
-def _configure_local_runtime(runtime) -> None:
-    save_global_config(
-        runtime.paths.config_path,
-        {
-            "providers": {
-                "local": {
-                    "type": "openai_chat",
-                    "base_url": "http://127.0.0.1:8080/v1",
-                    "api_key": "not-needed",
-                    "model": MODEL_ID,
-                    "capabilities": {
-                        "tool_calling": True,
-                        "structured_output": True,
-                    },
-                }
-            },
-            "role_assignments": dict(ALL_ROLES),
-            "approvals": {"default": "auto"},
-            "ui": {},
-        },
-    )
-    runtime.reload_registry()
-
-
-def _calculator_entrypoints(project_root: Path) -> list[tuple[Path, list[str]]]:
-    candidates: list[tuple[Path, list[str]]] = []
-    seen_paths: set[Path] = set()
-
-    def add_candidate(path: Path, commands: list[str]) -> None:
-        if path in seen_paths or not path.exists():
-            return
-        seen_paths.add(path)
-        candidates.append((path, commands))
-
-    calc_path = project_root / "calc.py"
-    add_candidate(calc_path, _cli_command_candidates("python3 calc.py"))
-    calculator_path = project_root / "calculator.py"
-    add_candidate(calculator_path, _cli_command_candidates("python3 calculator.py"))
-    cli_path = project_root / "cli.py"
-    add_candidate(cli_path, _cli_command_candidates("python3 cli.py"))
-
-    for package_dir in sorted(project_root.iterdir()):
-        if not package_dir.is_dir() or package_dir.name.startswith(".") or package_dir.name == "tests":
-            continue
-        package_main = package_dir / "main.py"
-        if package_main.exists():
-            module = f"{package_dir.name}.main"
-            add_candidate(
-                package_main,
-                _cli_command_candidates(f"python3 -m {module}"),
-            )
-
-    for path in sorted(project_root.rglob("*.py")):
-        if ".ergon.studio" in path.parts or "tests" in path.parts:
-            continue
-        relative = path.relative_to(project_root)
-        if path.name.startswith("test_"):
-            continue
-        command_base = str(relative)
-        add_candidate(
-            path,
-            _cli_command_candidates(f"python3 {command_base}"),
-        )
-        module_name = ".".join(relative.with_suffix("").parts)
-        if module_name:
-            add_candidate(
-                path,
-                _cli_command_candidates(f"python3 -m {module_name}"),
-            )
-
-    return candidates
-
-
-def _verification_commands(project_root: Path, entrypoint_commands: list[str]) -> list[tuple[str, bool]]:
-    commands = [(command, True) for command in entrypoint_commands]
-    if any(project_root.glob("test_*.py")) or any(project_root.glob("tests/test_*.py")):
-        commands.extend(
-            [
-                ("python3 -m pytest -q", False),
-                ("python3 -m unittest discover -s . -p 'test*.py'", False),
-            ]
-        )
-    return commands
+from tests.real_test_support import (
+    calculator_entrypoints,
+    configure_local_runtime,
+    should_run_real_model_tests,
+    verification_commands,
+)
 
 
 def _workspace_python_files(project_root: Path) -> list[Path]:
@@ -131,22 +23,10 @@ def _workspace_python_files(project_root: Path) -> list[Path]:
     ]
 
 
-def _cli_command_candidates(invocation: str) -> list[str]:
-    return [
-        f"{invocation} 2 + 3",
-        f"{invocation} add 2 3",
-        f"{invocation} 2 add 3",
-        f"{invocation} + 2 3",
-        f"{invocation} 2 3 +",
-        f"{invocation} 2 3 add",
-        f"{invocation} --num1 2 --num2 3 --op add",
-        f"{invocation} --a 2 --b 3 --op add",
-        f"{invocation} '2 + 3'",
-        f"printf '2\\n+\\n3\\n' | {invocation}",
-    ]
-
-
-@unittest.skipUnless(_model_available(), f"requires local llama-router model {MODEL_ID}")
+@unittest.skipUnless(
+    should_run_real_model_tests(),
+    "requires ERGON_STUDIO_RUN_REAL_E2E=1 and local qwen3-coder-next-q40 availability",
+)
 class RealE2ETests(unittest.IsolatedAsyncioTestCase):
     async def test_real_coder_can_create_a_file_with_local_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -157,7 +37,7 @@ class RealE2ETests(unittest.IsolatedAsyncioTestCase):
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             result = await runtime.delegate_to_agent(
                 agent_id="coder",
@@ -195,7 +75,7 @@ class RealE2ETests(unittest.IsolatedAsyncioTestCase):
             )
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
             runtime.save_agent_definition_text(
                 agent_id="researcher",
                 text="""---
@@ -240,7 +120,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             first = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(first)
+            configure_local_runtime(first)
 
             created = await first.delegate_to_agent(
                 agent_id="coder",
@@ -263,7 +143,7 @@ Be short and concrete.
                 create_session=True,
                 session_title="Parallel lane",
             )
-            _configure_local_runtime(second)
+            configure_local_runtime(second)
 
             self.assertNotEqual(second.main_session_id, first.main_session_id)
             self.assertEqual(second.list_main_messages(), [])
@@ -312,7 +192,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             result = await runtime.run_workflow(
                 workflow_id="debate",
@@ -352,7 +232,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             result = await runtime.run_workflow(
                 workflow_id="dynamic-open-ended",
@@ -390,7 +270,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             result = await runtime.run_workflow(
                 workflow_id="specialist-handoff",
@@ -441,7 +321,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             await runtime.send_user_message_to_orchestrator(
                 body=(
@@ -464,13 +344,13 @@ Be short and concrete.
             task_titles = [task.title for task in runtime.list_tasks()]
             self.assertGreaterEqual(len(task_titles), 1)
 
-            entrypoints = _calculator_entrypoints(project_root)
+            entrypoints = calculator_entrypoints(project_root)
             self.assertTrue(entrypoints, "expected a runnable calculator entrypoint to be created")
 
             successful_result = None
             command_index = 0
             for _path, commands in entrypoints:
-                for command, require_output_prefix in _verification_commands(project_root, commands):
+                for command, require_output_prefix in verification_commands(project_root, commands):
                     command_index += 1
                     command_result = runtime.run_workspace_command(
                         command,
@@ -502,7 +382,7 @@ Be short and concrete.
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            _configure_local_runtime(runtime)
+            configure_local_runtime(runtime)
 
             await runtime.send_user_message_to_orchestrator(
                 body="We need a tiny Python CLI calculator. Talk me through the approach first before building anything.",
@@ -512,7 +392,7 @@ Be short and concrete.
             first_pass_messages = runtime.list_main_messages()
             self.assertGreaterEqual(len(first_pass_messages), 2)
             self.assertEqual(runtime.list_workflow_runs(), [])
-            self.assertEqual(_calculator_entrypoints(project_root), [])
+            self.assertEqual(calculator_entrypoints(project_root), [])
 
             await runtime.send_user_message_to_orchestrator(
                 body="That sounds fine. Please proceed and build it.",
@@ -525,4 +405,4 @@ Be short and concrete.
 
             final_message = runtime.conversation_store.read_message_body(runtime.list_main_messages()[-1]).strip()
             self.assertTrue("workflow" in final_message or "built" in final_message.lower())
-            self.assertTrue(bool(_calculator_entrypoints(project_root)) or bool(_workspace_python_files(project_root)))
+            self.assertTrue(bool(calculator_entrypoints(project_root)) or bool(_workspace_python_files(project_root)))

@@ -1177,6 +1177,19 @@ class RuntimeContext:
                     response = await stream_or_response.get_final_response()
                 else:
                     response = await stream_or_response
+        except asyncio.CancelledError:
+            self.agent_session_store.save_session(
+                session_id=runtime_session_id,
+                thread_id=thread_id,
+                agent_id=agent_id,
+                session=session,
+            )
+            self.live_state.fail_draft(
+                draft_id=draft_id,
+                error="cancelled",
+                created_at=created_at + 1,
+            )
+            raise
         except Exception as exc:
             self.append_event(
                 kind="agent_failed",

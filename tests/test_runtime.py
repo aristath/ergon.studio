@@ -2286,6 +2286,56 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "Streaming fallback reply.\n",
             )
 
+    async def test_stream_user_message_to_orchestrator_clears_live_draft_on_cancellation(self) -> None:
+        import asyncio
+
+        from ergon_studio.runtime import load_runtime
+
+        class BlockingStreamingAgent:
+            def __init__(self) -> None:
+                self.release = asyncio.Event()
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+
+                async def _updates():
+                    await self.release.wait()
+                    yield SimpleNamespace(text="late reply")
+
+                return ResponseStream(
+                    _updates(),
+                    finalizer=lambda updates: SimpleNamespace(text="".join(update.text for update in updates)),
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            agent = BlockingStreamingAgent()
+
+            with patch.object(type(runtime), "build_agent", return_value=agent):
+                stream = runtime.stream_user_message_to_orchestrator(
+                    body="Please take a look.",
+                    created_at=10,
+                )
+                iterator = stream.__aiter__()
+                started = await iterator.__anext__()
+                self.assertEqual(started.kind, "message_started")
+                pending = asyncio.create_task(iterator.__anext__())
+                await asyncio.sleep(0)
+                pending.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await pending
+
+            self.assertEqual(runtime.list_live_message_drafts(), ())
+
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
         from ergon_studio.runtime import load_runtime
 

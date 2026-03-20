@@ -12,6 +12,7 @@ from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.live_runtime import LiveRuntimeSubscription
 from ergon_studio.runtime import RuntimeContext, load_runtime
+from ergon_studio.runtime_events import RuntimeEventSubscription
 from ergon_studio.tui.inspectors import (
     InspectorScreen,
     build_approval_entries,
@@ -226,6 +227,8 @@ class ErgonStudioApp(App[None]):
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
+        self._runtime_event_subscription: RuntimeEventSubscription | None = None
+        self._runtime_event_task: asyncio.Task[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
@@ -265,14 +268,14 @@ class ErgonStudioApp(App[None]):
 
     def on_mount(self) -> None:
         self.set_focus(self.query_one("#composer-input", ComposerTextArea))
-        self.runtime.set_event_callback(self._on_runtime_event)
         self._start_live_subscription()
+        self._start_runtime_event_subscription()
         self._refresh_timeline()
         self._refresh_info()
         if self.open_session_picker_on_mount:
             self._open_session_picker()
 
-    def _on_runtime_event(self, kind: str, summary: str) -> None:
+    def _on_runtime_event(self, kind: str) -> None:
         """Update the thinking indicator when the runtime emits events."""
         label = self._EVENT_LABELS.get(kind)
         if label is None:
@@ -286,7 +289,7 @@ class ErgonStudioApp(App[None]):
 
     def on_unmount(self) -> None:
         self._stop_live_subscription()
-        self.runtime.set_event_callback(None)
+        self._stop_runtime_event_subscription()
         if self._active_turn_task is not None:
             self._active_turn_task.cancel()
             self._active_turn_task = None
@@ -998,9 +1001,10 @@ class ErgonStudioApp(App[None]):
 
     def _replace_runtime(self, runtime: RuntimeContext, *, notice: str | None = None) -> None:
         self._stop_live_subscription()
+        self._stop_runtime_event_subscription()
         self.runtime = runtime
-        self.runtime.set_event_callback(self._on_runtime_event)
         self._start_live_subscription()
+        self._start_runtime_event_subscription()
         self.selected_workflow_run_id = None
         self._timeline_notices = []
         self._hidden_main_message_ids = set()
@@ -1136,6 +1140,30 @@ class ErgonStudioApp(App[None]):
         try:
             async for _event in subscription:
                 self._refresh_timeline()
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            return
+
+    def _start_runtime_event_subscription(self) -> None:
+        self._stop_runtime_event_subscription()
+        self._runtime_event_subscription = self.runtime.event_stream.subscribe()
+        self._runtime_event_task = asyncio.create_task(self._watch_runtime_events())
+
+    def _stop_runtime_event_subscription(self) -> None:
+        if self._runtime_event_subscription is not None:
+            self._runtime_event_subscription.close()
+            self._runtime_event_subscription = None
+        if self._runtime_event_task is not None:
+            self._runtime_event_task.cancel()
+            self._runtime_event_task = None
+
+    async def _watch_runtime_events(self) -> None:
+        subscription = self._runtime_event_subscription
+        if subscription is None:
+            return
+        try:
+            async for event in subscription:
+                self._on_runtime_event(event.kind)
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             return

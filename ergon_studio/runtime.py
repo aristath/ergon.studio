@@ -27,6 +27,7 @@ from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry, load_registry
+from ergon_studio.runtime_events import RuntimeEventStream
 from ergon_studio.session_store import SessionStore, default_session_title
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
@@ -133,11 +134,11 @@ class RuntimeContext:
     tool_call_store: ToolCallStore
     retrieval_index: RetrievalIndex
     live_state: LiveRuntimeState
+    event_stream: RuntimeEventStream
     main_session_id: str
     main_thread_id: str
     _accumulated_tokens: int
     _compaction_failure_count: int
-    _event_callback: object  # Optional: (kind: str, summary: str) -> None
 
     def build_agent(self, agent_id: str):
         return build_agent(
@@ -2899,13 +2900,6 @@ class RuntimeContext:
         )
         return [workroom]
 
-    def set_event_callback(self, callback) -> None:
-        """Register a callback for real-time event notifications.
-
-        The callback is called as callback(kind, summary) for each event.
-        """
-        object.__setattr__(self, "_event_callback", callback)
-
     def append_event(
         self,
         *,
@@ -2924,11 +2918,7 @@ class RuntimeContext:
             thread_id=thread_id,
             task_id=task_id,
         )
-        if self._event_callback is not None:
-            try:
-                self._event_callback(kind, summary)
-            except Exception:
-                pass
+        self.event_stream.publish(record)
         return record
 
     def request_approval(
@@ -3326,11 +3316,11 @@ def load_runtime(
         tool_call_store=tool_call_store,
         retrieval_index=retrieval_index,
         live_state=LiveRuntimeState(),
+        event_stream=RuntimeEventStream(),
         main_session_id=resolved_session.id,
         main_thread_id=_main_thread_id_for_session(resolved_session.id),
         _accumulated_tokens=0,
         _compaction_failure_count=0,
-        _event_callback=None,
     )
     object.__setattr__(
         runtime,

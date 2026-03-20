@@ -1,5 +1,6 @@
 from ergon_studio.proxy.chat_adapter import encode_chat_stream_done, encode_chat_stream_event, encode_chat_stream_sse
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
+from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -16,9 +17,11 @@ __all__ = [
     "ProxyFinishEvent",
     "ProxyFunctionTool",
     "ProxyInputMessage",
+    "ProxyOrchestrationCore",
     "ProxyReasoningDeltaEvent",
     "ProxyToolCall",
     "ProxyToolCallEvent",
+    "ProxyTurnResult",
     "ProxyTurnRequest",
     "encode_chat_stream_done",
     "encode_chat_stream_event",

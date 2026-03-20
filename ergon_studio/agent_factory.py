@@ -32,6 +32,8 @@ def build_agent(
     event_store: EventStore | None = None,
     tool_call_store: ToolCallStore | None = None,
     retrieval_index: RetrievalIndex | None = None,
+    ignore_missing_tools: bool = False,
+    include_mcp_servers: bool = True,
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
@@ -46,7 +48,16 @@ def build_agent(
         tool_call_store=tool_call_store,
     )
     tool_calling_enabled = provider_capabilities.get("tool_calling", True) is not False
-    tools = _resolve_tools(definition, tool_registry or {}) if tool_calling_enabled else []
+    tools = (
+        _resolve_tools(
+            definition,
+            tool_registry or {},
+            ignore_missing_tools=ignore_missing_tools,
+            include_mcp_servers=include_mcp_servers,
+        )
+        if tool_calling_enabled
+        else []
+    )
     context_providers = _build_context_providers(
         registry=registry,
         definition=definition,
@@ -142,6 +153,9 @@ def _build_client(
 def _resolve_tools(
     definition: DefinitionDocument,
     tool_registry: Mapping[str, Callable[..., Any]],
+    *,
+    ignore_missing_tools: bool = False,
+    include_mcp_servers: bool = True,
 ) -> list[object]:
     tool_names = definition.metadata.get("tools", [])
     if tool_names and not isinstance(tool_names, list):
@@ -150,9 +164,12 @@ def _resolve_tools(
     resolved: list[Callable[..., Any] | object] = []
     for tool_name in tool_names or []:
         if tool_name not in tool_registry:
+            if ignore_missing_tools:
+                continue
             raise ValueError(f"unknown tool: {tool_name}")
         resolved.append(tool_registry[tool_name])
-    resolved.extend(_resolve_mcp_tools(definition))
+    if include_mcp_servers:
+        resolved.extend(_resolve_mcp_tools(definition))
     return resolved
 
 

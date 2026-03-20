@@ -128,6 +128,63 @@ Lead engineer.
             with self.assertRaisesRegex(ValueError, "unknown tool"):
                 build_agent(registry, "orchestrator", tool_registry={})
 
+    def test_build_agent_can_ignore_missing_tools_for_proxy_use(self) -> None:
+        from ergon_studio.agent_factory import build_agent
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            home_dir = base / "home"
+            project_root = base / "repo"
+            home_dir.mkdir()
+            project_root.mkdir()
+            paths = StudioPaths(
+                home_dir=home_dir,
+                project_root=project_root,
+                project_uuid=UUID("12345678-1234-5678-1234-567812345678"),
+            )
+            paths.ensure_global_layout()
+            save_global_config(
+                paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                        }
+                    },
+                    "role_assignments": {"orchestrator": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+            (paths.agents_dir / "orchestrator.md").write_text(
+                """---
+id: orchestrator
+name: Orchestrator
+role: orchestrator
+tools:
+  - read_file
+---
+## Identity
+Lead engineer.
+""",
+                encoding="utf-8",
+            )
+            registry = load_registry(paths)
+
+            agent = build_agent(
+                registry,
+                "orchestrator",
+                tool_registry={},
+                ignore_missing_tools=True,
+                include_mcp_servers=False,
+            )
+
+            self.assertEqual(agent.id, "orchestrator")
+            self.assertEqual(agent.default_options["tools"], [])
+
     def test_build_agent_can_resolve_seeded_researcher_tools(self) -> None:
         from ergon_studio.agent_factory import build_agent
         from ergon_studio.artifact_store import ArtifactStore

@@ -120,6 +120,34 @@ class ProxyChatBridgeTests(unittest.TestCase):
         self.assertEqual([message.role for message in request.messages], ["system", "user"])
         self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
 
+    def test_normalizes_legacy_function_call_history(self) -> None:
+        request = parse_chat_completion_request(
+            {
+                "model": "ergon",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"main.py\"}",
+                        },
+                    },
+                    {
+                        "role": "function",
+                        "name": "read_file",
+                        "content": "print('hello')",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(request.messages[0].role, "assistant")
+        self.assertEqual(request.messages[0].tool_calls[0].id, "legacy_call_0")
+        self.assertEqual(request.messages[0].tool_calls[0].name, "read_file")
+        self.assertEqual(request.messages[1].role, "tool")
+        self.assertEqual(request.messages[1].tool_call_id, "legacy_call_0")
+
     def test_parses_specific_function_tool_choice(self) -> None:
         request = parse_chat_completion_request(
             {

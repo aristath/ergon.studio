@@ -16,7 +16,7 @@ def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     if not isinstance(raw_messages, list):
         raise ValueError("chat completion request must include a messages list")
 
-    messages = tuple(_parse_message(item) for item in raw_messages)
+    messages = tuple(_parse_messages(raw_messages))
     tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
     stream = payload.get("stream", False)
     if type(stream) is not bool:
@@ -41,7 +41,20 @@ def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     )
 
 
-def _parse_message(payload: Any) -> ProxyInputMessage:
+def _parse_messages(raw_messages: list[Any]) -> list[ProxyInputMessage]:
+    messages: list[ProxyInputMessage] = []
+    pending_legacy_call_ids: list[str] = []
+    for index, payload in enumerate(raw_messages):
+        message = _parse_message(payload, index=index, pending_legacy_call_ids=pending_legacy_call_ids)
+        messages.append(message)
+        if message.role == "assistant" and message.tool_calls:
+            pending_legacy_call_ids.extend(tool_call.id for tool_call in message.tool_calls)
+        elif message.role == "tool" and pending_legacy_call_ids:
+            pending_legacy_call_ids.pop(0)
+    return messages
+
+
+def _parse_message(payload: Any, *, index: int, pending_legacy_call_ids: list[str]) -> ProxyInputMessage:
     if not isinstance(payload, dict):
         raise ValueError("messages must contain objects")
     role = payload.get("role")
@@ -55,12 +68,21 @@ def _parse_message(payload: Any) -> ProxyInputMessage:
         if not isinstance(tool_calls, list):
             raise ValueError("assistant tool_calls must be a list")
         parsed_tool_calls = tuple(parse_function_tool_call(item) for item in tool_calls)
+    elif normalized_role == "assistant":
+        legacy_function_call = payload.get("function_call")
+        if legacy_function_call is not None:
+            parsed_tool_calls = (_parse_legacy_function_call(legacy_function_call, index=index),)
+
+    tool_call_id = optional_non_empty_text(payload.get("tool_call_id"))
+    if normalized_role == "function":
+        normalized_role = "tool"
+        tool_call_id = pending_legacy_call_ids[0] if pending_legacy_call_ids else f"legacy_call_{index}"
 
     return ProxyInputMessage(
         role=normalized_role,
         content=normalize_message_content(payload.get("content")),
         name=optional_non_empty_text(payload.get("name")),
-        tool_call_id=optional_non_empty_text(payload.get("tool_call_id")),
+        tool_call_id=tool_call_id,
         tool_calls=parsed_tool_calls,
     )
 
@@ -70,3 +92,19 @@ def _normalize_message_role(role: str) -> str:
     if stripped.casefold() == "developer":
         return "system"
     return stripped
+
+
+def _parse_legacy_function_call(payload: Any, *, index: int) -> ProxyToolCall:
+    if not isinstance(payload, dict):
+        raise ValueError("assistant function_call must be an object")
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("assistant function_call must include a non-empty name")
+    arguments = payload.get("arguments", "")
+    if not isinstance(arguments, str):
+        raise ValueError("assistant function_call arguments must be a string")
+    return ProxyToolCall(
+        id=f"legacy_call_{index}",
+        name=name.strip(),
+        arguments_json=arguments,
+    )

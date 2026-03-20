@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _next_followup_cycle, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _required_tool_names_for_workflow, _supports_auto_repair, _workflow_review_evidence_lines
+from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _next_followup_cycle, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _required_tool_names_for_workflow, _workflow_review_evidence_lines
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
@@ -70,12 +70,6 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 tool_mode="default",
             ),
         )
-
-    def test_auto_repair_support_is_limited_to_delivery_workflows(self) -> None:
-        self.assertTrue(_supports_auto_repair("standard-build"))
-        self.assertTrue(_supports_auto_repair("best-of-n"))
-        self.assertTrue(_supports_auto_repair("test-driven-repair"))
-        self.assertFalse(_supports_auto_repair("architecture-first"))
 
     def test_required_tool_names_match_execution_roles(self) -> None:
         self.assertEqual(_required_tool_names("coder"), ("write_file", "patch_file"))
@@ -172,49 +166,6 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 "",
             ],
         )
-
-    def test_next_followup_cycle_prefers_clarification_for_missing_tool_evidence(self) -> None:
-        runtime = SimpleNamespace(
-            registry=SimpleNamespace(
-                agent_definitions={"coder": object()},
-                workflow_definitions={
-                    "single-agent-execution": SimpleNamespace(
-                        metadata={"max_clarification_cycles": 2, "max_repair_cycles": 1}
-                    )
-                },
-            ),
-            _workflow_changed_files=lambda workflow_run_id: [],
-        )
-        tracker = _ExecutionTracker(
-            blocked_step_index=0,
-            blocked_thread_id="thread-1",
-            blocked_summary="coder replied without tool evidence.",
-            blocked_reason="missing_tool_evidence",
-            thread_outputs={"thread-1": "coder:\nThe implementation already exists."},
-        )
-        run_view = SimpleNamespace(
-            workflow_run=SimpleNamespace(id="workflow-run-1"),
-            steps=(
-                SimpleNamespace(
-                    threads=(SimpleNamespace(id="thread-1", assigned_agent_id="coder", summary="coder"),),
-                ),
-            ),
-        )
-
-        followup = _next_followup_cycle(
-            runtime=runtime,
-            workflow_id="single-agent-execution",
-            goal="Ship the implementation.",
-            tracker=tracker,
-            run_view=run_view,
-        )
-
-        self.assertIsNotNone(followup)
-        assert followup is not None
-        self.assertEqual(followup.cycle_kind, "clarify")
-        self.assertEqual(followup.step_groups, (("coder",),))
-        self.assertEqual(followup.tool_mode, "none")
-        self.assertIn("files, artifacts, or command results", followup.payload)
 
     def test_next_followup_cycle_stops_for_request_info_blocks(self) -> None:
         runtime = SimpleNamespace(

@@ -2027,35 +2027,6 @@ def _next_followup_cycle(
     if tracker.blocked_reason == "request_info":
         return None
 
-    if tracker.blocked_reason == "missing_tool_evidence":
-        blocked_agent = _blocked_agent_id(run_view=run_view, tracker=tracker)
-        if (
-            blocked_agent is not None
-            and blocked_agent in runtime.registry.agent_definitions
-            and tracker.clarification_cycles < _max_clarification_cycles(runtime, workflow_id)
-        ):
-            tracker.clarification_cycles += 1
-            return WorkflowFollowupPlan(
-                cycle_kind="clarify",
-                step_groups=((blocked_agent,),),
-                event_kind="workflow_clarification_requested",
-                event_summary=f"Requesting evidence clarification from {blocked_agent}",
-                payload=_render_followup_payload(
-                    runtime=runtime,
-                    workflow_id=workflow_id,
-                    goal=goal,
-                    tracker=tracker,
-                    run_view=run_view,
-                    cycle_kind="clarify",
-                    custom_request=(
-                        "Explain whether the current workspace already satisfies the goal and cite the concrete "
-                        "files, artifacts, or command results that prove it. If no further tool use is needed, "
-                        "state why plainly and directly."
-                    ),
-                ),
-                tool_mode="none",
-            )
-
     if tracker.review_requires_replan:
         replan_groups = _replan_step_groups(runtime, workflow_id)
         if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
@@ -2560,19 +2531,6 @@ def _render_workflow_report(
     if tracker.replan_cycles:
         lines.extend(["", f"- Automatic replanning cycles: {tracker.replan_cycles}"])
     return "\n".join(lines).strip()
-
-
-def _supports_auto_repair(workflow_id: str) -> bool:
-    return workflow_id in {
-        "standard-build",
-        "single-agent-execution",
-        "best-of-n",
-        "review-repair-loop",
-        "review-driven-repair",
-        "test-driven-repair",
-    }
-
-
 def _required_tool_names(agent_id: str) -> tuple[str, ...]:
     requirements = {
         "coder": ("write_file", "patch_file"),

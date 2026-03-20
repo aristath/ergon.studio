@@ -6,6 +6,9 @@ import time
 
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
+from ergon_studio.proxy.core import ProxyOrchestrationCore
+from ergon_studio.proxy.server import serve_proxy
+from ergon_studio.registry import load_registry
 from ergon_studio.session_store import SessionStore
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import ErgonStudioApp
@@ -26,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval")
     _add_project_args(eval_parser)
     _add_session_args(eval_parser)
+
+    serve_parser = subparsers.add_parser("serve")
+    _add_project_args(serve_parser)
+    serve_parser.add_argument("--host", type=str, default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=4000)
 
     sessions_parser = subparsers.add_parser("sessions")
     session_subparsers = sessions_parser.add_subparsers(dest="sessions_command", required=True)
@@ -113,6 +121,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"report={report_path}")
         for result in results:
             print(f"{result.name}:{result.status}:{result.details}")
+        return 0
+
+    if args.command == "serve":
+        paths = bootstrap_workspace(
+            project_root=args.project_root,
+            home_dir=args.home_dir,
+        )
+        registry = load_registry(paths)
+        core = ProxyOrchestrationCore(registry)
+        serve_proxy(
+            host=args.host,
+            port=args.port,
+            core=core,
+        )
         return 0
 
     if args.command == "sessions":

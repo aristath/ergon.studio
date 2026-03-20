@@ -64,6 +64,35 @@ class CliTests(unittest.TestCase):
             self.assertIn("report=", output)
             self.assertIn("workflow_compilation", output)
 
+    def test_serve_command_bootstraps_registry_and_starts_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            with patch("ergon_studio.cli.serve_proxy") as serve_proxy:
+                exit_code = main(
+                    [
+                        "serve",
+                        "--project-root",
+                        str(project_root),
+                        "--home-dir",
+                        str(home_dir),
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        "4242",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            serve_proxy.assert_called_once()
+            _, kwargs = serve_proxy.call_args
+            self.assertEqual(kwargs["host"], "0.0.0.0")
+            self.assertEqual(kwargs["port"], 4242)
+
     def test_sessions_new_and_list_commands_manage_project_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

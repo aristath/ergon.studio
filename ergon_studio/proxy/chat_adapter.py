@@ -77,3 +77,33 @@ def encode_chat_stream_sse(
 
 def encode_chat_stream_done() -> bytes:
     return b"data: [DONE]\n\n"
+
+
+def build_chat_completion_response(
+    *,
+    completion_id: str,
+    model: str,
+    created_at: int,
+    content: str,
+    finish_reason: str,
+    reasoning: str = "",
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": content,
+    }
+    if reasoning:
+        message["reasoning_content"] = reasoning
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created_at,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }

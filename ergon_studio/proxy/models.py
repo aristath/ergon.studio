@@ -5,6 +5,7 @@ from typing import Any
 
 
 _VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
+_VALID_FINISH_REASONS = {"stop", "tool_calls", "length", "content_filter", "error"}
 
 
 @dataclass(frozen=True)
@@ -97,3 +98,39 @@ class ProxyTurnRequest:
         if message is None:
             return None
         return message.content
+
+
+@dataclass(frozen=True)
+class ProxyReasoningDeltaEvent:
+    delta: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.delta, str):
+            raise TypeError("delta must be a string")
+
+
+@dataclass(frozen=True)
+class ProxyContentDeltaEvent:
+    delta: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.delta, str):
+            raise TypeError("delta must be a string")
+
+
+@dataclass(frozen=True)
+class ProxyToolCallEvent:
+    call: ProxyToolCall
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call, ProxyToolCall):
+            raise TypeError("call must be a ProxyToolCall")
+
+
+@dataclass(frozen=True)
+class ProxyFinishEvent:
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in _VALID_FINISH_REASONS:
+            raise ValueError(f"unsupported finish reason: {self.reason}")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.models import ProxyFunctionTool, ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyFunctionTool, ProxyInputMessage, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent, ProxyTurnRequest
 
 
 class ProxyModelsTests(unittest.TestCase):
@@ -57,6 +57,20 @@ class ProxyModelsTests(unittest.TestCase):
                 description="Read a file",
                 parameters="not-an-object",  # type: ignore[arg-type]
             )
+
+    def test_finish_event_rejects_unknown_reason(self) -> None:
+        with self.assertRaises(ValueError):
+            ProxyFinishEvent("bad-reason")
+
+    def test_output_events_validate_types(self) -> None:
+        self.assertEqual(ProxyReasoningDeltaEvent("plan").delta, "plan")
+        self.assertEqual(ProxyContentDeltaEvent("done").delta, "done")
+        self.assertEqual(
+            ProxyToolCallEvent(
+                ProxyToolCall(id="call_1", name="read_file", arguments_json="{}")
+            ).call.name,
+            "read_file",
+        )
 
 
 if __name__ == "__main__":

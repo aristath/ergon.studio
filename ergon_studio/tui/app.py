@@ -956,12 +956,14 @@ class ErgonStudioApp(App[None]):
         elif command == "/workflow":
             if not args:
                 self._add_notice("Usage: /workflow <name>", level="error")
-            elif args in self.runtime.list_workflow_ids():
-                self.selected_workflow_id = args
-                self._add_notice(f"Selected workflow: {args}", level="info")
-                self._refresh_info()
             else:
-                self._add_notice(f"Unknown workflow: {args}", level="error")
+                workflow_id = self.runtime.resolve_workflow_reference(args)
+                if workflow_id is None:
+                    self._add_notice(f"Unknown workflow: {args}", level="error")
+                else:
+                    self.selected_workflow_id = workflow_id
+                    self._add_notice(f"Selected workflow: {workflow_id}", level="info")
+                    self._refresh_info()
         elif command == "/agent":
             if not args:
                 self._add_notice("Usage: /agent <name>", level="error")

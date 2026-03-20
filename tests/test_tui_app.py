@@ -1288,6 +1288,16 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(app.selected_workflow_id, workflow_ids[0])
 
+    async def test_workflow_accepts_selection_hint(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/workflow tiny_delivery"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.selected_workflow_id, "single-agent-execution")
+
     async def test_agent_command_switches_composer_to_direct_thread(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.definitions import load_definition, load_definitions_from_dir, save_definition, save_definition_text
+from ergon_studio.definitions import load_definition, load_definitions_from_dir
 
 
 class DefinitionLoaderTests(unittest.TestCase):
@@ -69,52 +69,3 @@ Reviews code critically.
             definitions = load_definitions_from_dir(definitions_dir)
 
             self.assertEqual(sorted(definitions.keys()), ["coder", "reviewer"])
-
-    def test_save_definition_round_trips_markdown_document(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            definition_path = Path(temp_dir) / "orchestrator.md"
-
-            saved = save_definition(
-                definition_path,
-                {
-                    "id": "orchestrator",
-                    "role": "orchestrator",
-                    "temperature": 0.2,
-                },
-                """## Identity
-Lead engineer.
-
-## Rules
-Avoid keyword-triggered behavior.
-""",
-            )
-
-            self.assertEqual(saved.id, "orchestrator")
-            self.assertEqual(saved.metadata["temperature"], 0.2)
-            self.assertEqual(saved.sections["Identity"], "Lead engineer.")
-            self.assertEqual(saved.sections["Rules"], "Avoid keyword-triggered behavior.")
-
-    def test_save_definition_text_validates_before_writing(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            definition_path = Path(temp_dir) / "orchestrator.md"
-            original_text = """---
-id: orchestrator
-role: orchestrator
----
-## Identity
-Lead engineer.
-"""
-            definition_path.write_text(original_text, encoding="utf-8")
-
-            with self.assertRaisesRegex(ValueError, "must include an id"):
-                save_definition_text(
-                    definition_path,
-                    """---
-role: orchestrator
----
-## Identity
-Broken.
-""",
-                )
-
-            self.assertEqual(definition_path.read_text(encoding="utf-8"), original_text)

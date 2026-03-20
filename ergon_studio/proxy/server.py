@@ -23,6 +23,7 @@ from ergon_studio.proxy.responses_adapter import (
     encode_responses_stream_sse,
 )
 from ergon_studio.proxy.responses_bridge import parse_responses_request
+from ergon_studio.provider_health import probe_endpoint_models
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
@@ -317,13 +318,27 @@ def _available_models(registry) -> list[dict[str, Any]]:
     providers = registry.config.get("providers", {})
     if not isinstance(providers, dict):
         return []
-    model_ids = sorted(
-        {
-            str(provider.get("model", "")).strip()
-            for provider in providers.values()
-            if isinstance(provider, dict) and str(provider.get("model", "")).strip()
-        }
-    )
+    model_ids: set[str] = set()
+    for provider in providers.values():
+        if not isinstance(provider, dict):
+            continue
+        if str(provider.get("type", "openai_chat")).strip() != "openai_chat":
+            continue
+        base_url = str(provider.get("base_url", "")).strip()
+        api_key = str(provider.get("api_key", "")).strip() or None
+        if base_url:
+            try:
+                live_models = probe_endpoint_models(base_url, api_key, timeout=5)
+            except Exception:
+                live_models = []
+            for model in live_models:
+                model_id = str(model.get("id", "")).strip()
+                if model_id:
+                    model_ids.add(model_id)
+        configured_model = str(provider.get("model", "")).strip()
+        if configured_model:
+            model_ids.add(configured_model)
+    sorted_model_ids = sorted(model_ids)
     now = int(time.time())
     return [
         {
@@ -332,7 +347,7 @@ def _available_models(registry) -> list[dict[str, Any]]:
             "created": now,
             "owned_by": "ergon-studio",
         }
-        for model_id in model_ids
+        for model_id in sorted_model_ids
     ]
 
 

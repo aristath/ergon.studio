@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from unittest.mock import patch
 
 from agent_framework import ResponseStream
 
@@ -18,18 +19,43 @@ from ergon_studio.registry import RuntimeRegistry
 
 class ProxyServerTests(unittest.TestCase):
     def test_models_endpoint_lists_ergon_model(self) -> None:
-        handle = start_proxy_server_in_thread(
-            host="127.0.0.1",
-            port=0,
-            core=_FakeCore([]),
-        )
-        self.addCleanup(handle.close)
+        with patch("ergon_studio.proxy.server.probe_endpoint_models", side_effect=RuntimeError("offline")):
+            handle = start_proxy_server_in_thread(
+                host="127.0.0.1",
+                port=0,
+                core=_FakeCore([]),
+            )
+            self.addCleanup(handle.close)
 
-        with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
+                payload = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(payload["object"], "list")
         self.assertEqual(payload["data"][0]["id"], "qwen2.5-coder")
+
+    def test_models_endpoint_prefers_live_upstream_models_when_available(self) -> None:
+        with patch(
+            "ergon_studio.proxy.server.probe_endpoint_models",
+            return_value=[
+                {"id": "gpt-oss-20b"},
+                {"id": "qwen3-coder-next"},
+            ],
+        ):
+            handle = start_proxy_server_in_thread(
+                host="127.0.0.1",
+                port=0,
+                core=_FakeCore([]),
+            )
+            self.addCleanup(handle.close)
+
+            with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["object"], "list")
+        self.assertEqual(
+            [entry["id"] for entry in payload["data"]],
+            ["gpt-oss-20b", "qwen2.5-coder", "qwen3-coder-next"],
+        )
 
     def test_chat_completions_echo_requested_model(self) -> None:
         handle = start_proxy_server_in_thread(
@@ -805,6 +831,7 @@ class _FakeCore:
                     "providers": {
                         "local": {
                             "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
                             "model": "qwen2.5-coder",
                         }
                     }

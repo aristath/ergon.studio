@@ -4,6 +4,7 @@ import unittest
 
 from agent_framework import ResponseStream
 from openai import OpenAI
+from unittest.mock import patch
 
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.models import ProxyTurnResult
@@ -203,15 +204,16 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         self.assertEqual(events[-1].type, "response.completed")
 
     def test_models_list_returns_proxy_model_id(self) -> None:
-        handle = start_proxy_server_in_thread(
-            host="127.0.0.1",
-            port=0,
-            core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
-        )
-        self.addCleanup(handle.close)
-        client = _client(handle.port)
+        with patch("ergon_studio.proxy.server.probe_endpoint_models", side_effect=RuntimeError("offline")):
+            handle = start_proxy_server_in_thread(
+                host="127.0.0.1",
+                port=0,
+                core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+            )
+            self.addCleanup(handle.close)
+            client = _client(handle.port)
 
-        models = client.models.list()
+            models = client.models.list()
 
         self.assertEqual(models.data[0].id, "qwen2.5-coder")
 
@@ -229,6 +231,7 @@ class _FakeCore:
                     "providers": {
                         "local": {
                             "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
                             "model": "qwen2.5-coder",
                         }
                     }

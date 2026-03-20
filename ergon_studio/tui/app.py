@@ -12,6 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.live_runtime import LiveRuntimeEvent, LiveRuntimeSubscription
+from ergon_studio.provider_health import ProviderHealthResult, probe_all_providers
 from ergon_studio.runtime import RuntimeContext, load_runtime
 from ergon_studio.storage.models import MessageRecord
 from ergon_studio.tui.inspectors import (
@@ -76,6 +77,13 @@ class PendingTurn:
     created_at: int
     target: ComposeTarget
     completion: asyncio.Future[None]
+
+
+@dataclass(frozen=True)
+class SlashSuggestion:
+    label: str
+    replacement: str
+    auto_submit: bool = False
 
 
 class DefinitionEditorScreen(ModalScreen[None]):
@@ -249,6 +257,7 @@ class ErgonStudioApp(App[None]):
         self._live_subscription_task: asyncio.Task[None] | None = None
         self._live_refresh_task: asyncio.Task[None] | None = None
         self._compose_target = self._orchestrator_target()
+        self._slash_suggestions: list[SlashSuggestion] = []
 
     def _default_workflow_id(self) -> str | None:
         summaries = self.runtime.list_workflow_summaries()
@@ -307,6 +316,71 @@ class ErgonStudioApp(App[None]):
             return
         composer.placeholder = self._composer_placeholder()
 
+    def _slash_command_suggestions(self, value: str) -> list[SlashSuggestion]:
+        text = value.strip()
+        if not text.startswith("/"):
+            return []
+
+        if " " not in text:
+            prefix = text.lower()
+            return [
+                SlashSuggestion(
+                    label=f"{cmd}  [dim]{desc}[/dim]",
+                    replacement=cmd,
+                    auto_submit=cmd not in {
+                        "/workflow",
+                        "/agent",
+                        "/new-session",
+                        "/rename-session",
+                        "/archive-session",
+                        "/switch-session",
+                    },
+                )
+                for cmd, desc in SLASH_COMMANDS
+                if cmd.startswith(prefix)
+            ]
+
+        command, raw_arg = text.split(" ", 1)
+        arg_prefix = raw_arg.strip().lower()
+        suggestions: list[SlashSuggestion] = []
+
+        if command == "/agent":
+            for agent_id in self.runtime.list_agent_ids():
+                if arg_prefix and not agent_id.lower().startswith(arg_prefix):
+                    continue
+                suggestions.append(
+                    SlashSuggestion(
+                        label=f"{command} {agent_id}  [dim]open a direct thread[/dim]",
+                        replacement=f"{command} {agent_id}",
+                        auto_submit=True,
+                    )
+                )
+        elif command == "/workflow":
+            for workflow_id in self.runtime.list_workflow_ids():
+                if arg_prefix and not workflow_id.lower().startswith(arg_prefix):
+                    continue
+                suggestions.append(
+                    SlashSuggestion(
+                        label=f"{command} {workflow_id}  [dim]select workflow[/dim]",
+                        replacement=f"{command} {workflow_id}",
+                        auto_submit=True,
+                    )
+                )
+        elif command in {"/switch-session", "/archive-session"}:
+            for session in self.runtime.list_sessions(include_archived=command == "/switch-session"):
+                haystack = f"{session.id} {session.title}".lower()
+                if arg_prefix and arg_prefix not in haystack:
+                    continue
+                suggestions.append(
+                    SlashSuggestion(
+                        label=f"{command} {session.id}  [dim]{session.title}[/dim]",
+                        replacement=f"{command} {session.id}",
+                        auto_submit=True,
+                    )
+                )
+
+        return suggestions
+
     def _target_notice_label(self, target: ComposeTarget) -> str:
         if target.thread_id is None:
             return "the orchestrator"
@@ -316,6 +390,75 @@ class ErgonStudioApp(App[None]):
         if turn.target.thread_id is None:
             return "Thinking"
         return f"Working with {turn.target.label}"
+
+    async def _provider_health(self) -> list[ProviderHealthResult]:
+        return await asyncio.to_thread(
+            probe_all_providers,
+            self.runtime.registry.config,
+            timeout=5,
+        )
+
+    async def _status_notice_body(self) -> str:
+        providers = self.runtime.list_provider_ids()
+        if not providers:
+            return "[bold]Provider status:[/bold]\n  [red]No providers configured.[/red] Use /config"
+
+        health_results = await self._provider_health()
+        if not health_results:
+            return "[bold]Provider status:[/bold]\n  [red]No valid provider definitions found.[/red]"
+
+        lines = ["[bold]Provider status:[/bold]"]
+        for result in health_results:
+            if result.ok:
+                suffix = f"{result.model} @ {result.base_url}"
+                if result.model_count:
+                    suffix += f" [dim]({result.model_count} models)[/dim]"
+                lines.append(f"  [green]●[/green] {result.name}: {suffix}")
+            else:
+                lines.append(
+                    f"  [red]●[/red] {result.name}: {result.model or 'unknown-model'} @ {result.base_url or '(missing url)'}"
+                )
+                if result.error:
+                    lines.append(f"    [dim]{result.error}[/dim]")
+        return "\n".join(lines)
+
+    async def _doctor_notice(self) -> tuple[str, str, str]:
+        issues: list[str] = []
+        suggestions: list[str] = []
+        health_results = await self._provider_health()
+
+        if not self.runtime.list_provider_ids():
+            issues.append("[red]✗[/red] No providers configured")
+            suggestions.append("Use /config to add at least one OpenAI-compatible provider.")
+
+        for result in health_results:
+            if not result.ok:
+                issues.append(f"[red]✗[/red] Provider {result.name}: {result.error or 'health check failed'}")
+                suggestions.append(f"Check {result.name} at {result.base_url or '(missing url)'} and verify its model list.")
+
+        for agent_id in self.runtime.list_agent_ids():
+            reason = self.runtime.agent_unavailable_reason(agent_id)
+            if reason is None:
+                continue
+            issues.append(f"[red]✗[/red] {agent_id}: {reason}")
+            if "no provider assigned" in reason:
+                suggestions.append(f"Assign a provider to {agent_id} in /config.")
+            elif "not defined" in reason:
+                suggestions.append(f"Fix the provider assignment for {agent_id} in /config.")
+
+        if not issues:
+            return (
+                "Doctor",
+                "All checks passed.\n\n[green]Providers are reachable and every agent can be constructed.[/green]",
+                "success",
+            )
+
+        lines = ["[bold]Issues found:[/bold]", *issues]
+        if suggestions:
+            deduped = list(dict.fromkeys(suggestions))
+            lines.extend(["", "[bold]Suggested fixes[/bold]"])
+            lines.extend(f"- {suggestion}" for suggestion in deduped)
+        return ("Doctor", "\n".join(lines), "info")
 
     def _maybe_surface_unavailable_target(self, target: ComposeTarget) -> None:
         if target.agent_id is None:
@@ -376,21 +519,13 @@ class ErgonStudioApp(App[None]):
             cmd_list = self.query_one("#slash-commands", OptionList)
         except (NoMatches, ScreenStackError):
             return
-        if value.startswith("/") and " " not in value:
-            prefix = value.lower()
-            matches = [
-                f"{cmd}  [dim]{desc}[/dim]"
-                for cmd, desc in SLASH_COMMANDS
-                if cmd.startswith(prefix)
-            ]
-            cmd_list.clear_options()
-            if matches:
-                for item in matches:
-                    cmd_list.add_option(item)
-                cmd_list.add_class("visible")
-                cmd_list.highlighted = 0
-            else:
-                cmd_list.remove_class("visible")
+        self._slash_suggestions = self._slash_command_suggestions(value)
+        cmd_list.clear_options()
+        if self._slash_suggestions:
+            for suggestion in self._slash_suggestions:
+                cmd_list.add_option(suggestion.label)
+            cmd_list.add_class("visible")
+            cmd_list.highlighted = 0
         else:
             cmd_list.remove_class("visible")
 
@@ -399,23 +534,19 @@ class ErgonStudioApp(App[None]):
             return
         if not self.is_mounted:
             return
-        # Extract the command from "  /cmd  description"
-        text = str(event.option.prompt).strip()
-        cmd = text.split()[0] if text else ""
+        index = event.option_list.highlighted
+        if index is None or index < 0 or index >= len(self._slash_suggestions):
+            return
+        suggestion = self._slash_suggestions[index]
         try:
             inp = self.query_one("#composer-input", ComposerTextArea)
         except (NoMatches, ScreenStackError):
             return
-        # If command takes args, put cursor after it with a space
-        if cmd in ("/workflow", "/agent", "/new-session", "/rename-session", "/archive-session", "/switch-session"):
-            inp.value = cmd + " "
-        else:
-            inp.value = cmd
+        inp.value = suggestion.replacement
         event.option_list.remove_class("visible")
         self.set_focus(inp)
-        # Auto-submit commands that don't need args
-        if cmd not in ("/workflow", "/agent", "/new-session", "/rename-session", "/archive-session", "/switch-session"):
-            inp.post_message(ComposerTextArea.Submitted(inp, cmd))
+        if suggestion.auto_submit:
+            inp.post_message(ComposerTextArea.Submitted(inp, suggestion.replacement))
 
     def on_key(self, event) -> None:
         """Route arrow keys to command list; double-escape to rewind."""
@@ -809,30 +940,21 @@ class ErgonStudioApp(App[None]):
             else:
                 self._add_notice("Use /config to change model assignments.", level="info")
         elif command == "/status":
-            lines = ["[bold]Provider status:[/bold]"]
-            for pid in self.runtime.list_provider_ids():
-                details = self.runtime.provider_details(pid)
-                if details:
-                    model = details.get("model", "?")
-                    url = details.get("base_url", "?")
-                    lines.append(f"  [green]●[/green] {pid}: {model} @ {url}")
-                else:
-                    lines.append(f"  [red]●[/red] {pid}: invalid config")
-            if not self.runtime.list_provider_ids():
-                lines.append("  [red]No providers configured.[/red] Use /config")
-            self._add_notice("\n".join(lines), title="Status")
+            thinking = self.query_one("#thinking", ThinkingIndicator)
+            thinking.show("Checking providers")
+            try:
+                body = await self._status_notice_body()
+            finally:
+                thinking.hide()
+            self._add_notice(body, title="Status")
         elif command == "/doctor":
-            issues: list[str] = []
-            if not self.runtime.list_provider_ids():
-                issues.append("[red]✗[/red] No providers configured")
-            for agent_id in self.runtime.list_agent_ids():
-                summary = self.runtime.agent_status_summary(agent_id)
-                if "not configured" in summary:
-                    issues.append(f"[red]✗[/red] {agent_id}: {summary}")
-            if not issues:
-                self._add_notice("All checks passed. Providers configured, agents ready.", level="success", title="Doctor")
-            else:
-                self._add_notice("[bold]Issues found:[/bold]\n" + "\n".join(issues), title="Doctor")
+            thinking = self.query_one("#thinking", ThinkingIndicator)
+            thinking.show("Running doctor")
+            try:
+                title, body, level = await self._doctor_notice()
+            finally:
+                thinking.hide()
+            self._add_notice(body, title=title, level=level)
         elif command == "/team":
             from ergon_studio.tui.widgets import AGENT_SPRITES, AGENT_COLORS
             lines = ["[bold]Team:[/bold]"]

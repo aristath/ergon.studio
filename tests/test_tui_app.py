@@ -9,6 +9,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from agent_framework import AgentSession, ResponseStream
+from textual.containers import VerticalScroll
 from textual.widgets import Input, OptionList
 
 from ergon_studio.runtime import load_runtime
@@ -930,6 +931,40 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertIn("/sessions", text)
             self.assertIn("/config", text)
 
+    async def test_slash_completion_suggests_agent_arguments(self):
+        _, runtime, app = _make_env()
+        async with app.run_test():
+            app.on_text_area_changed(
+                SimpleNamespace(text_area=SimpleNamespace(id="composer-input", text="/agent co"))
+            )
+            suggestions = app.query_one("#slash-commands", OptionList)
+            self.assertTrue(suggestions.has_class("visible"))
+            option_text = "\n".join(
+                str(suggestions.get_option_at_index(index).prompt)
+                for index in range(suggestions.option_count)
+            )
+            self.assertIn("/agent coder", option_text)
+
+    async def test_selecting_argument_completion_autosubmits_command(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/agent co"
+            app.on_text_area_changed(
+                SimpleNamespace(text_area=SimpleNamespace(id="composer-input", text="/agent co"))
+            )
+            suggestions = app.query_one("#slash-commands", OptionList)
+            suggestions.highlighted = 0
+            app.on_option_list_option_selected(
+                SimpleNamespace(option_list=suggestions)
+            )
+            for _ in range(5):
+                await pilot.pause()
+                if "target: coder" in str(app.query_one("#info-bar", InfoBar).content):
+                    break
+            self.assertIn("target: coder", str(app.query_one("#info-bar", InfoBar).content))
+
     async def test_session_shows_current_session(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
@@ -941,6 +976,64 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             text = _timeline_text(app)
             self.assertIn(runtime.current_session().title, text)
             self.assertIn(runtime.main_session_id, text)
+
+    async def test_status_runs_real_provider_checks(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            with (
+                patch.object(type(runtime), "list_provider_ids", autospec=True, return_value=["local"]),
+                patch("ergon_studio.tui.app.probe_all_providers", return_value=[
+                    SimpleNamespace(
+                        name="local",
+                        ok=True,
+                        base_url="http://localhost:8012/v1",
+                        model="qwen3-coder",
+                        model_count=4,
+                        error=None,
+                    )
+                ]),
+            ):
+                inp = app.query_one("#composer-input", ComposerTextArea)
+                app.set_focus(inp)
+                inp.value = "/status"
+                await pilot.press("enter")
+                await pilot.pause()
+            text = _timeline_text(app)
+            self.assertIn("Provider status", text)
+            self.assertIn("local", text)
+            self.assertIn("4 models", text)
+
+    async def test_doctor_reports_reachability_and_assignment_issues(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            with (
+                patch.object(type(runtime), "list_provider_ids", autospec=True, return_value=["local"]),
+                patch("ergon_studio.tui.app.probe_all_providers", return_value=[
+                    SimpleNamespace(
+                        name="local",
+                        ok=False,
+                        base_url="http://localhost:8012/v1",
+                        model="qwen3-coder",
+                        model_count=0,
+                        error="connection refused",
+                    )
+                ]),
+                patch.object(
+                    type(runtime),
+                    "agent_unavailable_reason",
+                    side_effect=lambda _runtime, agent_id: "no provider assigned for role 'coder'" if agent_id == "coder" else None,
+                    autospec=True,
+                ),
+            ):
+                inp = app.query_one("#composer-input", ComposerTextArea)
+                app.set_focus(inp)
+                inp.value = "/doctor"
+                await pilot.press("enter")
+                await pilot.pause()
+            text = _timeline_text(app)
+            self.assertIn("Issues found", text)
+            self.assertIn("connection refused", text)
+            self.assertIn("Assign a provider to coder", text)
 
     async def test_sessions_lists_project_sessions(self):
         _, runtime, app = _make_env()
@@ -1271,6 +1364,23 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, InspectorScreen)
             self.assertEqual(app.screen.title, "Events")
 
+    async def test_inspector_detail_panel_is_scrollable(self):
+        _, runtime, app = _make_env()
+        runtime.append_event(
+            kind="note",
+            summary="Something happened.",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/events"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            detail = app.screen.query_one("#inspector-detail", VerticalScroll)
+            self.assertIsNotNone(detail)
+
     async def test_unknown_command_shows_error(self):
         _, _, app = _make_env()
         async with app.run_test() as pilot:
@@ -1309,7 +1419,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             inp = app.query_one("#composer-input", ComposerTextArea)
             app.set_focus(inp)
-            inp.value = "/workflow "
+            inp.value = "/help anything"
             await pilot.pause()
             cmd_list = app.query_one("#slash-commands", OptionList)
             self.assertFalse(cmd_list.has_class("visible"))

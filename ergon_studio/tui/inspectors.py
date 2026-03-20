@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 
@@ -86,7 +86,8 @@ class InspectorScreen(ModalScreen[None]):
                     yield OptionList(*(entry.label for entry in self.entries), id="inspector-list")
                 else:
                     yield Static(self.empty_message, id="inspector-empty")
-                yield Static(self._initial_detail(), id="inspector-detail")
+                with VerticalScroll(id="inspector-detail"):
+                    yield Static(self._initial_detail(), id="inspector-detail-body")
 
     def on_mount(self) -> None:
         if not self.entries:
@@ -122,7 +123,7 @@ class InspectorScreen(ModalScreen[None]):
     def _update_detail(self, index: int) -> None:
         if index < 0 or index >= len(self.entries):
             return
-        self.query_one("#inspector-detail", Static).update(self.entries[index].detail)
+        self.query_one("#inspector-detail-body", Static).update(self.entries[index].detail)
 
 
 def build_thread_entries(runtime: RuntimeContext) -> list[InspectorEntry]:

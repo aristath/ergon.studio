@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import urllib.request
+import urllib.error
 from typing import Any
 
 from textual.app import ComposeResult
@@ -12,31 +12,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 
+from ergon_studio.provider_health import probe_endpoint_models
 from ergon_studio.runtime import RuntimeContext
-
-
-def _probe_endpoint(base_url: str, api_key: str | None) -> list[dict[str, Any]]:
-    """Probe an OpenAI-compatible endpoint for available models.
-
-    Returns a list of dicts with 'id' and optional 'context_length'.
-    """
-    url = base_url.rstrip("/") + "/models"
-    req = urllib.request.Request(url)
-    if api_key:
-        req.add_header("Authorization", f"Bearer {api_key}")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    models: list[dict[str, Any]] = []
-    for m in data.get("data", []):
-        if not isinstance(m, dict) or "id" not in m:
-            continue
-        entry: dict[str, Any] = {"id": m["id"]}
-        for key in ("context_length", "max_model_len", "context_window"):
-            if isinstance(m.get(key), int):
-                entry["context_length"] = m[key]
-                break
-        models.append(entry)
-    return sorted(models, key=lambda x: x["id"])
 
 
 class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
@@ -216,7 +193,7 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
         status_widget.update("[dim]Fetching models...[/dim]")
 
         try:
-            models = await asyncio.to_thread(_probe_endpoint, url, api_key)
+            models = await asyncio.to_thread(probe_endpoint_models, url, api_key)
         except urllib.error.URLError as exc:
             error_widget.update(f"[red]Could not reach endpoint: {exc.reason}[/red]")
             status_widget.update("")

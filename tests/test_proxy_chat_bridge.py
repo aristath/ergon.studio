@@ -106,6 +106,20 @@ class ProxyChatBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[0].content, "")
         self.assertEqual(request.messages[0].tool_calls[0].name, "run_command")
 
+    def test_normalizes_developer_role_to_system(self) -> None:
+        request = parse_chat_completion_request(
+            {
+                "model": "ergon",
+                "messages": [
+                    {"role": "developer", "content": "Always explain tradeoffs."},
+                    {"role": "user", "content": "Build it"},
+                ],
+            }
+        )
+
+        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
+
     def test_parses_specific_function_tool_choice(self) -> None:
         request = parse_chat_completion_request(
             {

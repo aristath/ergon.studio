@@ -87,6 +87,28 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[0].tool_calls[0].id, "call_1")
         self.assertEqual(request.messages[0].tool_calls[0].name, "read_file")
 
+    def test_normalizes_developer_role_to_system(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "content": "Always explain tradeoffs.",
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": "Build it",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
+
     def test_parses_specific_function_tool_choice(self) -> None:
         request = parse_responses_request(
             {

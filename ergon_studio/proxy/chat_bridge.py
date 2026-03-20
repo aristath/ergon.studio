@@ -47,6 +47,7 @@ def _parse_message(payload: Any) -> ProxyInputMessage:
     role = payload.get("role")
     if not isinstance(role, str) or not role.strip():
         raise ValueError("message role must be a non-empty string")
+    normalized_role = _normalize_message_role(role)
 
     tool_calls = payload.get("tool_calls")
     parsed_tool_calls: tuple[ProxyToolCall, ...] = ()
@@ -56,9 +57,16 @@ def _parse_message(payload: Any) -> ProxyInputMessage:
         parsed_tool_calls = tuple(parse_function_tool_call(item) for item in tool_calls)
 
     return ProxyInputMessage(
-        role=role.strip(),
+        role=normalized_role,
         content=normalize_message_content(payload.get("content")),
         name=optional_non_empty_text(payload.get("name")),
         tool_call_id=optional_non_empty_text(payload.get("tool_call_id")),
         tool_calls=parsed_tool_calls,
     )
+
+
+def _normalize_message_role(role: str) -> str:
+    stripped = role.strip()
+    if stripped.casefold() == "developer":
+        return "system"
+    return stripped

@@ -92,7 +92,14 @@ def _parse_input_item(payload: Any) -> ProxyInputMessage:
     if not isinstance(role, str) or not role.strip():
         raise ValueError("responses message items must include a non-empty role")
     return ProxyInputMessage(
-        role=role.strip(),
+        role=_normalize_message_role(role),
         content=normalize_message_content(payload.get("content")),
         name=optional_non_empty_text(payload.get("name")),
     )
+
+
+def _normalize_message_role(role: str) -> str:
+    stripped = role.strip()
+    if stripped.casefold() == "developer":
+        return "system"
+    return stripped

@@ -3143,6 +3143,122 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("delegation_review_unavailable", [event.kind for event in runtime.list_events()])
             self.assertIn("delegation_rejected", [event.kind for event in runtime.list_events()])
 
+    async def test_runtime_accepts_delegation_when_plaintext_review_fallback_accepts(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                return SimpleNamespace(text=self.responses.pop(0))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            fake_agents = {
+                "coder": FakeAgent("Implementation complete."),
+                "orchestrator": FakeAgent([
+                    "ACCEPTED: The delegated coder result satisfies the request.",
+                    "ACCEPTED: The delegated coder result satisfies the request.",
+                ]),
+            }
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                result = await runtime.delegate_to_agent(
+                    agent_id="coder",
+                    request="Implement the feature.",
+                    title="Feature delivery",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertIn("ACCEPTED:", result["review_summary"])
+            self.assertIn("delegation_review_fallback_used", [event.kind for event in runtime.list_events()])
+            self.assertIn("delegation_completed", [event.kind for event in runtime.list_events()])
+
+    async def test_runtime_can_repair_delegation_after_review_feedback(self) -> None:
+        from ergon_studio.runtime import DelegationReviewVerdict, load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                return SimpleNamespace(text=self.responses.pop(0))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            fake_agents = {
+                "coder": FakeAgent(["First attempt.", "Updated implementation with the requested fix."]),
+            }
+            review_verdicts = [
+                DelegationReviewVerdict(
+                    accepted=False,
+                    summary="Missing the requested fix.",
+                    findings=("Apply the requested fix and confirm it.",),
+                ),
+                DelegationReviewVerdict(
+                    accepted=True,
+                    summary="The updated result now satisfies the request.",
+                ),
+            ]
+
+            with (
+                patch.object(
+                    type(runtime),
+                    "build_agent",
+                    autospec=True,
+                    side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+                ),
+                patch.object(
+                    type(runtime),
+                    "_review_delegation_result",
+                    autospec=True,
+                    side_effect=review_verdicts,
+                ),
+            ):
+                result = await runtime.delegate_to_agent(
+                    agent_id="coder",
+                    request="Implement the feature.",
+                    title="Feature delivery",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertIn("ACCEPTED:", result["review_summary"])
+            thread = runtime.get_thread(result["thread_id"])
+            assert thread is not None
+            self.assertEqual(
+                [message.sender for message in runtime.list_thread_messages(thread.id)],
+                ["orchestrator", "coder", "orchestrator", "coder"],
+            )
+            self.assertIn("delegation_followup_requested", [event.kind for event in runtime.list_events()])
+            self.assertIn("delegation_completed", [event.kind for event in runtime.list_events()])
+
     async def test_runtime_can_run_workflow_end_to_end_with_orchestrator_review(self) -> None:
         from ergon_studio.runtime import load_runtime
 

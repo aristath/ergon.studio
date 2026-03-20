@@ -172,9 +172,14 @@ class RealE2ETests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(result["status"], "completed")
             self.assertEqual((project_root / "hello.txt").read_text(encoding="utf-8").rstrip("\n"), "hello from coder")
-            self.assertEqual(
-                [(tool_call.tool_name, tool_call.status, tool_call.agent_id) for tool_call in runtime.list_tool_calls()],
-                [("write_file", "completed", "coder")],
+            tool_calls = [
+                (tool_call.tool_name, tool_call.status, tool_call.agent_id)
+                for tool_call in runtime.list_tool_calls()
+            ]
+            self.assertIn(("write_file", "completed", "coder"), tool_calls)
+            self.assertFalse(
+                any(status == "failed" for _, status, _ in tool_calls),
+                msg=f"unexpected tool calls: {tool_calls}",
             )
 
     async def test_real_researcher_can_answer_from_retrieval_without_tools(self) -> None:

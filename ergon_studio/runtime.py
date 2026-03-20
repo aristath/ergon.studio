@@ -1410,28 +1410,19 @@ class RuntimeContext:
             thread_id=review_thread.id,
             task_id=task.id,
         )
-        verdict = await self._review_delegation_result(
+        verdict, review_summary, reply_body = await self._run_delegation_review_loop(
             agent_id=agent_id,
             request=request,
-            result=reply_body,
             thread=thread,
             review_thread=review_thread,
+            initial_result=reply_body,
             created_at=created_at + 4,
-        )
-        review_summary = _format_delegation_review_summary(verdict)
-        self.append_message_to_thread(
-            thread_id=review_thread.id,
-            message_id=f"message-{uuid4().hex}",
-            sender="orchestrator",
-            kind="review",
-            body=review_summary,
-            created_at=created_at + 5,
         )
         status = "completed" if verdict.accepted else "blocked"
         self.update_task_state(
             task_id=task.id,
             state=status,
-            updated_at=created_at + 5,
+            updated_at=created_at + 9,
         )
         self.append_event(
             kind="delegation_completed" if verdict.accepted else "delegation_rejected",
@@ -1440,7 +1431,7 @@ class RuntimeContext:
                 if verdict.accepted
                 else f"Delegation to {agent_id} was rejected by orchestrator review"
             ),
-            created_at=created_at + 5,
+            created_at=created_at + 9,
             thread_id=review_thread.id,
             task_id=task.id,
         )
@@ -1453,6 +1444,68 @@ class RuntimeContext:
             "review_thread_id": review_thread.id,
             "review_summary": review_summary,
         }
+
+    async def _run_delegation_review_loop(
+        self,
+        *,
+        agent_id: str,
+        request: str,
+        thread: ThreadRecord,
+        review_thread: ThreadRecord,
+        initial_result: str,
+        created_at: int,
+    ) -> tuple[DelegationReviewVerdict, str, str]:
+        current_result = initial_result
+        review_created_at = created_at
+        max_followups = 1
+        followups_used = 0
+
+        while True:
+            verdict = await self._review_delegation_result(
+                agent_id=agent_id,
+                request=request,
+                result=current_result,
+                thread=thread,
+                review_thread=review_thread,
+                created_at=review_created_at,
+            )
+            review_summary = _format_delegation_review_summary(verdict)
+            self.append_message_to_thread(
+                thread_id=review_thread.id,
+                message_id=f"message-{uuid4().hex}",
+                sender="orchestrator",
+                kind="review",
+                body=review_summary,
+                created_at=review_created_at + 1,
+            )
+            if verdict.accepted or followups_used >= max_followups or not verdict.findings:
+                return verdict, review_summary, current_result
+
+            followup_prompt = _render_delegation_followup_prompt(
+                agent_id=agent_id,
+                request=request,
+                review_summary=verdict.summary,
+                findings=verdict.findings,
+                evidence_lines=self._delegation_evidence_lines(thread.id),
+            )
+            self.append_event(
+                kind="delegation_followup_requested",
+                summary=f"Requested a follow-up from {agent_id} after review feedback",
+                created_at=review_created_at + 2,
+                thread_id=thread.id,
+                task_id=thread.parent_task_id,
+            )
+            _, followup_reply = await self.send_message_to_agent_thread(
+                thread_id=thread.id,
+                body=followup_prompt,
+                created_at=review_created_at + 2,
+            )
+            if followup_reply is None:
+                return verdict, review_summary, current_result
+
+            current_result = self.conversation_store.read_message_body(followup_reply).rstrip("\n")
+            followups_used += 1
+            review_created_at += 4
 
     async def _review_delegation_result(
         self,
@@ -1483,32 +1536,38 @@ class RuntimeContext:
             review_thread=review_thread,
             created_at=created_at + 1,
         )
-        if parsed is None:
+        if parsed is not None:
+            try:
+                return _delegation_review_verdict_from_payload(parsed)
+            except ValueError:
+                pass
+
+        fallback_verdict = await self._run_plaintext_delegation_review(
+            prompt=prompt,
+            review_thread=review_thread,
+            created_at=created_at + 2,
+        )
+        if fallback_verdict is not None:
             self.append_event(
-                kind="delegation_review_unavailable",
-                summary=f"Delegation review for {agent_id} fell back because no structured reviewer was available",
-                created_at=created_at + 1,
+                kind="delegation_review_fallback_used",
+                summary=f"Delegation review for {agent_id} used plaintext fallback",
+                created_at=created_at + 2,
                 thread_id=review_thread.id,
                 task_id=thread.parent_task_id,
             )
-            return DelegationReviewVerdict(
-                accepted=False,
-                summary="I could not complete a reliable acceptance review for the delegated result.",
-            )
-        try:
-            return _delegation_review_verdict_from_payload(parsed)
-        except ValueError:
-            self.append_event(
-                kind="delegation_review_unavailable",
-                summary=f"Delegation review for {agent_id} returned invalid structured output",
-                created_at=created_at + 1,
-                thread_id=review_thread.id,
-                task_id=thread.parent_task_id,
-            )
-            return DelegationReviewVerdict(
-                accepted=False,
-                summary="I could not produce a structured acceptance review for the delegated result.",
-            )
+            return fallback_verdict
+
+        self.append_event(
+            kind="delegation_review_unavailable",
+            summary=f"Delegation review for {agent_id} could not produce a usable verdict",
+            created_at=created_at + 2,
+            thread_id=review_thread.id,
+            task_id=thread.parent_task_id,
+        )
+        return DelegationReviewVerdict(
+            accepted=False,
+            summary="I could not complete a reliable acceptance review for the delegated result.",
+        )
 
     async def _run_structured_delegation_review(
         self,
@@ -1560,9 +1619,31 @@ class RuntimeContext:
         except ValueError:
             return None
 
+    async def _run_plaintext_delegation_review(
+        self,
+        *,
+        prompt: str,
+        review_thread: ThreadRecord,
+        created_at: int,
+    ) -> DelegationReviewVerdict | None:
+        response_text = await self.generate_agent_text_without_tools(
+            agent_id="orchestrator",
+            body=prompt,
+            created_at=created_at,
+            thread_id=review_thread.id,
+            extra_instructions=_delegation_review_fallback_instructions(),
+        )
+        if not response_text:
+            return None
+        try:
+            return _delegation_review_verdict_from_text(response_text)
+        except ValueError:
+            return None
+
     def _delegation_evidence_lines(self, thread_id: str) -> list[str]:
         lines: list[str] = []
         file_changes: list[str] = []
+        current_file_states: dict[str, str] = {}
         for tool_call in self.list_tool_calls():
             if tool_call.thread_id != thread_id or tool_call.status != "completed":
                 continue
@@ -1574,10 +1655,31 @@ class RuntimeContext:
                 request = {}
             path = request.get("path")
             if isinstance(path, str) and path:
-                file_changes.append(f"- {tool_call.tool_name}: {path}")
+                detail = f"- {tool_call.tool_name}: {path}"
+                if tool_call.tool_name == "write_file":
+                    content = request.get("content")
+                    if isinstance(content, str) and content:
+                        detail += f"; content preview: {_truncate_preview(repr(content), limit=160)}"
+                elif tool_call.tool_name == "patch_file":
+                    new_text = request.get("new_text")
+                    if isinstance(new_text, str) and new_text:
+                        detail += f"; new_text preview: {_truncate_preview(repr(new_text), limit=160)}"
+                file_changes.append(detail)
+                try:
+                    current_text = self._resolve_workspace_path(path).read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                current_file_states[path] = current_text
         if file_changes:
             lines.append("Recorded file changes:")
             lines.extend(file_changes[:8])
+            lines.append("")
+        if current_file_states:
+            lines.append("Current workspace file contents:")
+            for path, current_text in sorted(current_file_states.items())[:8]:
+                lines.append(
+                    f"- {path}: {_truncate_preview(repr(current_text), limit=160)}"
+                )
             lines.append("")
 
         command_evidence: list[str] = []
@@ -1585,8 +1687,9 @@ class RuntimeContext:
             if command_run.thread_id != thread_id or command_run.status != "completed":
                 continue
             output = self.command_store.read_command_output(command_run).strip()
+            stdout_preview = _extract_command_output_stdout(output) or "(no stdout)"
             command_evidence.append(
-                f"- {command_run.command} -> exit {command_run.exit_code}; output: {_truncate_preview(output or '(no output)', limit=160)}"
+                f"- {command_run.command} -> exit {command_run.exit_code}; stdout: {_truncate_preview(stdout_preview, limit=160)}"
             )
         if command_evidence:
             lines.append("Recorded command runs:")
@@ -1976,12 +2079,15 @@ class RuntimeContext:
             return None
         client = getattr(base_agent, "client", None)
         if client is None:
+            prompt_body = body
+            if extra_instructions.strip():
+                prompt_body = f"{extra_instructions.strip()}\n\n{body}".strip()
             _, reply_message = await self._run_agent_turn(
                 thread_id=target_thread_id,
                 agent_id=agent_id,
                 prompt_sender="workflow",
                 reply_sender=agent_id,
-                body=body,
+                body=prompt_body,
                 created_at=created_at,
                 record_prompt=False,
             )
@@ -3450,6 +3556,13 @@ def _truncate_preview(text: str, *, limit: int) -> str:
     return f"{text[: limit - 1].rstrip()}…"
 
 
+def _extract_command_output_stdout(output: str) -> str:
+    match = re.search(r"## Stdout\s+```text\n(.*?)\n```", output, re.DOTALL)
+    if match is None:
+        return output.strip()
+    return match.group(1).strip()
+
+
 def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
     workflow_lines = []
     for summary in runtime.list_workflow_summaries():
@@ -3642,6 +3755,17 @@ def _delegation_review_instructions() -> str:
     )
 
 
+def _delegation_review_fallback_instructions() -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal acceptance reviewer for a delegated specialist result.",
+            "Decide whether the delegated result appears complete enough to accept without another worker turn.",
+            "Do not delegate, do not plan, and do not call tools.",
+            "Reply with one concise line that starts with ACCEPTED: or REJECTED:.",
+        ]
+    )
+
+
 def _render_delegation_review_prompt(
     *,
     agent_id: str,
@@ -3670,6 +3794,41 @@ def _render_delegation_review_prompt(
     return "\n".join(lines).strip()
 
 
+def _render_delegation_followup_prompt(
+    *,
+    agent_id: str,
+    request: str,
+    review_summary: str,
+    findings: tuple[str, ...],
+    evidence_lines: list[str],
+) -> str:
+    lines = [
+        f"You are the delegated {agent_id}. The acceptance review rejected your previous result.",
+        "",
+        "Original request:",
+        request.strip() or "(no request provided)",
+        "",
+        "Review summary:",
+        review_summary.strip() or "(no review summary provided)",
+    ]
+    if findings:
+        lines.extend(["", "Findings:"])
+        lines.extend(f"- {finding}" for finding in findings)
+    if evidence_lines:
+        lines.extend(["", *evidence_lines])
+    lines.extend(
+        [
+            "",
+            "Address the review feedback now.",
+            "If the work is wrong or incomplete, fix it with the appropriate tools.",
+            "For file changes, the final corrected state must come from `write_file` or `patch_file`, not only from shell redirection.",
+            "If the work is already correct, reply with concrete evidence that resolves the findings.",
+            "Do not only say that it is done.",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
 def _delegation_review_verdict_from_payload(parsed: dict[str, object]) -> DelegationReviewVerdict:
     summary = _optional_text(parsed.get("summary")) or "No delegation review summary provided."
     findings_raw = parsed.get("findings", [])
@@ -3685,6 +3844,22 @@ def _delegation_review_verdict_from_payload(parsed: dict[str, object]) -> Delega
         accepted=_as_bool(parsed.get("accepted")),
         summary=summary,
         findings=tuple(findings),
+    )
+
+
+def _delegation_review_verdict_from_text(raw: str) -> DelegationReviewVerdict:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    match = re.search(r"\b(ACCEPTED|REJECTED):\s*(.+)", text, re.IGNORECASE | re.DOTALL)
+    if match is None:
+        raise ValueError("no ACCEPTED/REJECTED verdict found")
+    accepted = match.group(1).upper() == "ACCEPTED"
+    summary = match.group(2).strip() or "No delegation review summary provided."
+    return DelegationReviewVerdict(
+        accepted=accepted,
+        summary=summary,
     )
 
 

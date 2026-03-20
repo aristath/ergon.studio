@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import unittest
 from urllib.request import Request, urlopen
 
 from agent_framework import ResponseStream
 
-from ergon_studio.proxy.core import ProxyTurnResult
+from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall
 from ergon_studio.proxy.server import start_proxy_server_in_thread
+from ergon_studio.registry import RuntimeRegistry
 
 
 class ProxyServerTests(unittest.TestCase):
@@ -202,6 +205,187 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payload["output"][0]["type"], "function_call")
         self.assertEqual(payload["output"][0]["call_id"], "call_1")
 
+    def test_chat_completions_resume_full_tool_loop(self) -> None:
+        core = ProxyOrchestrationCore(
+            _proxy_registry(),
+            agent_builder=_proxy_agent_builder(
+                {
+                    "orchestrator": [
+                        "{\"mode\":\"workflow\",\"workflow_id\":\"standard-build\",\"goal\":\"Build calculator\"}",
+                        "Workflow final summary",
+                    ],
+                    "architect": [
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_arch_1",
+                                    "name": "read_file",
+                                    "arguments": "{\"path\":\"main.py\"}",
+                                }
+                            ],
+                        },
+                        "Architecture plan",
+                    ],
+                    "coder": ["Built feature"],
+                }
+            ),
+        )
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
+        self.addCleanup(handle.close)
+
+        first_request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Build calculator"}],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(first_request) as response:
+            first_payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(first_payload["choices"][0]["finish_reason"], "tool_calls")
+        tool_call = first_payload["choices"][0]["message"]["tool_calls"][0]
+
+        second_request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [
+                        {"role": "user", "content": "Build calculator"},
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [tool_call],
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": "print('current main')",
+                        },
+                    ],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(second_request) as response:
+            second_payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(second_payload["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(second_payload["choices"][0]["message"]["content"], "Workflow final summary")
+
+    def test_responses_resume_full_tool_loop(self) -> None:
+        core = ProxyOrchestrationCore(
+            _proxy_registry(),
+            agent_builder=_proxy_agent_builder(
+                {
+                    "orchestrator": [
+                        "{\"mode\":\"act\"}",
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "name": "read_file",
+                                    "arguments": "{\"path\":\"main.py\"}",
+                                }
+                            ],
+                        },
+                        "Final answer",
+                    ],
+                    "architect": [],
+                    "coder": [],
+                }
+            ),
+        )
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
+        self.addCleanup(handle.close)
+
+        first_request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Inspect main.py",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(first_request) as response:
+            first_payload = json.loads(response.read().decode("utf-8"))
+
+        function_call = next(item for item in first_payload["output"] if item["type"] == "function_call")
+
+        second_request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": [
+                        {"type": "message", "role": "user", "content": "Inspect main.py"},
+                        {
+                            "type": "function_call_output",
+                            "call_id": function_call["call_id"],
+                            "output": "print('current main')",
+                        },
+                    ],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(second_request) as response:
+            second_payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(second_payload["output_text"], "Final answer")
+
 
 class _FakeCore:
     def __init__(self, events, *, tool_calls=()):
@@ -230,6 +414,113 @@ class _FakeCore:
                 tool_calls=self._tool_calls,
             ),
         )
+
+
+class _FakeAgent:
+    def __init__(self, responses) -> None:
+        self._responses = list(responses)
+
+    def create_session(self, *, session_id: str):
+        return object()
+
+    def run(self, _messages, *, session, stream: bool = False, tools=None, **_kwargs):
+        raw = self._responses.pop(0)
+        if isinstance(raw, str):
+            payload = {"text": raw, "tool_calls": []}
+        else:
+            payload = raw
+        text = payload.get("text", "")
+        tool_calls = payload.get("tool_calls", [])
+        if not stream:
+            return _immediate_response(text, tool_calls=tool_calls)
+        parts = [piece for piece in text.split(" ") if piece]
+
+        async def _events():
+            for index, part in enumerate(parts):
+                suffix = " " if index < len(parts) - 1 else ""
+                yield type("Update", (), {"text": part + suffix})()
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: _response_object(text, tool_calls=tool_calls),
+        )
+
+
+def _proxy_agent_builder(mapping: dict[str, list[object]]):
+    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
+
+    def _build(_registry, agent_id: str, **_kwargs):
+        queue = remaining[agent_id]
+        if not queue:
+            raise AssertionError(f"no fake responses left for {agent_id}")
+        return _FakeAgent([queue.pop(0)])
+
+    return _build
+
+
+def _proxy_registry() -> RuntimeRegistry:
+    return RuntimeRegistry(
+        config={},
+        agent_definitions={
+            "orchestrator": DefinitionDocument(
+                id="orchestrator",
+                path=Path("orchestrator.md"),
+                metadata={"id": "orchestrator", "role": "orchestrator"},
+                body="## Identity\nLead engineer.",
+                sections={"Identity": "Lead engineer."},
+            ),
+            "architect": DefinitionDocument(
+                id="architect",
+                path=Path("architect.md"),
+                metadata={"id": "architect", "role": "architect"},
+                body="## Identity\nArchitect.",
+                sections={"Identity": "Architect."},
+            ),
+            "coder": DefinitionDocument(
+                id="coder",
+                path=Path("coder.md"),
+                metadata={"id": "coder", "role": "coder"},
+                body="## Identity\nCoder.",
+                sections={"Identity": "Coder."},
+            ),
+        },
+        workflow_definitions={
+            "standard-build": DefinitionDocument(
+                id="standard-build",
+                path=Path("standard-build.md"),
+                metadata={
+                    "id": "standard-build",
+                    "orchestration": "sequential",
+                    "steps": ["architect", "coder"],
+                },
+                body="## Purpose\nBuild.",
+                sections={"Purpose": "Build."},
+            )
+        },
+    )
+
+
+def _response_object(text: str, *, tool_calls: list[dict[str, str]]):
+    contents = [type("Content", (), {"type": "text", "text": text})()] if text else []
+    for tool_call in tool_calls:
+        contents.append(
+            type(
+                "Content",
+                (),
+                {
+                    "type": "function_call",
+                    "call_id": tool_call["id"],
+                    "name": tool_call["name"],
+                    "arguments": tool_call["arguments"],
+                },
+            )()
+        )
+    message = type("Message", (), {"contents": contents})()
+    return type("Response", (), {"text": text, "messages": [message]})()
+
+
+async def _immediate_response(text: str, *, tool_calls: list[dict[str, str]]):
+    return _response_object(text, tool_calls=tool_calls)
 
 
 if __name__ == "__main__":

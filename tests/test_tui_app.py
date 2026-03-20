@@ -1447,6 +1447,14 @@ class TestStatusBar(IsolatedAsyncioTestCase):
             bar = app.query_one("#agent-status-bar", AgentStatusBar)
             bar.set_agent_state("coder", "active")
             self.assertEqual(bar._agent_states["coder"], "active")
+            self.assertIn("active: coder", str(bar.content))
+
+    async def test_status_bar_shows_setup_hint_for_unconfigured_team(self):
+        _, _, app = _make_env()
+        async with app.run_test():
+            bar = app.query_one("#agent-status-bar", AgentStatusBar)
+            bar.refresh_from_runtime()
+            self.assertIn("setup needed: /config", str(bar.content))
 
 
 class TestEditorModals(IsolatedAsyncioTestCase):
@@ -1539,6 +1547,17 @@ class TestConfigWizard(IsolatedAsyncioTestCase):
             screen._save()
             await pilot.pause()
             self.assertEqual(len(result_holder), 0)
+
+    async def test_provider_editor_explains_fetch_vs_manual_paths(self):
+        from ergon_studio.tui.config_wizard import ProviderEditorScreen
+
+        _, _, app = _make_env()
+        async with app.run_test() as pilot:
+            screen = ProviderEditorScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            text = "\n".join(str(widget.content) for widget in screen.query(Static))
+            self.assertIn("Local endpoint? Use Fetch Models.", text)
 
     async def test_wizard_auto_assigns_first_provider(self):
         from ergon_studio.tui.config_wizard import ConfigWizardScreen

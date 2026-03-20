@@ -132,6 +132,9 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
 
             yield Static("", id="provider-status")
             yield Static("", id="provider-error")
+            yield Static(
+                "[dim]Local endpoint? Use Fetch Models. Hosted or remote endpoint? You can fetch or type the model name manually.[/dim]"
+            )
 
             yield OptionList(id="model-list")
 

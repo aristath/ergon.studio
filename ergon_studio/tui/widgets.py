@@ -101,7 +101,29 @@ class AgentStatusBar(Static):
             text.append(sprite, style=color)
             if i < len(agent_ids) - 1:
                 text.append(" ")
+        legend = self._legend_text()
+        if legend:
+            text.append("  ")
+            text.append(legend, style="grey62")
         return text
+
+    def _legend_text(self) -> str:
+        active_agents = [
+            agent_id
+            for agent_id, state in self._agent_states.items()
+            if state in {"active", "working", "waiting"}
+        ]
+        if active_agents:
+            labels = ", ".join(active_agents)
+            return f"active: {labels}"
+        error_agents = [
+            agent_id
+            for agent_id, state in self._agent_states.items()
+            if state == "error"
+        ]
+        if error_agents:
+            return "setup needed: /config"
+        return "team: /team"
 
 
 class InfoBar(Static):

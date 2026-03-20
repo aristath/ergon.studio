@@ -20,26 +20,14 @@ def build_agent(
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
-    provider_name = resolve_provider_name(registry, agent_id)
-    provider_config = registry.config["providers"][provider_name]
-    provider_capabilities = provider_config.get("capabilities", {})
-    if not isinstance(provider_capabilities, dict):
-        provider_capabilities = {}
-    client = _build_client(provider_config, model_id_override=model_id_override)
+    client = _build_client(registry, model_id_override=model_id_override)
     tools = _resolve_tools(definition, tool_registry)
-    context_providers = _build_context_providers(
-        registry=registry,
-        definition=definition,
-        provider_name=provider_name,
-        provider_capabilities=provider_capabilities,
-    )
+    context_providers = _build_context_providers(registry=registry, definition=definition)
 
     default_options: dict[str, Any] = {}
     for key in ("temperature", "max_tokens"):
         if key in definition.metadata:
             default_options[key] = definition.metadata[key]
-        elif key in provider_config:
-            default_options[key] = provider_config[key]
 
     return Agent(
         client=client,
@@ -65,58 +53,22 @@ def compose_instructions(definition: DefinitionDocument) -> str:
     return "\n\n".join(parts).strip()
 
 
-def resolve_provider_name(registry: RuntimeRegistry, agent_id: str) -> str:
-    if not registry.config.get("role_assignments") or not registry.config.get("providers"):
-        raise ValueError(f"no provider assigned for role '{agent_id}'")
-    definition = registry.agent_definitions[agent_id]
-    role = str(definition.metadata.get("role", definition.id))
-    return _resolve_provider_name(registry.config, role, definition.id)
-
-
-def provider_capabilities_for_agent(registry: RuntimeRegistry, agent_id: str) -> dict[str, object]:
-    if not registry.config.get("role_assignments") or not registry.config.get("providers"):
-        return {}
-    provider_name = resolve_provider_name(registry, agent_id)
-    provider_config = registry.config["providers"][provider_name]
-    capabilities = provider_config.get("capabilities", {})
-    if not isinstance(capabilities, dict):
-        return {}
-    return capabilities
-
-
 def provider_supports_tool_calling(registry: RuntimeRegistry, agent_id: str) -> bool:
-    capabilities = provider_capabilities_for_agent(registry, agent_id)
-    configured = capabilities.get("tool_calling")
-    if type(configured) is bool:
-        return configured
-    return True
-
-
-def _resolve_provider_name(config: dict[str, Any], role: str, agent_id: str) -> str:
-    role_assignments = config.get("role_assignments", {})
-    provider_name = role_assignments.get(role) or role_assignments.get(agent_id)
-    if not provider_name:
-        raise ValueError(f"no provider assigned for role '{role}'")
-    if provider_name not in config.get("providers", {}):
-        raise ValueError(f"provider '{provider_name}' is not defined")
-    return provider_name
+    del agent_id
+    return registry.upstream.tool_calling
 
 
 def _build_client(
-    provider_config: dict[str, Any],
+    registry: RuntimeRegistry,
     *,
     model_id_override: str | None = None,
 ) -> OpenAIChatClient:
-    provider_type = provider_config.get("type", "openai_chat")
-    if provider_type != "openai_chat":
-        raise ValueError(f"unsupported provider type: {provider_type}")
-
-    model_id = model_id_override or provider_config.get("model")
+    model_id = model_id_override
     if not model_id:
-        raise ValueError("provider config must define a model")
+        raise ValueError("proxy requests must supply a model")
 
-    api_key = provider_config.get("api_key")
-    base_url = provider_config.get("base_url")
+    api_key = registry.upstream.api_key
+    base_url = registry.upstream.base_url
     if not api_key and base_url:
         api_key = "not-needed"
 
@@ -124,7 +76,7 @@ def _build_client(
         model_id=model_id,
         api_key=api_key,
         base_url=base_url,
-        instruction_role=provider_config.get("instruction_role"),
+        instruction_role=registry.upstream.instruction_role,
     )
 
 
@@ -150,14 +102,5 @@ def _build_context_providers(
     *,
     registry: RuntimeRegistry,
     definition: DefinitionDocument,
-    provider_name: str,
-    provider_capabilities: dict[str, object],
 ) -> list[object]:
-    return [
-        AgentProfileContextProvider(
-            definition,
-            registry=registry,
-            provider_name=provider_name,
-            provider_capabilities=provider_capabilities,
-        )
-    ]
+    return [AgentProfileContextProvider(definition, registry=registry)]

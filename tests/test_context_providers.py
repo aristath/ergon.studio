@@ -5,6 +5,7 @@ import unittest
 from ergon_studio.context_providers import AgentProfileContextProvider
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.upstream import UpstreamSettings
 
 
 class _FakeContext:
@@ -18,7 +19,7 @@ class _FakeContext:
 class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_orchestrator_profile_includes_specialists_and_workflows(self) -> None:
         registry = RuntimeRegistry(
-            config={},
+            upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
             agent_definitions={
                 "orchestrator": DefinitionDocument(
                     id="orchestrator",
@@ -48,8 +49,6 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
         provider = AgentProfileContextProvider(
             registry.agent_definitions["orchestrator"],
             registry=registry,
-            provider_name="local",
-            provider_capabilities={"tool_calling": True},
         )
         context = _FakeContext()
 
@@ -58,6 +57,5 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(context.instructions), 1)
         payload = context.instructions[0][1]
         self.assertIn("Agent profile: orchestrator", payload)
-        self.assertIn("Provider: local", payload)
         self.assertIn("Available specialists: coder(coder)", payload)
         self.assertIn("Available workflows: standard-build(sequential)", payload)

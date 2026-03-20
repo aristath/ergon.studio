@@ -8,6 +8,7 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
 from ergon_studio.proxy.planner import build_turn_planner_prompt, parse_turn_plan, resolve_workflow_reference
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyPlannerTests(unittest.TestCase):
@@ -119,21 +120,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
 def _make_registry():
     return RuntimeRegistry(
-        config={
-            "providers": {
-                "local": {
-                    "type": "openai_chat",
-                    "base_url": "http://localhost:8080/v1",
-                    "api_key": "not-needed",
-                    "model": "qwen2.5-coder",
-                }
-            },
-            "role_assignments": {
-                "orchestrator": "local",
-                "architect": "local",
-                "coder": "local",
-            },
-        },
+        upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
             "orchestrator": DefinitionDocument(
                 id="orchestrator",

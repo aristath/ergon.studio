@@ -10,6 +10,7 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyInputMessage, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent, ProxyTurnRequest
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
@@ -565,7 +566,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 class _FakeRegistry:
     def __init__(self) -> None:
         self.inner = RuntimeRegistry(
-            config={},
+            upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
             agent_definitions={
                 "orchestrator": DefinitionDocument(
                     id="orchestrator",
@@ -672,18 +673,7 @@ def _grouped_workflow_registry():
 
 def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
     return RuntimeRegistry(
-        config={
-            "providers": {
-                "local": {
-                    "type": "openai_chat",
-                    "model": "ergon",
-                    "capabilities": {"tool_calling": tool_calling},
-                }
-            },
-            "role_assignments": {
-                "orchestrator": "local",
-            },
-        },
+        upstream=UpstreamSettings(base_url="http://localhost:8080/v1", tool_calling=tool_calling),
         agent_definitions={
             "orchestrator": DefinitionDocument(
                 id="orchestrator",
@@ -699,7 +689,7 @@ def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
 
 def _advanced_workflow_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
-        config={},
+        upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
             "orchestrator": DefinitionDocument(
                 id="orchestrator",

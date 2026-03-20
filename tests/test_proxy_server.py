@@ -15,11 +15,12 @@ from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyServerTests(unittest.TestCase):
-    def test_models_endpoint_lists_ergon_model(self) -> None:
-        with patch("ergon_studio.proxy.server.probe_endpoint_models", side_effect=RuntimeError("offline")):
+    def test_models_endpoint_proxies_upstream_models(self) -> None:
+        with patch("ergon_studio.proxy.server.probe_upstream_models", return_value=[{"id": "gpt-oss-20b"}]):
             handle = start_proxy_server_in_thread(
                 host="127.0.0.1",
                 port=0,
@@ -31,15 +32,12 @@ class ProxyServerTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(payload["object"], "list")
-        self.assertEqual(payload["data"][0]["id"], "qwen2.5-coder")
+        self.assertEqual(payload["data"][0]["id"], "gpt-oss-20b")
 
-    def test_models_endpoint_prefers_live_upstream_models_when_available(self) -> None:
+    def test_models_endpoint_returns_bad_gateway_when_upstream_listing_fails(self) -> None:
         with patch(
-            "ergon_studio.proxy.server.probe_endpoint_models",
-            return_value=[
-                {"id": "gpt-oss-20b"},
-                {"id": "qwen3-coder-next"},
-            ],
+            "ergon_studio.proxy.server.probe_upstream_models",
+            side_effect=RuntimeError("offline"),
         ):
             handle = start_proxy_server_in_thread(
                 host="127.0.0.1",
@@ -48,14 +46,10 @@ class ProxyServerTests(unittest.TestCase):
             )
             self.addCleanup(handle.close)
 
-            with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            with self.assertRaises(HTTPError) as exc:
+                urlopen(f"http://127.0.0.1:{handle.port}/v1/models")
 
-        self.assertEqual(payload["object"], "list")
-        self.assertEqual(
-            [entry["id"] for entry in payload["data"]],
-            ["gpt-oss-20b", "qwen2.5-coder", "qwen3-coder-next"],
-        )
+        self.assertEqual(exc.exception.code, 502)
 
     def test_chat_completions_echo_requested_model(self) -> None:
         handle = start_proxy_server_in_thread(
@@ -104,22 +98,6 @@ class ProxyServerTests(unittest.TestCase):
             payload = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(payload["model"], "gpt-oss-20b")
-
-    def test_health_endpoint_reports_proxy_readiness(self) -> None:
-        core = ProxyOrchestrationCore(_proxy_registry())
-        handle = start_proxy_server_in_thread(
-            host="127.0.0.1",
-            port=0,
-            core=core,
-        )
-        self.addCleanup(handle.close)
-
-        with urlopen(f"http://127.0.0.1:{handle.port}/health") as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        self.assertFalse(payload["ok"])
-        orchestrator = next(item for item in payload["agents"] if item["name"] == "orchestrator")
-        self.assertFalse(orchestrator["ok"])
 
     def test_chat_completions_returns_non_stream_response(self) -> None:
         handle = start_proxy_server_in_thread(
@@ -827,15 +805,7 @@ class _FakeCore:
             "Registry",
             (),
             {
-                "config": {
-                    "providers": {
-                        "local": {
-                            "type": "openai_chat",
-                            "base_url": "http://localhost:8080/v1",
-                            "model": "qwen2.5-coder",
-                        }
-                    }
-                },
+                "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
                 "workflow_definitions": {},
             },
@@ -910,7 +880,7 @@ def _proxy_agent_builder(mapping: dict[str, list[object]]):
 
 def _proxy_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
-        config={},
+        upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
             "orchestrator": DefinitionDocument(
                 id="orchestrator",

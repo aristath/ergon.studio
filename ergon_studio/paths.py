@@ -16,10 +16,6 @@ class GlobalStudioPaths:
         return self.home_dir / STUDIO_DIRNAME
 
     @property
-    def config_path(self) -> Path:
-        return self.studio_home / "config.json"
-
-    @property
     def agents_dir(self) -> Path:
         return self.studio_home / "agents"
 

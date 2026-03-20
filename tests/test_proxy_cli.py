@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import io
 import tempfile
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,6 +23,8 @@ class ProxyCliTests(unittest.TestCase):
                         "0.0.0.0",
                         "--port",
                         "4242",
+                        "--upstream-base-url",
+                        "http://localhost:8080/v1",
                     ]
                 )
 
@@ -34,25 +34,13 @@ class ProxyCliTests(unittest.TestCase):
             self.assertEqual(kwargs["host"], "0.0.0.0")
             self.assertEqual(kwargs["port"], 4242)
 
-    def test_proxy_cli_check_fails_fast_when_orchestrator_is_unavailable(self) -> None:
+    def test_proxy_cli_requires_upstream_base_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             home_dir = Path(temp_dir) / "home"
             home_dir.mkdir()
-            stdout = io.StringIO()
 
-            with patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy:
-                with redirect_stdout(stdout):
-                    exit_code = main(
-                        [
-                            "--home-dir",
-                            str(home_dir),
-                            "--check",
-                        ]
-                    )
-
-            self.assertEqual(exit_code, 1)
-            self.assertIn("ok=false", stdout.getvalue())
-            serve_proxy.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "missing upstream base URL"):
+                main(["--home-dir", str(home_dir)])
 
 
 if __name__ == "__main__":

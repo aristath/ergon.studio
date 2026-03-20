@@ -9,6 +9,7 @@ from unittest.mock import patch
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.models import ProxyTurnResult
 from ergon_studio.proxy.server import start_proxy_server_in_thread
+from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyOpenAISDKTests(unittest.TestCase):
@@ -203,8 +204,8 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         self.assertEqual(events[4].type, "response.output_item.done")
         self.assertEqual(events[-1].type, "response.completed")
 
-    def test_models_list_returns_proxy_model_id(self) -> None:
-        with patch("ergon_studio.proxy.server.probe_endpoint_models", side_effect=RuntimeError("offline")):
+    def test_models_list_returns_upstream_model_ids(self) -> None:
+        with patch("ergon_studio.proxy.server.probe_upstream_models", return_value=[{"id": "gpt-oss-20b"}]):
             handle = start_proxy_server_in_thread(
                 host="127.0.0.1",
                 port=0,
@@ -215,7 +216,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
 
             models = client.models.list()
 
-        self.assertEqual(models.data[0].id, "qwen2.5-coder")
+        self.assertEqual(models.data[0].id, "gpt-oss-20b")
 
 
 class _FakeCore:
@@ -227,15 +228,7 @@ class _FakeCore:
             "Registry",
             (),
             {
-                "config": {
-                    "providers": {
-                        "local": {
-                            "type": "openai_chat",
-                            "base_url": "http://localhost:8080/v1",
-                            "model": "qwen2.5-coder",
-                        }
-                    }
-                },
+                "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
                 "workflow_definitions": {},
             },

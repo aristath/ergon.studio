@@ -12,14 +12,10 @@ class AgentProfileContextProvider(BaseContextProvider):
         definition: DefinitionDocument,
         *,
         registry: RuntimeRegistry | None = None,
-        provider_name: str | None = None,
-        provider_capabilities: dict[str, object] | None = None,
     ) -> None:
         super().__init__("agent_profile")
         self.definition = definition
         self.registry = registry
-        self.provider_name = provider_name
-        self.provider_capabilities = provider_capabilities or {}
 
     async def before_run(self, *, agent, session, context, state) -> None:
         role = str(self.definition.metadata.get("role", self.definition.id))
@@ -33,12 +29,6 @@ class AgentProfileContextProvider(BaseContextProvider):
             f"Role: {role}",
             f"Tools: {', '.join(str(tool) for tool in tools) if isinstance(tools, list) and tools else 'none'}",
         ]
-        if self.provider_name is not None:
-            capability_text = ", ".join(
-                f"{key}={value}" for key, value in sorted(self.provider_capabilities.items())
-            ) or "none"
-            lines.append(f"Provider: {self.provider_name}")
-            lines.append(f"Provider capabilities: {capability_text}")
         if flags:
             lines.append(f"Flags: {', '.join(flags)}")
         if role == "orchestrator" and self.registry is not None:

@@ -12,3 +12,8 @@ It sits in front of an existing host client and turns one model request into an 
 The host keeps the UI, sessions, tools, MCPs, and approvals.
 
 `ergon.studio` keeps the orchestration brain.
+
+The proxy uses:
+- one upstream OpenAI-compatible endpoint for all internal orchestration turns
+- markdown-defined agents
+- markdown-defined workflows

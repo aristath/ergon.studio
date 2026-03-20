@@ -13,6 +13,5 @@ class GlobalStudioPathsTests(unittest.TestCase):
             home_dir = Path(temp_dir) / "home"
             paths = GlobalStudioPaths(home_dir=home_dir)
 
-            self.assertEqual(paths.config_path, home_dir / ".ergon.studio" / "config.json")
             self.assertEqual(paths.agents_dir, home_dir / ".ergon.studio" / "agents")
             self.assertEqual(paths.workflows_dir, home_dir / ".ergon.studio" / "workflows")

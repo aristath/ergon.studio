@@ -15,7 +15,6 @@ from ergon_studio.proxy.chat_adapter import (
     encode_chat_stream_sse,
 )
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
-from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent
 from ergon_studio.proxy.responses_adapter import (
     build_responses_response,
@@ -23,7 +22,7 @@ from ergon_studio.proxy.responses_adapter import (
     encode_responses_stream_sse,
 )
 from ergon_studio.proxy.responses_bridge import parse_responses_request
-from ergon_studio.provider_health import probe_endpoint_models
+from ergon_studio.upstream import probe_upstream_models
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
@@ -37,20 +36,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
-        if self.path == "/health":
-            self._send_json(
-                HTTPStatus.OK,
-                build_proxy_health_snapshot(self.server.core.registry),
-            )
-            return
         if self.path == "/v1/models":
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "object": "list",
-                    "data": _available_models(self.server.core.registry),
-                },
-            )
+            try:
+                data = _available_models(self.server.core.registry)
+            except Exception as exc:
+                self._send_error_json(HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}")
+                return
+            self._send_json(HTTPStatus.OK, {"object": "list", "data": data})
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown route: {self.path}")
 
@@ -315,40 +307,22 @@ def start_proxy_server_in_thread(*, host: str, port: int, core) -> ProxyServerHa
 
 
 def _available_models(registry) -> list[dict[str, Any]]:
-    providers = registry.config.get("providers", {})
-    if not isinstance(providers, dict):
-        return []
-    model_ids: set[str] = set()
-    for provider in providers.values():
-        if not isinstance(provider, dict):
-            continue
-        if str(provider.get("type", "openai_chat")).strip() != "openai_chat":
-            continue
-        base_url = str(provider.get("base_url", "")).strip()
-        api_key = str(provider.get("api_key", "")).strip() or None
-        if base_url:
-            try:
-                live_models = probe_endpoint_models(base_url, api_key, timeout=5)
-            except Exception:
-                live_models = []
-            for model in live_models:
-                model_id = str(model.get("id", "")).strip()
-                if model_id:
-                    model_ids.add(model_id)
-        configured_model = str(provider.get("model", "")).strip()
-        if configured_model:
-            model_ids.add(configured_model)
-    sorted_model_ids = sorted(model_ids)
     now = int(time.time())
-    return [
-        {
-            "id": model_id,
-            "object": "model",
-            "created": now,
-            "owned_by": "ergon-studio",
-        }
-        for model_id in sorted_model_ids
-    ]
+    models = probe_upstream_models(registry.upstream, timeout=5)
+    normalized: list[dict[str, Any]] = []
+    for model in models:
+        model_id = str(model.get("id", "")).strip()
+        if not model_id:
+            continue
+        normalized.append(
+            {
+                "id": model_id,
+                "object": "model",
+                "created": int(model.get("created", now)) if isinstance(model.get("created"), int) else now,
+                "owned_by": str(model.get("owned_by", "upstream")),
+            }
+        )
+    return normalized
 
 
 def _ensure_response_output_item(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
-from ergon_studio.bootstrap import bootstrap_proxy_home
+from ergon_studio.bootstrap import bootstrap_definition_home
 from ergon_studio.proxy.core import ProxyOrchestrationCore
-from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
+from ergon_studio.upstream import UpstreamSettings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,27 +16,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home-dir", type=Path, default=Path.home())
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)
-    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--upstream-base-url", type=str, default=os.environ.get("ERGON_UPSTREAM_BASE_URL"))
+    parser.add_argument("--upstream-api-key", type=str, default=os.environ.get("ERGON_UPSTREAM_API_KEY"))
+    parser.add_argument("--instruction-role", type=str, default=os.environ.get("ERGON_INSTRUCTION_ROLE"))
+    parser.add_argument("--disable-tool-calling", action="store_true")
     return parser
 
 
-def run_proxy_server(*, home_dir: Path, host: str, port: int, check: bool) -> int:
-    proxy_paths = bootstrap_proxy_home(home_dir)
-    registry = load_registry(proxy_paths)
-    if check:
-        health = build_proxy_health_snapshot(registry)
-        print(f"ok={str(health['ok']).lower()}")
-        for provider in health["providers"]:
-            status = "ok" if provider["ok"] else "error"
-            detail = provider["error"] or provider["model"]
-            print(f"provider[{provider['name']}]={status}:{detail}")
-        for agent in health["agents"]:
-            status = "ok" if agent["ok"] else "error"
-            detail = agent["error"] or agent["summary"]
-            print(f"agent[{agent['name']}]={status}:{detail}")
-        if not health["ok"]:
-            return 1
-
+def run_proxy_server(
+    *,
+    home_dir: Path,
+    host: str,
+    port: int,
+    upstream_base_url: str | None,
+    upstream_api_key: str | None,
+    instruction_role: str | None,
+    disable_tool_calling: bool,
+) -> int:
+    if not upstream_base_url or not upstream_base_url.strip():
+        raise ValueError("missing upstream base URL; pass --upstream-base-url or set ERGON_UPSTREAM_BASE_URL")
+    proxy_paths = bootstrap_definition_home(home_dir)
+    registry = load_registry(
+        proxy_paths,
+        upstream=UpstreamSettings(
+            base_url=upstream_base_url.strip(),
+            api_key=upstream_api_key.strip() if upstream_api_key else None,
+            instruction_role=instruction_role.strip() if instruction_role else None,
+            tool_calling=not disable_tool_calling,
+        ),
+    )
     serve_proxy(
         host=host,
         port=port,
@@ -51,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         home_dir=args.home_dir,
         host=args.host,
         port=args.port,
-        check=args.check,
+        upstream_base_url=args.upstream_base_url,
+        upstream_api_key=args.upstream_api_key,
+        instruction_role=args.instruction_role,
+        disable_tool_calling=args.disable_tool_calling,
     )
 
 

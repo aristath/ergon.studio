@@ -163,6 +163,13 @@ class RuntimeContext:
             return False
         return True
 
+    def agent_unavailable_reason(self, agent_id: str) -> str | None:
+        try:
+            self.build_agent(agent_id)
+        except (KeyError, ValueError) as exc:
+            return str(exc)
+        return None
+
     def assigned_provider_name(self, agent_id: str) -> str | None:
         definition = self.registry.agent_definitions.get(agent_id)
         if definition is None:
@@ -881,6 +888,28 @@ class RuntimeContext:
         )
         return user_message
 
+    def record_user_message_to_thread(
+        self,
+        *,
+        thread_id: str,
+        body: str,
+        created_at: int,
+    ) -> MessageRecord:
+        message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender="user",
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+        if thread_id == self.main_thread_id:
+            self._refresh_session_title_from_user_turn(
+                body=body,
+                created_at=created_at,
+            )
+        return message
+
     async def send_user_message_to_orchestrator(
         self,
         *,
@@ -962,6 +991,65 @@ class RuntimeContext:
                 reply_sender="orchestrator",
                 body=prepared.resolved_request if decision.request else body,
                 created_at=created_at + 2,
+                record_prompt=False,
+            )
+            async for event in turn_stream:
+                yield event
+            _, state["reply"] = await turn_stream.get_final_response()
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: (
+                state["user"],
+                state["reply"],
+            ),
+        )
+
+    async def send_user_message_to_agent_thread(
+        self,
+        *,
+        thread_id: str,
+        body: str,
+        created_at: int,
+    ) -> tuple[MessageRecord, MessageRecord | None]:
+        stream = self.stream_user_message_to_agent_thread(
+            thread_id=thread_id,
+            body=body,
+            created_at=created_at,
+        )
+        async for _ in stream:
+            pass
+        return await stream.get_final_response()
+
+    def stream_user_message_to_agent_thread(
+        self,
+        *,
+        thread_id: str,
+        body: str,
+        created_at: int,
+        user_message: MessageRecord | None = None,
+    ) -> ResponseStream[LiveRuntimeEvent, tuple[MessageRecord, MessageRecord | None]]:
+        thread = self.get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"unknown thread: {thread_id}")
+        if thread.assigned_agent_id is None:
+            raise ValueError(f"thread has no assigned agent: {thread_id}")
+
+        resolved_user_message = user_message or self.record_user_message_to_thread(
+            thread_id=thread_id,
+            body=body,
+            created_at=created_at,
+        )
+        state: dict[str, MessageRecord | None] = {"user": resolved_user_message, "reply": None}
+
+        async def _events():
+            turn_stream = self._stream_agent_turn(
+                thread_id=thread_id,
+                agent_id=thread.assigned_agent_id,
+                prompt_sender="user",
+                reply_sender=thread.assigned_agent_id,
+                body=body,
+                created_at=created_at + 1,
                 record_prompt=False,
             )
             async for event in turn_stream:

@@ -2488,6 +2488,48 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 ["orchestrator", "architect"],
             )
 
+    async def test_runtime_can_send_user_message_to_agent_thread(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, response_text: str) -> None:
+                self.response_text = response_text
+                self.created_session_ids: list[str] = []
+                self.seen_session_ids: list[str] = []
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                self.created_session_ids.append(session_id or "")
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                self.seen_session_ids.append(session.session_id if session is not None else "")
+                return SimpleNamespace(text=self.response_text)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            thread = runtime.create_agent_thread(agent_id="architect", created_at=1_710_755_200)
+            agent = FakeAgent("Here is the architecture sketch.")
+
+            with patch.object(type(runtime), "build_agent", return_value=agent):
+                await runtime.send_user_message_to_agent_thread(
+                    thread_id=thread.id,
+                    body="What shape should this take?",
+                    created_at=1_710_755_201,
+                )
+
+            self.assertEqual(agent.created_session_ids, [f"{thread.id}:architect"])
+            self.assertEqual(agent.seen_session_ids, [f"{thread.id}:architect"])
+            self.assertEqual(
+                [message.sender for message in runtime.list_thread_messages(thread.id)],
+                ["user", "architect"],
+            )
+
     async def test_stream_agent_turn_emits_failed_draft_when_agent_is_unavailable(self) -> None:
         from ergon_studio.runtime import load_runtime
 

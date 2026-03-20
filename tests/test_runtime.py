@@ -73,6 +73,24 @@ Ship a design deliverable.
 
             self.assertFalse(runtime._workflow_is_non_delivery("architecture-first"))
 
+    def test_list_workflow_summaries_exposes_selection_hints(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            summaries = {summary["id"]: summary for summary in runtime.list_workflow_summaries()}
+
+            self.assertEqual(summaries["single-agent-execution"]["selection_hints"], ("tiny_delivery",))
+            self.assertEqual(summaries["standard-build"]["selection_hints"], ("staged_delivery",))
+            self.assertEqual(summaries["dynamic-open-ended"]["selection_hints"], ("adaptive_delivery",))
+
     def test_load_runtime_combines_paths_registry_and_tools(self) -> None:
         from ergon_studio.runtime import load_runtime
 

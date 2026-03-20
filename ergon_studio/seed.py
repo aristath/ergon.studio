@@ -356,6 +356,8 @@ name: Single-Agent Execution
 kind: workflow
 orchestration: direct
 delivery_candidate: true
+selection_hints:
+  - tiny_delivery
 steps:
   - coder
 tool_evidence:
@@ -396,6 +398,8 @@ name: Architecture First
 kind: workflow
 orchestration: sequential
 adaptive_staffing: false
+selection_hints:
+  - design_only
 steps:
   - architect
 acceptance_mode: design_brief
@@ -421,6 +425,8 @@ name: Standard Build
 kind: workflow
 orchestration: sequential
 delivery_candidate: true
+selection_hints:
+  - staged_delivery
 steps:
   - architect
   - coder
@@ -463,6 +469,8 @@ id: best-of-n
 name: Best of N
 kind: workflow
 orchestration: concurrent
+selection_hints:
+  - quality_sensitive
 step_groups:
   - [coder, coder, coder]
   - [reviewer]
@@ -500,6 +508,8 @@ id: debate
 name: Debate
 kind: workflow
 orchestration: group_chat
+selection_hints:
+  - exploratory
 step_groups:
   - [architect, brainstormer, reviewer]
 max_rounds: 4
@@ -532,6 +542,8 @@ name: Dynamic Open Ended
 kind: workflow
 orchestration: magentic
 delivery_candidate: true
+selection_hints:
+  - adaptive_delivery
 step_groups:
   - [architect, coder, reviewer, fixer, tester, researcher]
 max_rounds: 8
@@ -557,6 +569,8 @@ id: specialist-handoff
 name: Specialist Handoff
 kind: workflow
 orchestration: handoff
+selection_hints:
+  - exploratory
 step_groups:
   - [architect, researcher, brainstormer, reviewer]
 start_agent: architect
@@ -596,6 +610,8 @@ id: research-then-decide
 name: Research Then Decide
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - research_only
 steps:
   - researcher
 acceptance_mode: research_brief
@@ -620,6 +636,8 @@ id: review-repair-loop
 name: Review Repair Loop
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - review_loop
 steps:
   - reviewer
   - fixer
@@ -656,6 +674,8 @@ id: review-driven-repair
 name: Review Driven Repair
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - review_loop
 steps:
   - reviewer
   - fixer
@@ -692,6 +712,8 @@ id: test-driven-repair
 name: Test Driven Repair
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - test_repair
 steps:
   - tester
   - fixer
@@ -732,6 +754,8 @@ id: approval-gated
 name: Approval Gated
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - approval_only
 steps: []
 ---
 ## Purpose
@@ -754,6 +778,8 @@ id: replanning
 name: Replanning
 kind: workflow
 orchestration: sequential
+selection_hints:
+  - design_only
 steps:
   - architect
 acceptance_mode: revised_plan

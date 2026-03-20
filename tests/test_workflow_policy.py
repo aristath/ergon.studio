@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, delivery_candidate_for_metadata, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode, step_groups_for_metadata
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, delivery_candidate_for_metadata, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode, selection_hints_for_metadata, step_groups_for_metadata
 
 
 class WorkflowPolicyTests(unittest.TestCase):
@@ -26,6 +26,13 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("minimal working delivery", acceptance_rule_for_mode("delivery"))
         self.assertIn("decision-ready recommendation", acceptance_criteria_for_mode("decision_ready"))
         self.assertIn("minimal working result", acceptance_criteria_for_mode("delivery"))
+
+    def test_selection_hints_for_metadata_normalizes_and_deduplicates(self) -> None:
+        self.assertEqual(
+            selection_hints_for_metadata({"selection_hints": ["tiny_delivery", " tiny_delivery ", "", "adaptive_delivery"]}),
+            ("tiny_delivery", "adaptive_delivery"),
+        )
+        self.assertEqual(selection_hints_for_metadata({"selection_hints": "tiny_delivery"}), ())
 
     def test_step_groups_for_metadata_validates_and_normalizes(self) -> None:
         self.assertEqual(

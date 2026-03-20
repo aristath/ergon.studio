@@ -34,7 +34,7 @@ from ergon_studio.tool_context import ToolExecutionContext, current_tool_executi
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
 from ergon_studio.workflow_compiler import compile_workflow_definition, validate_workflow_group, workflow_step_groups_for_definition
-from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, delivery_candidate_for_metadata, is_non_delivery_acceptance_mode, step_groups_for_metadata
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, delivery_candidate_for_metadata, is_non_delivery_acceptance_mode, selection_hints_for_metadata, step_groups_for_metadata
 from ergon_studio.workflow_runtime import execute_defined_workflow
 from ergon_studio.workflow_store import WorkflowStore
 
@@ -506,6 +506,7 @@ class RuntimeContext:
                     "orchestration": str(definition.metadata.get("orchestration", "unknown")),
                     "acceptance_mode": acceptance_mode_for_metadata(definition.metadata),
                     "delivery_candidate": delivery_candidate_for_metadata(definition.metadata),
+                    "selection_hints": selection_hints_for_metadata(definition.metadata),
                     "step_groups": self.workflow_step_groups(workflow_id),
                     "purpose": purpose,
                 }
@@ -3260,10 +3261,12 @@ def _truncate_preview(text: str, *, limit: int) -> str:
 def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
     workflow_lines = []
     for summary in runtime.list_workflow_summaries():
+        hints = ", ".join(summary["selection_hints"]) or "none"
         workflow_lines.append(
             f"- {summary['id']}: orchestration={summary['orchestration']} "
             f"delivery_candidate={summary['delivery_candidate']} "
-            f"acceptance={summary['acceptance_mode']} purpose={summary['purpose']}"
+            f"acceptance={summary['acceptance_mode']} "
+            f"selection_hints={hints} purpose={summary['purpose']}"
         )
     agent_lines = []
     for summary in runtime.list_agent_summaries():
@@ -3285,12 +3288,12 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "Rules:",
             "- Prefer workflow for non-trivial implementation, debugging, verification, or delivery work.",
             "- If the user wants runnable code or an implemented project outcome, preserve the full delivery goal instead of narrowing it to a design-only or review-only subtask.",
-            "- Prefer `single-agent-execution` for tiny, bounded deliveries with one obvious entrypoint and minimal moving parts.",
-            "- Prefer `standard-build` only when explicit staging and a separate implementation/review cycle are clearly helpful.",
-            "- Prefer `dynamic-open-ended` when the work is broad, greenfield, evolving, or likely to need clarification, replanning, or changing specialist assignments mid-flight.",
-            "- Prefer `specialist-handoff` when the work is mainly exploratory discussion and specialists should pass control directly among themselves.",
+            "- For tiny, bounded delivery, prefer workflows tagged `tiny_delivery`.",
+            "- For staged implementation with explicit build/test/review structure, prefer workflows tagged `staged_delivery`.",
+            "- For broad, evolving, or uncertainty-heavy delivery, prefer workflows tagged `adaptive_delivery`.",
+            "- For exploratory specialist-to-specialist discussion, prefer workflows tagged `exploratory`.",
             "- When the user expects delivery, strongly prefer workflows marked `delivery_candidate=true`.",
-            "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
+            "- Avoid workflows tagged `design_only`, `research_only`, or other non-delivery-only patterns when the user explicitly expects implementation in the same turn.",
             "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
             "- If the recent conversation already settled the approach and the latest user turn is approval to proceed, choose delivery work instead of another reply.",
             "- Prefer delegate only for narrow specialist work.",

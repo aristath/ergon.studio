@@ -22,3 +22,7 @@ It does not create local project state on startup.
 Point it at a definitions directory containing:
 - `agents/orchestrator.md`
 - `workflows/*.md`
+
+Required startup inputs:
+- `--definitions-dir` or `ERGON_DEFINITIONS_DIR`
+- `--upstream-base-url` or `ERGON_UPSTREAM_BASE_URL`

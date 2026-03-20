@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--definitions-dir",
         type=Path,
-        default=Path(os.environ.get("ERGON_DEFINITIONS_DIR", Path.home() / ".ergon.studio")),
+        default=Path(os.environ["ERGON_DEFINITIONS_DIR"]) if os.environ.get("ERGON_DEFINITIONS_DIR") else None,
     )
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)
@@ -36,6 +36,8 @@ def run_proxy_server(
     instruction_role: str | None,
     disable_tool_calling: bool,
 ) -> int:
+    if definitions_dir is None:
+        raise ValueError("missing definitions directory; pass --definitions-dir or set ERGON_DEFINITIONS_DIR")
     if not upstream_base_url or not upstream_base_url.strip():
         raise ValueError("missing upstream base URL; pass --upstream-base-url or set ERGON_UPSTREAM_BASE_URL")
     registry = load_registry(

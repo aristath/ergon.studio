@@ -395,6 +395,7 @@ id: architecture-first
 name: Architecture First
 kind: workflow
 orchestration: sequential
+adaptive_staffing: false
 steps:
   - architect
 acceptance_mode: design_brief

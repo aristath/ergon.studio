@@ -12,6 +12,24 @@ from ergon_studio.config import save_global_config
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_adaptive_staffing_support_follows_metadata_flag(self) -> None:
+        from ergon_studio.runtime import _workflow_supports_adaptive_staffing
+
+        self.assertFalse(
+            _workflow_supports_adaptive_staffing(
+                adaptive_staffing_enabled=False,
+                orchestration="sequential",
+                default_step_groups=(("architect",), ("coder",)),
+            )
+        )
+        self.assertTrue(
+            _workflow_supports_adaptive_staffing(
+                adaptive_staffing_enabled=True,
+                orchestration="sequential",
+                default_step_groups=(("architect",), ("coder",)),
+            )
+        )
+
     def test_load_runtime_combines_paths_registry_and_tools(self) -> None:
         from ergon_studio.runtime import load_runtime
 

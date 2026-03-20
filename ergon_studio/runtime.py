@@ -1387,8 +1387,10 @@ class RuntimeContext:
     ) -> tuple[tuple[str, ...], ...]:
         default_groups = self.workflow_step_groups(workflow_id)
         orchestration = self.workflow_orchestration(workflow_id)
+        definition = self.registry.workflow_definitions[workflow_id]
+        adaptive_staffing_enabled = bool(definition.metadata.get("adaptive_staffing", True))
         if not _workflow_supports_adaptive_staffing(
-            workflow_id=workflow_id,
+            adaptive_staffing_enabled=adaptive_staffing_enabled,
             orchestration=orchestration,
             default_step_groups=default_groups,
         ):
@@ -3563,11 +3565,13 @@ def _validate_runtime_step_groups(
 
 def _workflow_supports_adaptive_staffing(
     *,
-    workflow_id: str,
+    adaptive_staffing_enabled: bool,
     orchestration: str,
     default_step_groups: tuple[tuple[str, ...], ...],
 ) -> bool:
     if not default_step_groups:
+        return False
+    if not adaptive_staffing_enabled:
         return False
     if orchestration not in {"sequential", "magentic", "handoff"}:
         return False
@@ -3577,8 +3581,6 @@ def _workflow_supports_adaptive_staffing(
         for agent_id in group
     }
     if len(participants) <= 1:
-        return False
-    if workflow_id == "architecture-first":
         return False
     return True
 

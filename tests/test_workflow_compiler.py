@@ -54,6 +54,25 @@ Broken.
             with self.assertRaisesRegex(ValueError, "non-empty lists"):
                 compile_workflow_definition(definition)
 
+    def test_compile_workflow_definition_requires_explicit_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            definition_path = Path(temp_dir) / "broken.md"
+            definition_path.write_text(
+                """---
+id: broken
+name: Broken
+orchestration: sequential
+---
+## Purpose
+Broken.
+""",
+                encoding="utf-8",
+            )
+
+            definition = load_definition(definition_path)
+            with self.assertRaisesRegex(ValueError, "must declare `steps` or `step_groups`"):
+                compile_workflow_definition(definition)
+
     def test_compile_workflow_definition_supports_group_chat(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             definition_path = Path(temp_dir) / "debate.md"

@@ -33,13 +33,12 @@ from ergon_studio.tool_call_store import ToolCallStore
 from ergon_studio.tool_context import ToolExecutionContext, current_tool_execution_context, use_tool_execution_context
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
-from ergon_studio.workflow_compiler import compile_workflow_definition
+from ergon_studio.workflow_compiler import compile_workflow_definition, validate_workflow_group, workflow_step_groups_for_definition
 from ergon_studio.workflow_runtime import execute_defined_workflow
 from ergon_studio.workflow_store import WorkflowStore
 
 
-MAIN_SESSION_ID = "session-main"
-MAIN_THREAD_ID = "thread-main"
+MAIN_THREAD_PREFIX = "thread-main"
 
 
 @dataclass(frozen=True)
@@ -85,8 +84,8 @@ class RuntimeContext:
     command_store: CommandStore
     tool_call_store: ToolCallStore
     retrieval_index: RetrievalIndex
-    main_session_id: str = MAIN_SESSION_ID
-    main_thread_id: str = MAIN_THREAD_ID
+    main_session_id: str
+    main_thread_id: str
 
     def build_agent(self, agent_id: str):
         return build_agent(
@@ -494,22 +493,7 @@ class RuntimeContext:
         definition = self.registry.workflow_definitions.get(workflow_id)
         if definition is None:
             raise ValueError(f"unknown workflow: {workflow_id}")
-
-        configured_step_groups = definition.metadata.get("step_groups")
-        if configured_step_groups is not None:
-            if not isinstance(configured_step_groups, list):
-                raise ValueError(f"workflow '{workflow_id}' step_groups must be a list")
-            return tuple(_validate_workflow_group(workflow_id, group) for group in configured_step_groups)
-
-        configured_steps = definition.metadata.get("steps")
-        if configured_steps is None:
-            legacy_steps = _legacy_workflow_steps(workflow_id)
-            return tuple((step,) for step in legacy_steps)
-        if not isinstance(configured_steps, list):
-            raise ValueError(f"workflow '{workflow_id}' steps must be a list")
-        if not configured_steps:
-            return ()
-        return tuple((step,) for step in _validate_workflow_group(workflow_id, configured_steps))
+        return workflow_step_groups_for_definition(definition)
 
     def list_provider_ids(self) -> list[str]:
         return sorted(self.registry.config.get("providers", {}).keys())
@@ -2971,9 +2955,7 @@ def _resolve_runtime_session(
 
 
 def _main_thread_id_for_session(session_id: str) -> str:
-    if session_id == MAIN_SESSION_ID:
-        return MAIN_THREAD_ID
-    return f"{MAIN_THREAD_ID}-{session_id}"
+    return f"{MAIN_THREAD_PREFIX}-{session_id}"
 
 
 def _session_title_from_message(body: str, *, limit: int = 60) -> str:
@@ -3224,40 +3206,6 @@ def _as_bool(value: object) -> bool:
         if normalized in {"false", "no", "0", ""}:
             return False
     return False
-
-
-def _legacy_workflow_steps(workflow_id: str) -> tuple[str, ...]:
-    workflow_map = {
-        "direct-response": (),
-        "single-agent-execution": ("coder",),
-        "architecture-first": ("architect",),
-        "research-then-decide": ("researcher",),
-        "standard-build": ("architect", "coder", "reviewer"),
-        "best-of-n": ("coder", "reviewer"),
-        "debate": ("architect", "brainstormer", "reviewer"),
-        "review-driven-repair": ("reviewer", "fixer"),
-        "test-driven-repair": ("tester", "fixer", "reviewer"),
-        "approval-gated": (),
-        "replanning": ("architect",),
-        "dynamic-open-ended": ("architect", "coder", "reviewer", "fixer", "tester", "researcher"),
-        "specialist-handoff": ("architect", "researcher", "brainstormer", "reviewer"),
-    }
-    return workflow_map.get(workflow_id, ())
-
-
-def _validate_workflow_group(workflow_id: str, group: object) -> tuple[str, ...]:
-    if isinstance(group, str):
-        if not group:
-            raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
-        return (group,)
-    if not isinstance(group, list) or not group:
-        raise ValueError(f"workflow '{workflow_id}' step groups must be non-empty lists of strings")
-    steps: list[str] = []
-    for step in group:
-        if not isinstance(step, str) or not step:
-            raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
-        steps.append(step)
-    return tuple(steps)
 
 
 def _validate_runtime_step_groups(

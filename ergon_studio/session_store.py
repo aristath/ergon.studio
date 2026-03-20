@@ -95,8 +95,6 @@ class SessionStore:
 
 
 def default_session_title(*, session_id: str, created_at: int) -> str:
-    if session_id == "session-main":
-        return "Main Session"
     if session_id.startswith("session-"):
         suffix = session_id.removeprefix("session-")
     else:

@@ -22,7 +22,7 @@ class CompiledWorkflow:
 
 
 def compile_workflow_definition(definition: DefinitionDocument) -> CompiledWorkflow:
-    step_groups = _workflow_step_groups(definition)
+    step_groups = workflow_step_groups_for_definition(definition)
     orchestration = str(definition.metadata.get("orchestration", "sequential"))
     if orchestration == "group_chat":
         workflow = _compile_group_chat_workflow(definition, step_groups)
@@ -146,20 +146,22 @@ def _executor_id(executor: object) -> str:
     return str(getattr(executor, "id"))
 
 
-def _workflow_step_groups(definition: DefinitionDocument) -> tuple[tuple[str, ...], ...]:
+def workflow_step_groups_for_definition(definition: DefinitionDocument) -> tuple[tuple[str, ...], ...]:
     configured_step_groups = definition.metadata.get("step_groups")
     if configured_step_groups is not None:
         if not isinstance(configured_step_groups, list):
             raise ValueError(f"workflow '{definition.id}' step_groups must be a list")
-        return tuple(_validate_group(definition.id, group) for group in configured_step_groups)
+        return tuple(validate_workflow_group(definition.id, group) for group in configured_step_groups)
 
-    configured_steps = definition.metadata.get("steps", [])
+    configured_steps = definition.metadata.get("steps")
+    if configured_steps is None:
+        raise ValueError(f"workflow '{definition.id}' must declare `steps` or `step_groups`")
     if not isinstance(configured_steps, list):
         raise ValueError(f"workflow '{definition.id}' steps must be a list")
-    return tuple((step,) for step in _validate_group(definition.id, configured_steps)) if configured_steps else ()
+    return tuple((step,) for step in validate_workflow_group(definition.id, configured_steps)) if configured_steps else ()
 
 
-def _validate_group(workflow_id: str, group: object) -> tuple[str, ...]:
+def validate_workflow_group(workflow_id: str, group: object) -> tuple[str, ...]:
     if isinstance(group, str):
         if not group:
             raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")

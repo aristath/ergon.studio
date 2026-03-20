@@ -560,6 +560,11 @@ id: standard-build
 name: Standard Build
 kind: workflow
 orchestration: sequential
+steps:
+  - architect
+  - coder
+  - tester
+  - reviewer
 ---
 ## Purpose
 Ship standard implementation work.
@@ -578,6 +583,33 @@ Return reviewed code and a clear summary.
                 [event.kind for event in runtime.list_events()],
                 ["definition_saved"],
             )
+
+    def test_runtime_rejects_workflow_definition_without_explicit_steps(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            with self.assertRaisesRegex(ValueError, "must declare `steps` or `step_groups`"):
+                runtime.save_workflow_definition_text(
+                    workflow_id="standard-build",
+                    text="""---
+id: standard-build
+name: Standard Build
+kind: workflow
+orchestration: sequential
+---
+## Purpose
+Broken workflow.
+""",
+                    created_at=1_710_755_200,
+                )
 
     def test_runtime_can_run_and_persist_workspace_commands(self) -> None:
         from ergon_studio.runtime import load_runtime

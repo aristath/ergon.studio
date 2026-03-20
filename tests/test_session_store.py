@@ -19,7 +19,7 @@ class SessionStoreTests(unittest.TestCase):
             paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
             store = SessionStore(paths)
 
-            first = store.create_session(session_id="session-main", created_at=10)
+            first = store.create_session(session_id="session-alpha", created_at=10)
             second = store.create_session(created_at=20, title="Bugfix lane")
             renamed = store.rename_session(
                 session_id=second.id,
@@ -31,7 +31,7 @@ class SessionStoreTests(unittest.TestCase):
             visible = store.list_sessions()
             all_sessions = store.list_sessions(include_archived=True)
 
-            self.assertEqual(first.title, "Main Session")
+            self.assertEqual(first.title, "Session alpha")
             self.assertEqual(renamed.title, "Bugfix session")
             self.assertEqual([session.id for session in visible], [second.id])
             self.assertEqual([session.id for session in all_sessions], [first.id, second.id])
@@ -61,7 +61,7 @@ class SessionStoreTests(unittest.TestCase):
             paths = bootstrap_workspace(project_root=project_root, home_dir=home_dir)
             store = SessionStore(paths)
 
-            first = store.create_session(session_id="session-main", created_at=10)
+            first = store.create_session(session_id="session-alpha", created_at=10)
             second = store.create_session(created_at=20, title="Feature branch")
             store.touch_session(session_id=first.id, updated_at=50)
 

@@ -9,18 +9,20 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.proxy import (
-    ProxyContentDeltaEvent,
+from ergon_studio.proxy.chat_adapter import (
     build_chat_completion_response,
-    build_responses_response,
     encode_chat_stream_done,
     encode_chat_stream_sse,
+)
+from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
+from ergon_studio.proxy.health import build_proxy_health_snapshot
+from ergon_studio.proxy.models import ProxyContentDeltaEvent
+from ergon_studio.proxy.responses_adapter import (
+    build_responses_response,
     encode_responses_stream_events,
     encode_responses_stream_sse,
-    parse_chat_completion_request,
-    parse_responses_request,
 )
-from ergon_studio.proxy.health import build_proxy_health_snapshot
+from ergon_studio.proxy.responses_bridge import parse_responses_request
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):

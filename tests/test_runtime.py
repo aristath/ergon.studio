@@ -3477,6 +3477,177 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             body = runtime.read_artifact_body(report.id)
             self.assertIn("Automatic repair cycles: 1", body)
 
+    async def test_runtime_blocks_when_orchestrator_followup_decision_is_invalid(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture ready."),
+            "coder": FakeAgent("Implementation ready."),
+            "tester": FakeAgent("Verification exposed a remaining issue."),
+            "reviewer": FakeAgent("Review complete."),
+            "fixer": FakeAgent("Not used."),
+            "orchestrator": FakeAgent(
+                '{"accepted": false, "summary": "The current result still needs a concrete follow-up decision.", "findings": ["The current evidence is not sufficient yet."], "requires_replan": false, "replan_summary": ""}'
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            original_generate = type(runtime).generate_agent_text_without_tools
+
+            async def fake_generate(
+                _runtime,
+                *,
+                agent_id: str,
+                body: str,
+                created_at: int,
+                thread_id: str | None = None,
+                extra_instructions: str = "",
+            ):
+                if "You are deciding the next workflow move" in extra_instructions:
+                    return "not valid json"
+                return await original_generate(
+                    _runtime,
+                    agent_id=agent_id,
+                    body=body,
+                    created_at=created_at,
+                    thread_id=thread_id,
+                    extra_instructions=extra_instructions,
+                )
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch.object(
+                type(runtime),
+                "generate_agent_text_without_tools",
+                autospec=True,
+                side_effect=fake_generate,
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "blocked")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            self.assertEqual(workflow_run.current_step_index, 4)
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertNotIn("workflow_auto_repair_started", event_kinds)
+            self.assertNotIn("workflow_auto_replan_started", event_kinds)
+            self.assertNotIn("workflow_scripted_fallback_used", event_kinds)
+
+    async def test_runtime_uses_scripted_fallback_only_when_followup_is_unavailable(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                response_text = self.responses.pop(0)
+                return SimpleNamespace(text=response_text)
+
+        fake_agents = {
+            "architect": FakeAgent("Architecture ready."),
+            "coder": FakeAgent("Implementation ready."),
+            "tester": FakeAgent(["Tests failed on the first pass.", "Tests passed after the fix."]),
+            "reviewer": FakeAgent(["Initial review complete.", "Follow-up review complete."]),
+            "fixer": FakeAgent("Applied a focused fix."),
+            "orchestrator": FakeAgent(
+                [
+                    '{"accepted": false, "summary": "The implementation still fails verification.", "findings": ["The tester reported a failing verification step."], "requires_replan": false, "replan_summary": ""}',
+                    '{"accepted": true, "summary": "The repair resolved the issue and the workflow can be accepted.", "findings": [], "requires_replan": false, "replan_summary": ""}',
+                ]
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            original_generate = type(runtime).generate_agent_text_without_tools
+
+            async def fake_generate(
+                _runtime,
+                *,
+                agent_id: str,
+                body: str,
+                created_at: int,
+                thread_id: str | None = None,
+                extra_instructions: str = "",
+            ):
+                if "You are deciding the next workflow move" in extra_instructions:
+                    return None
+                return await original_generate(
+                    _runtime,
+                    agent_id=agent_id,
+                    body=body,
+                    created_at=created_at,
+                    thread_id=thread_id,
+                    extra_instructions=extra_instructions,
+                )
+
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch.object(
+                type(runtime),
+                "generate_agent_text_without_tools",
+                autospec=True,
+                side_effect=fake_generate,
+            ), patch(
+                "ergon_studio.workflow_runtime._required_tool_names",
+                side_effect=lambda _agent_id: (),
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="standard-build",
+                    goal="Build the feature end to end.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "completed")
+            workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(workflow_run)
+            assert workflow_run is not None
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_scripted_fallback_used", event_kinds)
+            self.assertIn("workflow_auto_repair_started", event_kinds)
+
     async def test_runtime_recovers_blocked_step_with_orchestrator_clarification(self) -> None:
         from ergon_studio.runtime import load_runtime
 

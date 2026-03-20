@@ -7,7 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ergon_studio.runtime import load_runtime
-from ergon_studio.tui.widgets import ComposerTextArea
+try:
+    from ergon_studio.tui.widgets import ComposerTextArea
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("textual is not installed") from exc
 from tests.real_test_support import (
     calculator_entrypoints,
     configure_local_runtime,

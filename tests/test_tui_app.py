@@ -3,14 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from agent_framework import AgentSession, ResponseStream
-from textual.containers import VerticalScroll
-from textual.widgets import Input, OptionList, Static
+try:
+    from textual.containers import VerticalScroll
+    from textual.widgets import Input, OptionList, Static
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("textual is not installed") from exc
 
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen

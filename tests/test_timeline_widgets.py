@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from textual.app import App, ComposeResult
+try:
+    from textual.app import App, ComposeResult
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("textual is not installed") from exc
 
 from ergon_studio.tui.timeline_models import ChatTurnItem
 from ergon_studio.tui.timeline_widgets import TimelineChatTurnWidget, TimelineView
@@ -45,4 +48,3 @@ class TimelineWidgetTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIs(first_widget, second_widget)
             self.assertEqual(timeline.plain_text(), "orchestrator: Working on it now")
-

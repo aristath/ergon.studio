@@ -3748,6 +3748,9 @@ def _delegation_review_instructions() -> str:
             "You are a narrow internal acceptance reviewer for a delegated specialist result.",
             "Decide whether the delegated result appears complete enough to accept without another worker turn.",
             "Prefer clarification or rejection when the result is vague, missing evidence, or clearly does not satisfy the request.",
+            "When the original request asks for a narrow output format such as filename only, yes/no, or one line, accept an answer that matches that format exactly.",
+            "Do not reject a plain filename like `Dockerfile` merely because it is concise if it directly answers the request.",
+            "Do not require extra evidence or explanation when the original request explicitly asked for the minimal answer only.",
             "Do not delegate, do not plan, and do not call tools.",
             "Output JSON only with this shape:",
             '{"accepted": true, "summary": "one concise sentence", "findings": ["specific issue"]}',
@@ -3760,6 +3763,8 @@ def _delegation_review_fallback_instructions() -> str:
         [
             "You are a narrow internal acceptance reviewer for a delegated specialist result.",
             "Decide whether the delegated result appears complete enough to accept without another worker turn.",
+            "If the request asks for filename only, yes/no, or another narrow format, accept an answer that matches that format exactly.",
+            "Do not reject a plain filename like `Dockerfile` just because it is concise.",
             "Do not delegate, do not plan, and do not call tools.",
             "Reply with one concise line that starts with ACCEPTED: or REJECTED:.",
         ]
@@ -3788,6 +3793,7 @@ def _render_delegation_review_prompt(
         [
             "",
             "Decide whether this delegated result should be accepted as complete.",
+            "Honor the requested output format. If the request asked for filename only or another narrow answer, a concise matching answer is acceptable.",
             "If it is not complete enough, reject it and explain the most important missing point.",
         ]
     )
@@ -3822,7 +3828,10 @@ def _render_delegation_followup_prompt(
             "Address the review feedback now.",
             "If the work is wrong or incomplete, fix it with the appropriate tools.",
             "For file changes, the final corrected state must come from `write_file` or `patch_file`, not only from shell redirection.",
-            "If the work is already correct, reply with concrete evidence that resolves the findings.",
+            "If the issue is formatting or answer shape, return only the corrected final answer in the requested format.",
+            "If the original request asks for filename only, yes/no, one line, or another narrow format, follow that exactly.",
+            "Do not add snippets, line numbers, markdown fences, or extra explanation unless the original request asks for them.",
+            "If the work is already correct, reply with only the minimum concrete answer needed to resolve the findings.",
             "Do not only say that it is done.",
         ]
     )

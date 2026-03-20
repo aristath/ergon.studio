@@ -73,6 +73,24 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(payload["output"][0]["call_id"], "call_1")
         self.assertEqual(len(payload["output"]), 1)
 
+    def test_build_responses_response_preserves_recorded_output_order(self) -> None:
+        payload = build_responses_response(
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            content="Draft first.",
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json="{\"path\":\"main.py\"}",
+                ),
+            ),
+            output_order=("content", "tool_calls"),
+        )
+
+        self.assertEqual([item["type"] for item in payload["output"]], ["message", "function_call"])
+
     def test_encodes_tool_call_stream_events(self) -> None:
         payload = encode_responses_stream_events(
             event=ProxyToolCallEvent(

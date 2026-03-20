@@ -173,6 +173,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 content=result.content,
                 reasoning=result.reasoning,
                 tool_calls=result.tool_calls,
+                output_order=result.output_order,
             ),
         )
 

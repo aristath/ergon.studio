@@ -298,6 +298,40 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payload["output"][0]["type"], "function_call")
         self.assertEqual(payload["output"][0]["call_id"], "call_1")
 
+    def test_responses_preserve_content_before_tool_calls_when_turn_recorded_it_that_way(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [ProxyContentDeltaEvent("Draft first."), ProxyFinishEvent("tool_calls")],
+                tool_calls=(
+                    ProxyToolCall(
+                        id="call_1",
+                        name="read_file",
+                        arguments_json="{\"path\":\"main.py\"}",
+                    ),
+                ),
+                output_order=("content", "tool_calls"),
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Inspect main.py",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual([item["type"] for item in payload["output"]], ["message", "function_call"])
+
     def test_chat_completions_resume_full_tool_loop(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
@@ -640,9 +674,10 @@ class ProxyServerTests(unittest.TestCase):
 
 
 class _FakeCore:
-    def __init__(self, events, *, tool_calls=()):
+    def __init__(self, events, *, tool_calls=(), output_order=()):
         self._events = list(events)
         self._tool_calls = tuple(tool_calls)
+        self._output_order = tuple(output_order)
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)
@@ -664,6 +699,7 @@ class _FakeCore:
                 reasoning="",
                 mode="act",
                 tool_calls=self._tool_calls,
+                output_order=self._output_order,
             ),
         )
 

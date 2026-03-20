@@ -14,50 +14,53 @@ def build_responses_response(
     content: str,
     reasoning: str = "",
     tool_calls: tuple[Any, ...] = (),
+    output_order: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     output: list[dict[str, Any]] = []
-    if reasoning:
-        output.append(
-            {
-                "id": f"rs_{uuid4().hex}",
-                "type": "reasoning",
-                "summary": [
-                    {
-                        "type": "summary_text",
-                        "text": reasoning,
-                    }
-                ],
-                "content": [],
-            }
-        )
-    if tool_calls:
-        for tool_call in tool_calls:
+    ordered_kinds = _normalize_output_order(output_order, reasoning=reasoning, content=content, tool_calls=tool_calls)
+    for kind in ordered_kinds:
+        if kind == "reasoning":
             output.append(
                 {
-                    "id": f"fc_{uuid4().hex}",
-                    "type": "function_call",
-                    "call_id": tool_call.id,
-                    "name": tool_call.name,
-                    "arguments": tool_call.arguments_json,
-                    "status": "completed",
+                    "id": f"rs_{uuid4().hex}",
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": reasoning,
+                        }
+                    ],
+                    "content": [],
                 }
             )
-    if content or not tool_calls:
-        output.append(
-            {
-                "id": f"msg_{uuid4().hex}",
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [
+        elif kind == "tool_calls":
+            for tool_call in tool_calls:
+                output.append(
                     {
-                        "type": "output_text",
-                        "text": content,
-                        "annotations": [],
+                        "id": f"fc_{uuid4().hex}",
+                        "type": "function_call",
+                        "call_id": tool_call.id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments_json,
+                        "status": "completed",
                     }
-                ],
-            }
-        )
+                )
+        elif kind == "content":
+            output.append(
+                {
+                    "id": f"msg_{uuid4().hex}",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": content,
+                            "annotations": [],
+                        }
+                    ],
+                }
+            )
     return {
         "id": response_id,
         "object": "response",
@@ -165,3 +168,24 @@ def encode_responses_stream_sse(payload: dict[str, Any]) -> bytes:
     import json
 
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode("utf-8")
+
+
+def _normalize_output_order(output_order: tuple[str, ...], *, reasoning: str, content: str, tool_calls: tuple[Any, ...]) -> tuple[str, ...]:
+    ordered: list[str] = []
+    for kind in output_order:
+        if kind not in {"reasoning", "content", "tool_calls"} or kind in ordered:
+            continue
+        if kind == "reasoning" and not reasoning:
+            continue
+        if kind == "content" and not (content or not tool_calls):
+            continue
+        if kind == "tool_calls" and not tool_calls:
+            continue
+        ordered.append(kind)
+    if reasoning and "reasoning" not in ordered:
+        ordered.append("reasoning")
+    if tool_calls and "tool_calls" not in ordered:
+        ordered.append("tool_calls")
+    if (content or not tool_calls) and "content" not in ordered:
+        ordered.append("content")
+    return tuple(ordered)

@@ -148,9 +148,12 @@ class ProxyTurnResult:
     reasoning: str
     mode: str
     tool_calls: tuple[ProxyToolCall, ...] = ()
+    output_order: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.finish_reason not in _VALID_FINISH_REASONS:
             raise ValueError(f"unsupported finish reason: {self.finish_reason}")
         if not isinstance(self.tool_calls, tuple):
             raise TypeError("tool_calls must be a tuple")
+        if not isinstance(self.output_order, tuple):
+            raise TypeError("output_order must be a tuple")

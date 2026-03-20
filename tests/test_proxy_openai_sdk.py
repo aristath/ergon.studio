@@ -214,9 +214,10 @@ class ProxyOpenAISDKTests(unittest.TestCase):
 
 
 class _FakeCore:
-    def __init__(self, events, *, tool_calls=()):
+    def __init__(self, events, *, tool_calls=(), output_order=()):
         self._events = list(events)
         self._tool_calls = tuple(tool_calls)
+        self._output_order = tuple(output_order)
         self.registry = type("Registry", (), {"config": {}, "agent_definitions": {}, "workflow_definitions": {}})()
 
     def stream_turn(self, request, *, created_at: int | None = None):
@@ -239,6 +240,7 @@ class _FakeCore:
                 reasoning="",
                 mode="act",
                 tool_calls=self._tool_calls,
+                output_order=self._output_order,
             ),
         )
 

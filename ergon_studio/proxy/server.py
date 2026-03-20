@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from ergon_studio.proxy import (
+    ProxyContentDeltaEvent,
     build_chat_completion_response,
     build_responses_response,
     encode_chat_stream_done,
@@ -169,6 +170,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     async def _stream_responses(self, *, request, response_id: str, created_at: int) -> None:
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
+        content_emitted = False
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
@@ -186,6 +188,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         sequence_number = 2
         stream = self.server.core.stream_turn(request, created_at=created_at)
         async for event in stream:
+            if isinstance(event, ProxyContentDeltaEvent) and event.delta:
+                content_emitted = True
             for payload in encode_responses_stream_events(
                 event=event,
                 response_id=response_id,
@@ -194,6 +198,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 sequence_number=sequence_number,
                 reasoning_item_id=reasoning_item_id,
                 message_item_id=message_item_id,
+                include_output_done=content_emitted,
             ):
                 self.wfile.write(encode_responses_stream_sse(payload))
                 self.wfile.flush()

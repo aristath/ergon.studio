@@ -71,6 +71,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload["output"][0]["type"], "function_call")
         self.assertEqual(payload["output"][0]["call_id"], "call_1")
+        self.assertEqual(len(payload["output"]), 1)
 
     def test_encodes_tool_call_stream_events(self) -> None:
         payload = encode_responses_stream_events(
@@ -91,6 +92,20 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload[0]["type"], "response.output_item.added")
         self.assertEqual(payload[0]["item"]["type"], "function_call")
+
+    def test_finish_event_can_skip_output_done_when_no_content_was_streamed(self) -> None:
+        payload = encode_responses_stream_events(
+            event=ProxyFinishEvent("tool_calls"),
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            sequence_number=3,
+            reasoning_item_id="rs_1",
+            message_item_id="msg_1",
+            include_output_done=False,
+        )
+
+        self.assertEqual([item["type"] for item in payload], ["response.completed"])
 
 
 if __name__ == "__main__":

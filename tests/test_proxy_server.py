@@ -434,6 +434,54 @@ class ProxyServerTests(unittest.TestCase):
 
         self.assertEqual(second_payload["output_text"], "Final answer")
 
+    def test_responses_stream_tool_calls_do_not_emit_empty_output_done(self) -> None:
+        core = ProxyOrchestrationCore(
+            _proxy_registry(),
+            agent_builder=_proxy_agent_builder(
+                {
+                    "orchestrator": ["{\"mode\":\"act\"}", {"text": "", "tool_calls": [{"id": "call_1", "name": "read_file", "arguments": "{\"path\":\"main.py\"}"}]}],
+                    "architect": [],
+                    "coder": [],
+                }
+            ),
+        )
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Inspect main.py",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payloads = [
+                json.loads(line[6:])
+                for line in response.read().decode("utf-8").splitlines()
+                if line.startswith("data: {")
+            ]
+
+        event_types = [payload["type"] for payload in payloads]
+        self.assertIn("response.output_item.added", event_types)
+        self.assertNotIn("response.output_text.done", event_types)
+        self.assertEqual(event_types[-1], "response.completed")
+
 
 class _FakeCore:
     def __init__(self, events, *, tool_calls=()):

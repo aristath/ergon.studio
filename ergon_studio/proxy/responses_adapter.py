@@ -42,21 +42,22 @@ def build_responses_response(
                     "status": "completed",
                 }
             )
-    output.append(
-        {
-            "id": f"msg_{uuid4().hex}",
-            "type": "message",
-            "status": "completed",
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "output_text",
-                    "text": content,
-                    "annotations": [],
-                }
-            ],
-        }
-    )
+    if content or not tool_calls:
+        output.append(
+            {
+                "id": f"msg_{uuid4().hex}",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": content,
+                        "annotations": [],
+                    }
+                ],
+            }
+        )
     return {
         "id": response_id,
         "object": "response",
@@ -77,6 +78,7 @@ def encode_responses_stream_events(
     sequence_number: int,
     reasoning_item_id: str,
     message_item_id: str,
+    include_output_done: bool = True,
 ) -> list[dict[str, Any]]:
     if isinstance(event, ProxyReasoningDeltaEvent):
         return [
@@ -123,17 +125,22 @@ def encode_responses_stream_events(
             }
         ]
     if isinstance(event, ProxyFinishEvent):
-        return [
-            {
-                "type": "response.output_text.done",
-                "event_id": f"event_{uuid4().hex}",
-                "response_id": response_id,
-                "item_id": message_item_id,
-                "output_index": 0,
-                "content_index": 0,
-                "text": "",
-                "sequence_number": sequence_number,
-            },
+        payloads: list[dict[str, Any]] = []
+        if include_output_done:
+            payloads.append(
+                {
+                    "type": "response.output_text.done",
+                    "event_id": f"event_{uuid4().hex}",
+                    "response_id": response_id,
+                    "item_id": message_item_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "text": "",
+                    "sequence_number": sequence_number,
+                }
+            )
+            sequence_number += 1
+        payloads.append(
             {
                 "type": "response.completed",
                 "event_id": f"event_{uuid4().hex}",
@@ -144,9 +151,10 @@ def encode_responses_stream_events(
                     "model": model,
                     "status": "completed",
                 },
-                "sequence_number": sequence_number + 1,
-            },
-        ]
+                "sequence_number": sequence_number,
+            }
+        )
+        return payloads
     raise TypeError(f"unsupported event type: {type(event).__name__}")
 
 

@@ -34,6 +34,7 @@ from ergon_studio.tool_context import ToolExecutionContext, current_tool_executi
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
 from ergon_studio.workflow_compiler import compile_workflow_definition, validate_workflow_group, workflow_step_groups_for_definition
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, is_non_delivery_acceptance_mode
 from ergon_studio.workflow_runtime import execute_defined_workflow
 from ergon_studio.workflow_store import WorkflowStore
 
@@ -1767,7 +1768,7 @@ class RuntimeContext:
         definition = self.registry.workflow_definitions.get(workflow_id)
         if definition is None:
             return False
-        return str(definition.metadata.get("acceptance_mode", "delivery")) != "delivery"
+        return is_non_delivery_acceptance_mode(acceptance_mode_for_metadata(definition.metadata))
 
     async def generate_agent_text_without_tools(
         self,
@@ -2469,18 +2470,10 @@ class RuntimeContext:
         return "\n".join(lines)
 
     def _workflow_acceptance_criteria(self, workflow_id: str) -> str:
-        acceptance_mode = str(
-            self.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery")
+        acceptance_mode = acceptance_mode_for_metadata(
+            self.registry.workflow_definitions[workflow_id].metadata
         )
-        if acceptance_mode == "decision_ready":
-            return "Produce a clear decision-ready recommendation that addresses the goal and passes orchestrator review."
-        if acceptance_mode == "research_brief":
-            return "Produce a concrete research brief with enough evidence for the orchestrator to choose the next step."
-        if acceptance_mode == "design_brief":
-            return "Produce a concrete design brief that is implementation-ready and passes orchestrator review."
-        if acceptance_mode == "revised_plan":
-            return "Produce an explicit revised plan that realigns the work and passes orchestrator review."
-        return "Deliver a minimal working result that satisfies the goal and passes orchestrator review."
+        return acceptance_criteria_for_mode(acceptance_mode)
 
     def request_workflow_fix_cycle(
         self,

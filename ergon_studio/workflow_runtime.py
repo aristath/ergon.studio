@@ -15,6 +15,7 @@ from agent_framework_orchestrations._base_group_chat_orchestrator import GroupCh
 from ergon_studio.agent_factory import compose_instructions
 from ergon_studio.context_providers import WORKSPACE_STATE_KEY
 from ergon_studio.tool_context import ToolExecutionContext, use_tool_execution_context
+from ergon_studio.workflow_policy import acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_planning_acceptance_mode
 
 if TYPE_CHECKING:
     from ergon_studio.runtime import RuntimeContext, WorkflowRunView
@@ -1351,19 +1352,10 @@ def _workflow_participants(runtime: RuntimeContext, workflow_id: str) -> tuple[s
 
 
 def _workflow_acceptance_rule(runtime: RuntimeContext, workflow_id: str) -> str:
-    acceptance_mode = str(runtime.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery"))
-    if acceptance_mode == "decision_ready":
-        return "Decide whether the work produced a concrete decision-ready recommendation that addresses the goal."
-    if acceptance_mode == "research_brief":
-        return "Decide whether the work produced a concrete research brief with enough evidence for the orchestrator to choose the next step."
-    if acceptance_mode == "design_brief":
-        return "Decide whether the work produced a concrete design brief that is implementation-ready and aligned with the goal."
-    if acceptance_mode == "revised_plan":
-        return "Decide whether the work produced an explicit revised plan that realigns the project and is actionable."
-    return (
-        "Decide whether the work satisfies the goal and represents a minimal working delivery. "
-        "For runnable deliverables, require concrete command evidence that at least one direct invocation worked."
+    acceptance_mode = acceptance_mode_for_metadata(
+        runtime.registry.workflow_definitions[workflow_id].metadata
     )
+    return acceptance_rule_for_mode(acceptance_mode)
 
 
 def _build_group_chat_manager(
@@ -1420,8 +1412,10 @@ def _group_chat_agent(base_agent, runtime: RuntimeContext, workflow_id: str, age
 
 
 def _group_chat_agent_instructions(runtime: RuntimeContext, workflow_id: str, agent_id: str) -> str:
-    acceptance_mode = str(runtime.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery"))
-    if acceptance_mode == "decision_ready":
+    acceptance_mode = acceptance_mode_for_metadata(
+        runtime.registry.workflow_definitions[workflow_id].metadata
+    )
+    if is_decision_ready_acceptance_mode(acceptance_mode):
         lines = [
             "You are in a shared strategy discussion, not a code review or implementation task.",
             "Work under reasonable explicit assumptions when the repo does not provide enough context.",
@@ -1436,7 +1430,7 @@ def _group_chat_agent_instructions(runtime: RuntimeContext, workflow_id: str, ag
                 ]
             )
         return "\n".join(lines)
-    if acceptance_mode in {"research_brief", "design_brief", "revised_plan"}:
+    if is_planning_acceptance_mode(acceptance_mode):
         return (
             "You are in a collaborative planning discussion. Focus on producing the requested brief or plan, "
             "not on requesting implementation evidence."
@@ -1535,13 +1529,15 @@ def _build_handoff_agents(
 
 
 def _handoff_agent_instructions(runtime: RuntimeContext, workflow_id: str, agent_id: str) -> str:
-    acceptance_mode = str(runtime.registry.workflow_definitions[workflow_id].metadata.get("acceptance_mode", "delivery"))
+    acceptance_mode = acceptance_mode_for_metadata(
+        runtime.registry.workflow_definitions[workflow_id].metadata
+    )
     lines = [
         "You are participating in a decentralized specialist handoff workflow.",
         "If another specialist is better placed to continue, use a handoff tool instead of trying to do everything yourself.",
         "If you can finish your part cleanly, respond directly and stop.",
     ]
-    if acceptance_mode == "decision_ready":
+    if is_decision_ready_acceptance_mode(acceptance_mode):
         lines.extend(
             [
                 "This is a discussion workflow, not an implementation workflow.",

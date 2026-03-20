@@ -3653,53 +3653,67 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, participants) -> None:
                 self.participants = participants
 
-            async def run(self, goal, include_status_events=True):
+            def run(self, goal, *, stream=False, include_status_events=True):
                 del include_status_events
-                participant_map = {participant.id: participant for participant in self.participants}
-                opening = workflow_runtime.GroupChatParticipantMessage(
-                    messages=[Message(role="user", text=goal, author_name="workflow")]
-                )
-                for participant in self.participants:
-                    await participant.sync_messages(opening, DummyCtx())
-
-                responses = []
-                for agent_id in ("architect", "coder", "reviewer"):
-                    participant = participant_map[agent_id]
-                    ctx = DummyCtx()
-                    await participant.handle_request(
-                        workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
-                        ctx,
+                async def _execute():
+                    participant_map = {participant.id: participant for participant in self.participants}
+                    opening = workflow_runtime.GroupChatParticipantMessage(
+                        messages=[Message(role="user", text=goal, author_name="workflow")]
                     )
-                    response = ctx.output.message
-                    responses.append(response)
-                    broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
-                    for peer in self.participants:
-                        if peer.id == agent_id:
-                            continue
-                        await peer.sync_messages(broadcast, DummyCtx())
+                    for participant in self.participants:
+                        await participant.sync_messages(opening, DummyCtx())
 
-                return FakeWorkflowResult(
-                    events=[
-                        SimpleNamespace(
-                            type="magentic_orchestrator",
-                            data=SimpleNamespace(
-                                event_type="PLAN_CREATED",
-                                content=Message(
-                                    role="assistant",
-                                    text="Plan: architect -> coder -> reviewer",
-                                    author_name="magentic_manager",
+                    for agent_id in ("architect", "coder", "reviewer"):
+                        participant = participant_map[agent_id]
+                        ctx = DummyCtx()
+                        await participant.handle_request(
+                            workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
+                            ctx,
+                        )
+                        response = ctx.output.message
+                        broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
+                        for peer in self.participants:
+                            if peer.id == agent_id:
+                                continue
+                            await peer.sync_messages(broadcast, DummyCtx())
+
+                    return FakeWorkflowResult(
+                        events=[
+                            SimpleNamespace(
+                                type="magentic_orchestrator",
+                                data=SimpleNamespace(
+                                    event_type="PLAN_CREATED",
+                                    content=Message(
+                                        role="assistant",
+                                        text="Plan: architect -> coder -> reviewer",
+                                        author_name="magentic_manager",
+                                    ),
                                 ),
-                            ),
-                        )
-                    ],
-                    outputs=[[
-                        Message(
-                            role="assistant",
-                            text="Dynamic workflow complete.",
-                            author_name="magentic_manager",
-                        )
-                    ]],
-                )
+                            )
+                        ],
+                        outputs=[[
+                            Message(
+                                role="assistant",
+                                text="Dynamic workflow complete.",
+                                author_name="magentic_manager",
+                            )
+                        ]],
+                    )
+
+                if not stream:
+                    return _execute()
+
+                result_holder: dict[str, FakeWorkflowResult] = {}
+
+                async def _updates():
+                    result_holder["result"] = await _execute()
+                    for event in result_holder["result"]:
+                        yield event
+
+                async def _finalizer(_updates):
+                    return result_holder["result"]
+
+                return ResponseStream(_updates(), finalizer=_finalizer)
 
         class FakeMagenticBuilder:
             def __init__(self, *, participants, manager_agent=None, max_round_count=None, enable_plan_review=False) -> None:
@@ -4661,53 +4675,67 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, participants) -> None:
                 self.participants = participants
 
-            async def run(self, goal, include_status_events=True):
+            def run(self, goal, *, stream=False, include_status_events=True):
                 del include_status_events
-                participant_map = {participant.id: participant for participant in self.participants}
-                opening = workflow_runtime.GroupChatParticipantMessage(
-                    messages=[Message(role="user", text=goal, author_name="workflow")]
-                )
-                for participant in self.participants:
-                    await participant.sync_messages(opening, DummyCtx())
-
-                responses = []
-                for agent_id in ("researcher", "coder"):
-                    participant = participant_map[agent_id]
-                    ctx = DummyCtx()
-                    await participant.handle_request(
-                        workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
-                        ctx,
+                async def _execute():
+                    participant_map = {participant.id: participant for participant in self.participants}
+                    opening = workflow_runtime.GroupChatParticipantMessage(
+                        messages=[Message(role="user", text=goal, author_name="workflow")]
                     )
-                    response = ctx.output.message
-                    responses.append(response)
-                    broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
-                    for peer in self.participants:
-                        if peer.id == agent_id:
-                            continue
-                        await peer.sync_messages(broadcast, DummyCtx())
+                    for participant in self.participants:
+                        await participant.sync_messages(opening, DummyCtx())
 
-                return FakeWorkflowResult(
-                    events=[
-                        SimpleNamespace(
-                            type="magentic_orchestrator",
-                            data=SimpleNamespace(
-                                event_type="PLAN_CREATED",
-                                content=Message(
-                                    role="assistant",
-                                    text="Plan: researcher -> coder",
-                                    author_name="magentic_manager",
+                    for agent_id in ("researcher", "coder"):
+                        participant = participant_map[agent_id]
+                        ctx = DummyCtx()
+                        await participant.handle_request(
+                            workflow_runtime.GroupChatRequestMessage(additional_instruction=f"Continue as {agent_id}."),
+                            ctx,
+                        )
+                        response = ctx.output.message
+                        broadcast = workflow_runtime.GroupChatParticipantMessage(messages=[response])
+                        for peer in self.participants:
+                            if peer.id == agent_id:
+                                continue
+                            await peer.sync_messages(broadcast, DummyCtx())
+
+                    return FakeWorkflowResult(
+                        events=[
+                            SimpleNamespace(
+                                type="magentic_orchestrator",
+                                data=SimpleNamespace(
+                                    event_type="PLAN_CREATED",
+                                    content=Message(
+                                        role="assistant",
+                                        text="Plan: researcher -> coder",
+                                        author_name="magentic_manager",
+                                    ),
                                 ),
-                            ),
-                        )
-                    ],
-                    outputs=[[
-                        Message(
-                            role="assistant",
-                            text="Dynamic workflow complete.",
-                            author_name="magentic_manager",
-                        )
-                    ]],
-                )
+                            )
+                        ],
+                        outputs=[[
+                            Message(
+                                role="assistant",
+                                text="Dynamic workflow complete.",
+                                author_name="magentic_manager",
+                            )
+                        ]],
+                    )
+
+                if not stream:
+                    return _execute()
+
+                result_holder: dict[str, FakeWorkflowResult] = {}
+
+                async def _updates():
+                    result_holder["result"] = await _execute()
+                    for event in result_holder["result"]:
+                        yield event
+
+                async def _finalizer(_updates):
+                    return result_holder["result"]
+
+                return ResponseStream(_updates(), finalizer=_finalizer)
 
         class FakeMagenticBuilder:
             def __init__(self, *, participants, manager_agent=None, max_round_count=None, enable_plan_review=False) -> None:

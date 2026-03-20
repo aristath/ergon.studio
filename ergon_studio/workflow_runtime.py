@@ -932,7 +932,15 @@ async def _execute_magentic_workflow(
     ).build()
 
     try:
-        result = await workflow.run(goal, include_status_events=True)
+        result = await _run_streamed_magentic_workflow(
+            runtime=runtime,
+            workflow=workflow,
+            thread=workroom_thread,
+            task_id=workflow_run.root_task_id,
+            cursor=cursor,
+            tracker=tracker,
+            goal=goal,
+        )
     except Exception as exc:
         tracker.failed = True
         tracker.last_thread_id = workroom_thread.id
@@ -954,13 +962,6 @@ async def _execute_magentic_workflow(
             result=None,
         )
 
-    _record_magentic_events(
-        runtime=runtime,
-        result=result,
-        thread=workroom_thread,
-        task_id=workflow_run.root_task_id,
-        cursor=cursor,
-    )
     _append_output_messages_to_thread(
         runtime=runtime,
         thread=workroom_thread,
@@ -1644,6 +1645,31 @@ def _build_handoff_termination_condition(runtime: RuntimeContext, workflow_id: s
     return _termination
 
 
+async def _run_streamed_magentic_workflow(
+    *,
+    runtime: RuntimeContext,
+    workflow,
+    thread: ThreadRecord,
+    task_id: str | None,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+    goal: str,
+):
+    stream = workflow.run(goal, stream=True)
+    async for event in stream:
+        if event.type != "magentic_orchestrator":
+            continue
+        _record_magentic_event(
+            runtime=runtime,
+            event=event,
+            thread=thread,
+            task_id=task_id,
+            cursor=cursor,
+            tracker=tracker,
+        )
+    return await stream.get_final_response()
+
+
 async def _run_streamed_handoff_workflow(
     *,
     runtime: RuntimeContext,
@@ -1820,30 +1846,59 @@ def _record_magentic_events(
     cursor: _TimestampCursor,
 ) -> None:
     for event in result:
-        if event.type != "magentic_orchestrator":
-            continue
-        data = getattr(event, "data", None)
-        event_type = str(getattr(data, "event_type", "")).split(".")[-1].lower()
-        content = getattr(data, "content", None)
-        if isinstance(content, Message):
-            sender = content.author_name if isinstance(content.author_name, str) and content.author_name else "magentic_manager"
-            body = _message_text(content)
-            if body:
-                runtime.append_message_to_thread(
-                    thread_id=thread.id,
-                    message_id=f"message-{uuid4().hex}",
-                    sender=sender,
-                    kind="status_update",
-                    body=body,
-                    created_at=cursor.next(),
-                )
-                runtime.append_event(
-                    kind=f"magentic_{event_type or 'update'}",
-                    summary=f"Magentic manager updated {thread.summary or thread.id}",
-                    created_at=cursor.next(),
-                    thread_id=thread.id,
-                    task_id=task_id,
-                )
+        _record_magentic_event(
+            runtime=runtime,
+            event=event,
+            thread=thread,
+            task_id=task_id,
+            cursor=cursor,
+            tracker=None,
+        )
+
+
+def _record_magentic_event(
+    *,
+    runtime: RuntimeContext,
+    event,
+    thread: ThreadRecord,
+    task_id: str | None,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker | None,
+) -> None:
+    if event.type != "magentic_orchestrator":
+        return
+    data = getattr(event, "data", None)
+    event_type = str(getattr(data, "event_type", "")).split(".")[-1].lower()
+    content = getattr(data, "content", None)
+    if not isinstance(content, Message):
+        return
+    sender = content.author_name if isinstance(content.author_name, str) and content.author_name else "magentic_manager"
+    body = _message_text(content)
+    if not body:
+        return
+    runtime.append_message_to_thread(
+        thread_id=thread.id,
+        message_id=f"message-{uuid4().hex}",
+        sender=sender,
+        kind="status_update",
+        body=body,
+        created_at=cursor.next(),
+    )
+    runtime.append_event(
+        kind=f"magentic_{event_type or 'update'}",
+        summary=f"Magentic manager updated {thread.summary or thread.id}",
+        created_at=cursor.next(),
+        thread_id=thread.id,
+        task_id=task_id,
+    )
+    if tracker is not None:
+        _append_thread_output(
+            tracker=tracker,
+            thread_id=thread.id,
+            speaker=sender,
+            body=body,
+        )
+        tracker.last_thread_id = thread.id
 
 
 def _record_handoff_events(

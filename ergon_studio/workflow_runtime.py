@@ -1053,16 +1053,6 @@ async def _execute_handoff_workflow(
         )
 
     handoff_results = [result]
-    while result.get_request_info_events():
-        responses = {
-            event.request_id: []
-            for event in result.get_request_info_events()
-        }
-        result = await workflow.run(
-            responses=responses,
-            include_status_events=True,
-        )
-        handoff_results.append(result)
 
     for handoff_result in handoff_results:
         _record_handoff_events(
@@ -1080,6 +1070,40 @@ async def _execute_handoff_workflow(
         tracker=tracker,
         assistant_only=True,
     )
+    request_info_events = result.get_request_info_events()
+    if request_info_events:
+        request_lines = _request_info_lines(request_info_events)
+        tracker.blocked_step_index = 0
+        tracker.blocked_thread_id = workroom_thread.id
+        tracker.blocked_summary = (
+            "The handoff workroom requested more information before it could continue."
+        )
+        tracker.last_thread_id = workroom_thread.id
+        runtime.append_event(
+            kind="workflow_info_requested",
+            summary=request_lines[0],
+            created_at=cursor.next(),
+            thread_id=workroom_thread.id,
+            task_id=workflow_run.root_task_id,
+        )
+        runtime.append_message_to_thread(
+            thread_id=workroom_thread.id,
+            message_id=f"message-{uuid4().hex}",
+            sender="workflow",
+            kind="question",
+            body="\n".join(request_lines),
+            created_at=cursor.next(),
+        )
+        return _finalize_workflow_run(
+            runtime=runtime,
+            workflow_run=workflow_run,
+            run_view=run_view,
+            goal=goal,
+            review_thread=review_thread,
+            tracker=tracker,
+            cursor=cursor,
+            result=result,
+        )
 
     transcript = _read_thread_transcript(runtime, workroom_thread.id)
     tracker.thread_outputs[workroom_thread.id] = transcript
@@ -1695,6 +1719,30 @@ def _collect_output_messages(outputs: list[object]) -> list[Message]:
             if isinstance(item, Message):
                 messages.append(item)
     return messages
+
+
+def _request_info_lines(events: Sequence[object]) -> list[str]:
+    details: list[str] = []
+    for index, event in enumerate(events, start=1):
+        question = getattr(event, "question", None)
+        request_id = getattr(event, "request_id", None)
+        if isinstance(question, str) and question.strip():
+            label = f"{index}. {question.strip()}"
+            if isinstance(request_id, str) and request_id.strip():
+                label = f"{label} ({request_id.strip()})"
+            details.append(label)
+            continue
+        if isinstance(request_id, str) and request_id.strip():
+            details.append(f"{index}. Additional information requested ({request_id.strip()})")
+        else:
+            details.append(f"{index}. Additional information requested")
+    if not details:
+        return ["The workroom requested more information before it could continue."]
+    return [
+        "The workroom requested more information before it could continue.",
+        "",
+        *details,
+    ]
 
 
 def _combine_workflow_outputs(results: Sequence[object]) -> list[object]:

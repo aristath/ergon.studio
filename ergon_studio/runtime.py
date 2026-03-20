@@ -67,6 +67,13 @@ class OrchestratorTurnDecision:
 
 
 @dataclass(frozen=True)
+class DelegationReviewVerdict:
+    accepted: bool
+    summary: str
+    findings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RuntimeContext:
     paths: StudioPaths
     registry: RuntimeRegistry
@@ -871,15 +878,6 @@ class RuntimeContext:
         if decision.deliverable_expected and decision.mode == "reply":
             requires_delivery_workflow = True
             delivery_reason = "Promoted a reply-only turn into delivery work"
-        if (
-            decision.deliverable_expected
-            and decision.mode == "workflow"
-            and decision.workflow_id is not None
-            and self._workflow_is_single_specialist_delivery(decision.workflow_id)
-            and self._workspace_is_greenfield()
-        ):
-            requires_delivery_workflow = True
-            delivery_reason = "Re-selected the delivery workflow for a greenfield task"
         if requires_delivery_workflow:
             selected_workflow_id = await self._select_delivery_workflow(
                 body=body,
@@ -1082,25 +1080,205 @@ class RuntimeContext:
             }
 
         reply_body = self.conversation_store.read_message_body(reply).rstrip("\n")
-        self.update_task_state(
-            task_id=task.id,
-            state="completed",
-            updated_at=created_at + 3,
+        review_thread = self.create_thread(
+            thread_id=f"thread-review-orchestrator-{uuid4().hex[:8]}",
+            kind="review",
+            created_at=created_at + 3,
+            assigned_agent_id="orchestrator",
+            summary=f"Delegation review for {agent_id}",
+            parent_task_id=task.id,
+            parent_thread_id=resolved_parent_thread_id,
         )
         self.append_event(
-            kind="delegation_completed",
-            summary=f"Delegation to {agent_id} completed",
+            kind="delegation_review_requested",
+            summary=f"Requested orchestrator review for delegated {agent_id} work",
             created_at=created_at + 3,
-            thread_id=thread.id,
+            thread_id=review_thread.id,
+            task_id=task.id,
+        )
+        verdict = await self._review_delegation_result(
+            agent_id=agent_id,
+            request=request,
+            result=reply_body,
+            thread=thread,
+            review_thread=review_thread,
+            created_at=created_at + 4,
+        )
+        review_summary = _format_delegation_review_summary(verdict)
+        self.append_message_to_thread(
+            thread_id=review_thread.id,
+            message_id=f"message-{uuid4().hex}",
+            sender="orchestrator",
+            kind="review",
+            body=review_summary,
+            created_at=created_at + 5,
+        )
+        status = "completed" if verdict.accepted else "blocked"
+        self.update_task_state(
+            task_id=task.id,
+            state=status,
+            updated_at=created_at + 5,
+        )
+        self.append_event(
+            kind="delegation_completed" if verdict.accepted else "delegation_rejected",
+            summary=(
+                f"Delegation to {agent_id} completed"
+                if verdict.accepted
+                else f"Delegation to {agent_id} was rejected by orchestrator review"
+            ),
+            created_at=created_at + 5,
+            thread_id=review_thread.id,
             task_id=task.id,
         )
         return {
-            "status": "completed",
+            "status": status,
             "agent_id": agent_id,
             "task_id": task.id,
             "thread_id": thread.id,
             "result": reply_body,
+            "review_thread_id": review_thread.id,
+            "review_summary": review_summary,
         }
+
+    async def _review_delegation_result(
+        self,
+        *,
+        agent_id: str,
+        request: str,
+        result: str,
+        thread: ThreadRecord,
+        review_thread: ThreadRecord,
+        created_at: int,
+    ) -> DelegationReviewVerdict:
+        prompt = _render_delegation_review_prompt(
+            agent_id=agent_id,
+            request=request,
+            result=result,
+            evidence_lines=self._delegation_evidence_lines(thread.id),
+        )
+        self.append_message_to_thread(
+            thread_id=review_thread.id,
+            message_id=f"message-{uuid4().hex}",
+            sender="workflow",
+            kind="chat",
+            body=prompt,
+            created_at=created_at,
+        )
+        raw = await self._run_structured_delegation_review(
+            prompt=prompt,
+            review_thread=review_thread,
+            created_at=created_at + 1,
+        )
+        if raw is None:
+            self.append_event(
+                kind="delegation_review_unavailable",
+                summary=f"Delegation review for {agent_id} fell back because no structured reviewer was available",
+                created_at=created_at + 1,
+                thread_id=review_thread.id,
+                task_id=thread.parent_task_id,
+            )
+            return DelegationReviewVerdict(
+                accepted=True,
+                summary="Accepted without structured review because the orchestrator review agent was unavailable.",
+            )
+        try:
+            return _parse_delegation_review_verdict(raw)
+        except ValueError:
+            self.append_event(
+                kind="delegation_review_unavailable",
+                summary=f"Delegation review for {agent_id} returned invalid structured output",
+                created_at=created_at + 1,
+                thread_id=review_thread.id,
+                task_id=thread.parent_task_id,
+            )
+            return DelegationReviewVerdict(
+                accepted=True,
+                summary="Accepted without structured review because the orchestrator review output was invalid.",
+            )
+
+    async def _run_structured_delegation_review(
+        self,
+        *,
+        prompt: str,
+        review_thread: ThreadRecord,
+        created_at: int,
+    ) -> str | None:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return None
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            try:
+                response = await orchestrator.run(
+                    [
+                        Message(
+                            role="user",
+                            text=prompt,
+                            author_name="workflow",
+                        )
+                    ],
+                    session=orchestrator.create_session(session_id=f"{review_thread.id}:delegation-review"),
+                )
+            except Exception:
+                return None
+            return response.text.strip() or None
+        review_agent = Agent(
+            client=client,
+            id="delegation-orchestrator-review",
+            name="Delegation Orchestrator Review",
+            description="Structured delegation acceptance review",
+            instructions=_delegation_review_instructions(),
+        )
+        try:
+            response = await review_agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=prompt,
+                        author_name="workflow",
+                    )
+                ],
+                session=review_agent.create_session(session_id=f"{review_thread.id}:delegation-review"),
+            )
+        except Exception:
+            return None
+        return response.text.strip() or None
+
+    def _delegation_evidence_lines(self, thread_id: str) -> list[str]:
+        lines: list[str] = []
+        file_changes: list[str] = []
+        for tool_call in self.list_tool_calls():
+            if tool_call.thread_id != thread_id or tool_call.status != "completed":
+                continue
+            if tool_call.tool_name not in {"write_file", "patch_file"}:
+                continue
+            try:
+                request = json.loads(self.read_tool_call_request(tool_call.id))
+            except json.JSONDecodeError:
+                request = {}
+            path = request.get("path")
+            if isinstance(path, str) and path:
+                file_changes.append(f"- {tool_call.tool_name}: {path}")
+        if file_changes:
+            lines.append("Recorded file changes:")
+            lines.extend(file_changes[:8])
+            lines.append("")
+
+        command_evidence: list[str] = []
+        for command_run in self.list_command_runs():
+            if command_run.thread_id != thread_id or command_run.status != "completed":
+                continue
+            output = self.command_store.read_command_output(command_run).strip()
+            command_evidence.append(
+                f"- {command_run.command} -> exit {command_run.exit_code}; output: {_truncate_preview(output or '(no output)', limit=160)}"
+            )
+        if command_evidence:
+            lines.append("Recorded command runs:")
+            lines.extend(command_evidence[:8])
+            lines.append("")
+
+        return lines
 
     async def run_workflow(
         self,
@@ -1592,17 +1770,6 @@ class RuntimeContext:
             return False
         return str(definition.metadata.get("acceptance_mode", "delivery")) != "delivery"
 
-    def _workflow_is_single_specialist_delivery(self, workflow_id: str) -> bool:
-        if self._workflow_is_non_delivery(workflow_id):
-            return False
-        step_groups = self.workflow_step_groups(workflow_id)
-        participants = {
-            agent_id
-            for group in step_groups
-            for agent_id in group
-        }
-        return len(participants) == 1
-
     def _delivery_candidate_workflow_ids(self) -> tuple[str, ...]:
         configured: list[str] = []
         for workflow_id in self.list_workflow_ids():
@@ -1617,8 +1784,6 @@ class RuntimeContext:
         candidates = self._delivery_candidate_workflow_ids()
         if current_workflow_id in candidates:
             return current_workflow_id
-        if self._workspace_is_greenfield() and "standard-build" in candidates:
-            return "standard-build"
         if "single-agent-execution" in candidates:
             return "single-agent-execution"
         if candidates:
@@ -1764,6 +1929,9 @@ class RuntimeContext:
 
     def _format_delegation_summary(self, *, agent_id: str, result: dict[str, object]) -> str:
         lines = [f"I delegated this to `{agent_id}`."]
+        review_summary = result.get("review_summary")
+        if isinstance(review_summary, str) and review_summary.strip():
+            lines.extend(["", review_summary.strip()])
         response_text = result.get("result")
         if isinstance(response_text, str) and response_text.strip():
             lines.extend(["", response_text.strip()])
@@ -1780,15 +1948,6 @@ class RuntimeContext:
             if path.is_file() and ".ergon.studio" not in path.parts
         ]
         return files[:limit]
-
-    def _workspace_is_greenfield(self) -> bool:
-        root = self.paths.project_root.resolve()
-        files = [
-            path
-            for path in root.rglob("*")
-            if path.is_file() and ".ergon.studio" not in path.parts
-        ]
-        return len(files) <= 1
 
     def _workflow_team_summary(self, workflow_run_id: str) -> list[str]:
         run_view = self.describe_workflow_run(workflow_run_id)
@@ -3171,6 +3330,76 @@ def _delivery_workflow_selector_prompt(
             body,
         ]
     )
+
+
+def _delegation_review_instructions() -> str:
+    return "\n".join(
+        [
+            "You are a narrow internal acceptance reviewer for a delegated specialist result.",
+            "Decide whether the delegated result appears complete enough to accept without another worker turn.",
+            "Prefer clarification or rejection when the result is vague, missing evidence, or clearly does not satisfy the request.",
+            "Do not delegate, do not plan, and do not call tools.",
+            "Output JSON only with this shape:",
+            '{"accepted": true, "summary": "one concise sentence", "findings": ["specific issue"]}',
+        ]
+    )
+
+
+def _render_delegation_review_prompt(
+    *,
+    agent_id: str,
+    request: str,
+    result: str,
+    evidence_lines: list[str],
+) -> str:
+    lines = [
+        f"Delegated agent: {agent_id}",
+        "",
+        "Original request:",
+        request.strip() or "(no request provided)",
+        "",
+        "Delegated result:",
+        result.strip() or "(no result provided)",
+    ]
+    if evidence_lines:
+        lines.extend(["", *evidence_lines])
+    lines.extend(
+        [
+            "",
+            "Decide whether this delegated result should be accepted as complete.",
+            "If it is not complete enough, reject it and explain the most important missing point.",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def _parse_delegation_review_verdict(raw: str) -> DelegationReviewVerdict:
+    parsed = _parse_turn_decision_json(raw)
+    summary = _optional_text(parsed.get("summary")) or "No delegation review summary provided."
+    findings_raw = parsed.get("findings", [])
+    findings: list[str] = []
+    if isinstance(findings_raw, list):
+        for item in findings_raw:
+            if not isinstance(item, str):
+                continue
+            stripped = item.strip()
+            if stripped:
+                findings.append(stripped)
+    return DelegationReviewVerdict(
+        accepted=_as_bool(parsed.get("accepted")),
+        summary=summary,
+        findings=tuple(findings),
+    )
+
+
+def _format_delegation_review_summary(verdict: DelegationReviewVerdict) -> str:
+    prefix = "ACCEPTED" if verdict.accepted else "REJECTED"
+    lines = [f"{prefix}: {verdict.summary}"]
+    if verdict.findings:
+        lines.append("")
+        lines.append("Findings:")
+        lines.extend(f"- {finding}" for finding in verdict.findings)
+    return "\n".join(lines)
 
 
 def _parse_turn_decision_json(raw: str) -> dict[str, object]:

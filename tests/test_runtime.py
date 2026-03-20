@@ -1697,7 +1697,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [event.kind for event in runtime.list_events()],
             )
 
-    async def test_runtime_reselects_greenfield_single_agent_delivery_with_selector(self) -> None:
+    async def test_runtime_keeps_orchestrator_selected_delivery_workflow_on_greenfield_repo(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1708,6 +1708,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            captured: dict[str, str] = {}
 
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
@@ -1718,16 +1719,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     deliverable_expected=True,
                 )
 
-            async def choose_workflow(
-                _runtime,
-                *,
-                body: str,
-                goal: str,
-                current_workflow_id: str | None,
-                created_at: int,
-            ) -> str:
-                return "dynamic-open-ended"
-
             async def run_workflow(
                 _runtime,
                 *,
@@ -1736,6 +1727,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 created_at: int | None = None,
                 parent_thread_id: str | None = None,
             ):
+                captured["workflow_id"] = workflow_id
+                captured["goal"] = goal
                 return {
                     "status": "completed",
                     "workflow_run_id": "workflow-run-1",
@@ -1745,7 +1738,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
                 patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
@@ -1755,11 +1747,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("dynamic-open-ended", runtime.conversation_store.read_message_body(reply))
-            self.assertIn(
-                "orchestrator_delivery_workflow_selected",
-                [event.kind for event in runtime.list_events()],
-            )
+            self.assertIn("single-agent-execution", runtime.conversation_store.read_message_body(reply))
+            self.assertEqual(captured["workflow_id"], "single-agent-execution")
+            self.assertNotIn("orchestrator_delivery_workflow_selected", [event.kind for event in runtime.list_events()])
 
     async def test_runtime_reselects_non_delivery_workflow_by_metadata(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
@@ -2463,14 +2453,15 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
         from ergon_studio.runtime import load_runtime
 
         class FakeAgent:
-            def __init__(self, response_text: str) -> None:
-                self.response_text = response_text
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
 
             def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
                 return AgentSession(session_id=session_id)
 
             async def run(self, messages=None, *, session=None, **_: object):
-                return SimpleNamespace(text=self.response_text)
+                del messages, session
+                return SimpleNamespace(text=self.responses.pop(0))
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -2480,7 +2471,16 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             home_dir.mkdir()
 
             runtime = load_runtime(project_root=project_root, home_dir=home_dir)
-            with patch.object(type(runtime), "build_agent", return_value=FakeAgent("Implementation complete.")):
+            fake_agents = {
+                "coder": FakeAgent("Implementation complete."),
+                "orchestrator": FakeAgent('{"accepted": true, "summary": "The delegated coder result satisfies the request.", "findings": []}'),
+            }
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
                 result = await runtime.delegate_to_agent(
                     agent_id="coder",
                     request="Implement the feature.",
@@ -2490,15 +2490,66 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["agent_id"], "coder")
+            self.assertIn("ACCEPTED:", result["review_summary"])
             tasks = runtime.list_tasks()
             self.assertEqual(len(tasks), 1)
             self.assertEqual(tasks[0].state, "completed")
             threads = [thread for thread in runtime.list_threads() if thread.id != runtime.main_thread_id]
-            self.assertEqual(len(threads), 1)
+            self.assertEqual(len(threads), 2)
             self.assertEqual(threads[0].assigned_agent_id, "coder")
+            self.assertEqual(threads[1].kind, "review")
             thread_messages = runtime.list_thread_messages(threads[0].id)
             self.assertEqual([message.sender for message in thread_messages], ["orchestrator", "coder"])
+            review_messages = runtime.list_thread_messages(threads[1].id)
+            self.assertEqual([message.sender for message in review_messages], ["workflow", "orchestrator"])
             self.assertIn("delegation_completed", [event.kind for event in runtime.list_events()])
+            self.assertIn("delegation_review_requested", [event.kind for event in runtime.list_events()])
+
+    async def test_runtime_blocks_delegation_when_orchestrator_rejects_result(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                return SimpleNamespace(text=self.responses.pop(0))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            fake_agents = {
+                "coder": FakeAgent("I think this is done."),
+                "orchestrator": FakeAgent('{"accepted": false, "summary": "The delegated result does not show enough evidence yet.", "findings": ["The specialist did not demonstrate the requested outcome."]}'),
+            }
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ):
+                result = await runtime.delegate_to_agent(
+                    agent_id="coder",
+                    request="Implement the feature.",
+                    title="Feature delivery",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertIn("REJECTED:", result["review_summary"])
+            tasks = runtime.list_tasks()
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].state, "blocked")
+            self.assertIn("delegation_rejected", [event.kind for event in runtime.list_events()])
 
     async def test_runtime_can_run_workflow_end_to_end_with_orchestrator_review(self) -> None:
         from ergon_studio.runtime import load_runtime
@@ -2954,6 +3005,108 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             thread_messages = runtime.list_thread_messages(workroom.id)
             senders = [message.sender for message in thread_messages]
             self.assertEqual(senders, ["workflow", "architect", "reviewer"])
+
+    async def test_runtime_blocks_handoff_workflow_when_workroom_requests_info(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeWorkflowResult(list):
+            def __init__(self, events, outputs, request_info_events) -> None:
+                super().__init__(events)
+                self._outputs = outputs
+                self._request_info_events = request_info_events
+
+            def get_outputs(self):
+                return self._outputs
+
+            def get_final_state(self):
+                return "blocked"
+
+            def get_request_info_events(self):
+                return self._request_info_events
+
+        class FakeBuiltHandoffWorkflow:
+            async def run(self, goal, include_status_events=True):
+                del goal, include_status_events
+                return FakeWorkflowResult(
+                    events=[],
+                    outputs=[],
+                    request_info_events=[
+                        SimpleNamespace(request_id="info-1", question="Need the target Python version before continuing.")
+                    ],
+                )
+
+        class FakeHandoffBuilder:
+            def __init__(self, *, name=None, participants=None, description=None, checkpoint_storage=None, termination_condition=None) -> None:
+                del name, participants, description, checkpoint_storage, termination_condition
+
+            def with_start_agent(self, agent) -> "FakeHandoffBuilder":
+                del agent
+                return self
+
+            def with_autonomous_mode(self, *, agents=None, prompts=None, turn_limits=None) -> "FakeHandoffBuilder":
+                del agents, prompts, turn_limits
+                return self
+
+            def add_handoff(self, source, targets, *, description=None) -> "FakeHandoffBuilder":
+                del source, targets, description
+                return self
+
+            def build(self):
+                return FakeBuiltHandoffWorkflow()
+
+        class FakeAgent:
+            def __init__(self, responses: list[str] | str) -> None:
+                self.responses = responses if isinstance(responses, list) else [responses]
+
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                return SimpleNamespace(text=self.responses.pop(0))
+
+        fake_agents = {
+            "orchestrator": FakeAgent('{"accepted": false, "summary": "The workroom needs more context before it can finish.", "findings": ["The handoff workflow requested more information."]}'),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
+            ), patch(
+                "ergon_studio.workflow_runtime.HandoffBuilder",
+                FakeHandoffBuilder,
+            ), patch(
+                "ergon_studio.workflow_runtime._build_handoff_agents",
+                return_value={
+                    "architect": SimpleNamespace(name="architect"),
+                    "researcher": SimpleNamespace(name="researcher"),
+                    "brainstormer": SimpleNamespace(name="brainstormer"),
+                    "reviewer": SimpleNamespace(name="reviewer"),
+                },
+            ):
+                result = await runtime.run_workflow(
+                    workflow_id="specialist-handoff",
+                    goal="Discuss the right default CLI stack.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(result["status"], "blocked")
+            run_view = runtime.describe_workflow_run(result["workflow_run_id"])
+            self.assertIsNotNone(run_view)
+            assert run_view is not None
+            self.assertEqual(run_view.workflow_run.state, "blocked")
+            event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(run_view.workflow_run.id)]
+            self.assertIn("workflow_info_requested", event_kinds)
 
     async def test_runtime_auto_repairs_with_workflow_metadata(self) -> None:
         from ergon_studio.runtime import load_runtime

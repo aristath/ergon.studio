@@ -181,6 +181,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
         content_emitted = False
+        reasoning_text = ""
+        message_text = ""
         output_items: list[ProxyOutputItemRef] = []
         created_payload = {
             "type": "response.created",
@@ -201,6 +203,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         async for event in stream:
             if isinstance(event, ProxyContentDeltaEvent) and event.delta:
                 content_emitted = True
+                message_text += event.delta
+            if isinstance(event, ProxyReasoningDeltaEvent) and event.delta:
+                reasoning_text += event.delta
             reasoning_output_index = _response_output_index(output_items, ProxyOutputItemRef(kind="reasoning"))
             if isinstance(event, ProxyReasoningDeltaEvent):
                 reasoning_output_index = _ensure_response_output_item(output_items, ProxyOutputItemRef(kind="reasoning"))
@@ -224,6 +229,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 reasoning_output_index=reasoning_output_index,
                 message_output_index=message_output_index,
                 tool_output_index=tool_output_index,
+                reasoning_text=reasoning_text,
+                message_text=message_text,
                 include_output_done=content_emitted,
             ):
                 self.wfile.write(encode_responses_stream_sse(payload))

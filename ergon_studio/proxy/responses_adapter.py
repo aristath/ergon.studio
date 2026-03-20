@@ -89,6 +89,8 @@ def encode_responses_stream_events(
     reasoning_output_index: int = 0,
     message_output_index: int = 0,
     tool_output_index: int = 0,
+    reasoning_text: str = "",
+    message_text: str = "",
     include_output_done: bool = True,
 ) -> list[dict[str, Any]]:
     if isinstance(event, ProxyReasoningDeltaEvent):
@@ -133,10 +135,60 @@ def encode_responses_stream_events(
                     "status": "completed",
                 },
                 "sequence_number": sequence_number,
-            }
+            },
+            {
+                "type": "response.output_item.done",
+                "event_id": f"event_{uuid4().hex}",
+                "response_id": response_id,
+                "output_index": tool_output_index,
+                "item": {
+                    "id": f"fc_{uuid4().hex}",
+                    "type": "function_call",
+                    "call_id": event.call.id,
+                    "name": event.call.name,
+                    "arguments": event.call.arguments_json,
+                    "status": "completed",
+                },
+                "sequence_number": sequence_number + 1,
+            },
         ]
     if isinstance(event, ProxyFinishEvent):
         payloads: list[dict[str, Any]] = []
+        if reasoning_text:
+            payloads.append(
+                {
+                    "type": "response.reasoning_text.done",
+                    "event_id": f"event_{uuid4().hex}",
+                    "response_id": response_id,
+                    "item_id": reasoning_item_id,
+                    "output_index": reasoning_output_index,
+                    "content_index": 0,
+                    "text": reasoning_text,
+                    "sequence_number": sequence_number,
+                }
+            )
+            sequence_number += 1
+            payloads.append(
+                {
+                    "type": "response.output_item.done",
+                    "event_id": f"event_{uuid4().hex}",
+                    "response_id": response_id,
+                    "output_index": reasoning_output_index,
+                    "item": {
+                        "id": reasoning_item_id,
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": reasoning_text,
+                            }
+                        ],
+                        "content": [],
+                    },
+                    "sequence_number": sequence_number,
+                }
+            )
+            sequence_number += 1
         if include_output_done:
             payloads.append(
                 {
@@ -146,7 +198,30 @@ def encode_responses_stream_events(
                     "item_id": message_item_id,
                     "output_index": message_output_index,
                     "content_index": 0,
-                    "text": "",
+                    "text": message_text,
+                    "sequence_number": sequence_number,
+                }
+            )
+            sequence_number += 1
+            payloads.append(
+                {
+                    "type": "response.output_item.done",
+                    "event_id": f"event_{uuid4().hex}",
+                    "response_id": response_id,
+                    "output_index": message_output_index,
+                    "item": {
+                        "id": message_item_id,
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": message_text,
+                                "annotations": [],
+                            }
+                        ],
+                    },
                     "sequence_number": sequence_number,
                 }
             )

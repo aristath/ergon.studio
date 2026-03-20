@@ -167,6 +167,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
                 "response.created",
                 "response.output_text.delta",
                 "response.output_text.done",
+                "response.output_item.done",
                 "response.completed",
             ],
         )
@@ -196,6 +197,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         self.assertEqual(events[1].type, "response.output_item.added")
         self.assertEqual(events[1].item.type, "function_call")
         self.assertEqual(events[1].item.name, "read_file")
+        self.assertEqual(events[2].type, "response.output_item.done")
         self.assertEqual(events[-1].type, "response.completed")
 
     def test_models_list_returns_proxy_model_id(self) -> None:

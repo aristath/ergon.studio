@@ -175,6 +175,8 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn("\"type\":\"response.created\"", body)
         self.assertIn("\"type\":\"response.reasoning_text.delta\"", body)
         self.assertIn("\"type\":\"response.output_text.delta\"", body)
+        self.assertIn("\"type\":\"response.reasoning_text.done\"", body)
+        self.assertIn("\"type\":\"response.output_item.done\"", body)
         self.assertIn("\"type\":\"response.completed\"", body)
 
     def test_responses_stream_uses_consistent_output_indexes(self) -> None:

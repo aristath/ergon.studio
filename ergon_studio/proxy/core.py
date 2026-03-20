@@ -120,8 +120,18 @@ class ProxyOrchestrationCore:
                 yield event
             return
         if continuation.mode == "delegate":
-            plan = ProxyTurnPlan(mode="delegate", agent_id=continuation.agent_id, request=request.latest_user_text())
-            async for event in self._execute_delegation(request=request, plan=plan, created_at=created_at, state=state):
+            plan = ProxyTurnPlan(
+                mode="delegate",
+                agent_id=continuation.agent_id,
+                request=continuation.request_text or request.latest_user_text(),
+            )
+            async for event in self._execute_delegation(
+                request=request,
+                plan=plan,
+                created_at=created_at,
+                state=state,
+                current_brief=continuation.current_brief,
+            ):
                 yield event
             return
         async for event in self._execute_direct(request=request, created_at=created_at, state=state):
@@ -152,7 +162,15 @@ class ProxyOrchestrationCore:
             for event in emitted:
                 yield event
 
-    async def _execute_delegation(self, *, request, plan: ProxyTurnPlan, created_at: int, state: dict[str, Any]):
+    async def _execute_delegation(
+        self,
+        *,
+        request,
+        plan: ProxyTurnPlan,
+        created_at: int,
+        state: dict[str, Any],
+        current_brief: str | None = None,
+    ):
         agent_id = plan.agent_id or "coder"
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
         state["reasoning"] += intro
@@ -161,6 +179,7 @@ class ProxyOrchestrationCore:
             specialist_id=agent_id,
             request_text=plan.request or request.latest_user_text() or "",
             transcript_summary=summarize_conversation(request.messages),
+            current_brief=current_brief,
         )
         specialist_text = ""
         first = True
@@ -181,7 +200,12 @@ class ProxyOrchestrationCore:
         if response is not None:
             emitted = self._emit_tool_calls(
                 response=response,
-                continuation=ContinuationState(mode="delegate", agent_id=agent_id),
+                continuation=ContinuationState(
+                    mode="delegate",
+                    agent_id=agent_id,
+                    request_text=plan.request or request.latest_user_text(),
+                    current_brief=specialist_text.strip() or current_brief,
+                ),
                 state=state,
             )
             if emitted:
@@ -254,6 +278,9 @@ class ProxyOrchestrationCore:
                             workflow_id=definition.id,
                             step_index=step_index,
                             agent_id=agent_id,
+                            goal=goal,
+                            current_brief=agent_text.strip() or current_brief,
+                            workflow_outputs=tuple(workflow_outputs),
                         ),
                         state=state,
                     )
@@ -299,11 +326,11 @@ class ProxyOrchestrationCore:
         state["reasoning"] += intro
         yield ProxyReasoningDeltaEvent(intro)
 
-        goal = request.latest_user_text() or ""
+        goal = continuation.goal or request.latest_user_text() or ""
         step_groups = workflow_step_groups_for_definition(definition)
         start_index = continuation.step_index or 0
-        current_brief = goal
-        workflow_outputs: list[str] = []
+        current_brief = continuation.current_brief or goal
+        workflow_outputs: list[str] = list(continuation.workflow_outputs)
         for step_index in range(start_index, len(step_groups)):
             group = step_groups[step_index]
             agents = group
@@ -342,6 +369,9 @@ class ProxyOrchestrationCore:
                             workflow_id=definition.id,
                             step_index=step_index,
                             agent_id=agent_id,
+                            goal=goal,
+                            current_brief=agent_text.strip() or current_brief,
+                            workflow_outputs=tuple(workflow_outputs),
                         ),
                         state=state,
                     )
@@ -503,19 +533,26 @@ def _direct_reply_prompt(request) -> str:
     ).strip()
 
 
-def _specialist_prompt(*, specialist_id: str, request_text: str, transcript_summary: str) -> str:
-    return "\n".join(
-        [
-            f"You are the {specialist_id} working inside the orchestration proxy.",
-            "The orchestrator distilled the host conversation for you.",
-            "",
-            "Conversation summary:",
-            transcript_summary or "(none)",
-            "",
-            "Assigned request:",
-            request_text or "(none)",
-        ]
-    ).strip()
+def _specialist_prompt(*, specialist_id: str, request_text: str, transcript_summary: str, current_brief: str | None = None) -> str:
+    lines = [
+        f"You are the {specialist_id} working inside the orchestration proxy.",
+        "The orchestrator distilled the host conversation for you.",
+        "",
+        "Conversation summary:",
+        transcript_summary or "(none)",
+        "",
+        "Assigned request:",
+        request_text or "(none)",
+    ]
+    if current_brief:
+        lines.extend(
+            [
+                "",
+                "Current progress:",
+                current_brief,
+            ]
+        )
+    return "\n".join(lines).strip()
 
 
 def _workflow_step_prompt(

@@ -15,19 +15,28 @@ from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from ergon_studio.runtime import RuntimeContext
 
 
-def _probe_endpoint(base_url: str, api_key: str | None) -> list[str]:
-    """Probe an OpenAI-compatible endpoint for available models."""
+def _probe_endpoint(base_url: str, api_key: str | None) -> list[dict[str, Any]]:
+    """Probe an OpenAI-compatible endpoint for available models.
+
+    Returns a list of dicts with 'id' and optional 'context_length'.
+    """
     url = base_url.rstrip("/") + "/models"
     req = urllib.request.Request(url)
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
     with urllib.request.urlopen(req, timeout=10) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    return sorted(
-        m["id"]
-        for m in data.get("data", [])
-        if isinstance(m, dict) and "id" in m
-    )
+    models: list[dict[str, Any]] = []
+    for m in data.get("data", []):
+        if not isinstance(m, dict) or "id" not in m:
+            continue
+        entry: dict[str, Any] = {"id": m["id"]}
+        for key in ("context_length", "max_model_len", "context_window"):
+            if isinstance(m.get(key), int):
+                entry["context_length"] = m[key]
+                break
+        models.append(entry)
+    return sorted(models, key=lambda x: x["id"])
 
 
 class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
@@ -111,6 +120,8 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
         self._initial_key = api_key
         self._initial_model = model
         self._selected_model: str | None = model or None
+        self._selected_context_length: int | None = None
+        self._fetched_models: list[dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="provider-editor-container"):
@@ -175,7 +186,14 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
             self.dismiss(None)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        self._selected_model = str(event.option.prompt)
+        prompt = str(event.option.prompt)
+        # Extract model name (before the context length annotation)
+        self._selected_model = prompt.split("  ")[0].strip()
+        # Find context_length from fetched models
+        for m in self._fetched_models:
+            if m["id"] == self._selected_model and "context_length" in m:
+                self._selected_context_length = m["context_length"]
+                break
         self.query_one("#provider-status", Static).update(
             f"[green]Selected:[/green] {self._selected_model}"
         )
@@ -214,9 +232,14 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
             self.query_one("#manual-model-input", Input).add_class("visible")
             return
 
+        self._fetched_models = models
         model_list.clear_options()
-        for model_id in models:
-            model_list.add_option(model_id)
+        for m in models:
+            label = m["id"]
+            if "context_length" in m:
+                ctx_k = m["context_length"] // 1024
+                label += f"  [dim]({ctx_k}k ctx)[/dim]"
+            model_list.add_option(label)
         model_list.add_class("visible")
         status_widget.update(f"[green]Found {len(models)} models. Click to select.[/green]")
 
@@ -247,6 +270,8 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
         }
         if api_key:
             result["api_key"] = api_key
+        if self._selected_context_length is not None:
+            result["context_length"] = self._selected_context_length
 
         self.dismiss(result)
 

@@ -421,6 +421,7 @@ class ErgonStudioApp(App[None]):
             chat.write(self._format_message(reply_msg.sender, reply_body))
             self._chat_message_count += 1
         self._refresh_chat()
+        await self._check_auto_compaction()
 
     async def _send_to_thread(self, thread_id: str, body: str) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
@@ -474,12 +475,17 @@ class ErgonStudioApp(App[None]):
             total_chars = 0
             for msg in messages:
                 total_chars += len(self.runtime.conversation_store.read_message_body(msg))
-            approx_tokens = total_chars // 4
+            tracked = self.runtime.accumulated_tokens()
+            ctx_window = self.runtime.context_window_size()
+            pct = int(tracked / ctx_window * 100) if ctx_window > 0 else 0
             chat.write(
                 f"[bold]Context usage:[/bold]\n"
                 f"  Messages: {len(messages)}\n"
                 f"  Characters: {total_chars:,}\n"
-                f"  Estimated tokens: ~{approx_tokens:,}"
+                f"  Tracked tokens: {tracked:,}\n"
+                f"  Context window: {ctx_window:,} ({ctx_window // 1024}k)\n"
+                f"  Usage: {pct}%\n"
+                f"  Auto-compact at: 95%"
             )
         elif command == "/session":
             session = self.runtime.current_session()
@@ -989,33 +995,34 @@ class ErgonStudioApp(App[None]):
         chat.write("[dim]Rewound last exchange.[/dim]")
 
     async def _compact_conversation(self, focus: str | None = None) -> str:
-        """Summarize the conversation using the orchestrator's LLM."""
-        messages = self.runtime.list_main_messages()
-        if not messages:
-            return "No messages to compact."
-        conversation_text = []
-        for msg in messages:
-            body = self.runtime.conversation_store.read_message_body(msg).rstrip("\n")
-            conversation_text.append(f"[{msg.sender}] {body}")
-        full_text = "\n\n".join(conversation_text)
-        focus_hint = f"\nFocus on: {focus}" if focus else ""
-        prompt = (
-            "Summarize this conversation for continuity. Preserve:\n"
-            "- Current goals and active tasks\n"
-            "- Decisions made and their rationale\n"
-            "- Key technical facts (file paths, architecture choices, conventions)\n"
-            "- Outstanding issues and blockers\n"
-            "- User preferences expressed during the session\n"
-            "Discard: verbose reasoning, repeated attempts, intermediate tool outputs.\n"
-            f"{focus_hint}\n\n"
-            f"Conversation:\n{full_text}"
-        )
-        result = await self.runtime.generate_agent_text_without_tools(
-            agent_id="orchestrator",
-            body=prompt,
-            created_at=self._next_timestamp(),
+        """Summarize the conversation using the runtime's compaction system."""
+        result = await self.runtime.auto_compact(
+            focus=focus, created_at=self._next_timestamp(),
         )
         return result or "Compaction produced no output."
+
+    async def _check_auto_compaction(self) -> None:
+        """Check if auto-compaction is needed and trigger it."""
+        if not self.runtime.needs_compaction():
+            return
+        chat = self.query_one("#main-chat", RichLog)
+        thinking = self.query_one("#thinking", ThinkingIndicator)
+        ctx = self.runtime.context_window_size()
+        used = self.runtime.accumulated_tokens()
+        pct = int(used / ctx * 100) if ctx > 0 else 0
+        chat.write(f"[dim]Context at {pct}% ({used:,}/{ctx:,} tokens). Auto-compacting...[/dim]")
+        thinking.show("Compacting")
+        try:
+            summary = await self.runtime.auto_compact(created_at=self._next_timestamp())
+        except Exception as exc:
+            thinking.hide()
+            chat.write(f"[red]Auto-compaction failed:[/red] {exc}")
+            return
+        thinking.hide()
+        if summary:
+            chat.write("[green]Context compacted.[/green]")
+            self._chat_message_count = len(self.runtime.list_main_messages())
+        self._refresh_info()
 
     def _next_timestamp(self) -> int:
         self._time_cursor += 1

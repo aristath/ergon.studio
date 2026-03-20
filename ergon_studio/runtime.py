@@ -73,6 +73,31 @@ class DelegationReviewVerdict:
     findings: tuple[str, ...] = ()
 
 
+_DEFAULT_CONTEXT_LENGTH = 131072  # 128k — safe default for modern coding models
+_COMPACTION_THRESHOLD = 0.95
+_COMPACTION_MAX_FAILURES = 3
+
+_COMPACTION_PROMPT = (
+    "Summarize this conversation for continuity. You are compacting a long session "
+    "so it can continue within the model's context window.\n\n"
+    "PRESERVE (these must survive compaction):\n"
+    "- Current goals, active tasks, and their states\n"
+    "- Decisions made and their rationale\n"
+    "- Key technical facts: file paths, architecture choices, naming conventions\n"
+    "- Code snippets that were written or modified (include the actual code)\n"
+    "- Outstanding issues, blockers, and next steps\n"
+    "- User preferences and corrections expressed during the session\n"
+    "- Tool call results that informed decisions\n\n"
+    "DISCARD (safe to drop):\n"
+    "- Verbose intermediate reasoning and failed attempts\n"
+    "- Repeated explanations of the same concept\n"
+    "- Full command outputs when only the conclusion matters\n"
+    "- Progress messages and status updates\n\n"
+    "Format the summary as a structured briefing that another instance of yourself "
+    "could read and seamlessly continue the work."
+)
+
+
 @dataclass(frozen=True)
 class RuntimeContext:
     paths: StudioPaths
@@ -93,6 +118,8 @@ class RuntimeContext:
     retrieval_index: RetrievalIndex
     main_session_id: str
     main_thread_id: str
+    _accumulated_tokens: int
+    _compaction_failure_count: int
 
     def build_agent(self, agent_id: str):
         return build_agent(
@@ -1539,6 +1566,7 @@ class RuntimeContext:
             agent_id=agent_id,
             session=session,
         )
+        self.track_token_usage(response)
         response_text = response.text.strip()
         if not response_text:
             return prompt_message, None
@@ -2855,6 +2883,109 @@ class RuntimeContext:
             assigned_agent_id=None,
         )
 
+    # ── Context compaction ──
+
+    def context_window_size(self) -> int:
+        """Return the context window size for the orchestrator's provider."""
+        provider_name = self.assigned_provider_name("orchestrator")
+        if provider_name is None:
+            return _DEFAULT_CONTEXT_LENGTH
+        provider = self.provider_details(provider_name)
+        if provider is None:
+            return _DEFAULT_CONTEXT_LENGTH
+        ctx = provider.get("context_length")
+        if isinstance(ctx, int) and ctx > 0:
+            return ctx
+        return _DEFAULT_CONTEXT_LENGTH
+
+    def accumulated_tokens(self) -> int:
+        return self._accumulated_tokens
+
+    def track_token_usage(self, response) -> None:
+        """Accumulate token usage from an AgentResponse."""
+        usage = getattr(response, "usage_details", None)
+        if usage is None:
+            return
+        total = usage.get("total_token_count")
+        if isinstance(total, int):
+            object.__setattr__(self, "_accumulated_tokens", self._accumulated_tokens + total)
+            return
+        input_t = usage.get("input_token_count") or 0
+        output_t = usage.get("output_token_count") or 0
+        if input_t or output_t:
+            object.__setattr__(self, "_accumulated_tokens", self._accumulated_tokens + input_t + output_t)
+
+    def needs_compaction(self) -> bool:
+        """Check if accumulated tokens exceed the compaction threshold."""
+        if self._compaction_failure_count >= _COMPACTION_MAX_FAILURES:
+            return False
+        ctx = self.context_window_size()
+        return self._accumulated_tokens >= int(ctx * _COMPACTION_THRESHOLD)
+
+    async def auto_compact(self, *, focus: str | None = None, created_at: int | None = None) -> str | None:
+        """Run automatic context compaction. Returns the summary or None on failure."""
+        if created_at is None:
+            created_at = int(time.time())
+        self.append_event(
+            kind="compaction_started",
+            summary=f"Auto-compaction triggered at {self._accumulated_tokens} tokens",
+            created_at=created_at,
+            thread_id=self.main_thread_id,
+        )
+
+        # Summarize conversation
+        messages = self.list_main_messages()
+        if len(messages) < 4:
+            return None
+
+        conversation_parts: list[str] = []
+        for msg in messages:
+            body = self.conversation_store.read_message_body(msg).rstrip("\n")
+            conversation_parts.append(f"[{msg.sender}] {body}")
+        full_text = "\n\n".join(conversation_parts)
+        focus_hint = f"\nFocus especially on: {focus}" if focus else ""
+        prompt = f"{_COMPACTION_PROMPT}{focus_hint}\n\nConversation:\n{full_text}"
+
+        try:
+            summary = await self.generate_agent_text_without_tools(
+                agent_id="orchestrator",
+                body=prompt,
+                created_at=created_at + 1,
+            )
+        except Exception as exc:
+            object.__setattr__(self, "_compaction_failure_count", self._compaction_failure_count + 1)
+            self.append_event(
+                kind="compaction_failed",
+                summary=f"Compaction failed ({self._compaction_failure_count}/{_COMPACTION_MAX_FAILURES}): {exc}",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+            return None
+
+        if not summary or not summary.strip():
+            object.__setattr__(self, "_compaction_failure_count", self._compaction_failure_count + 1)
+            return None
+
+        # Inject summary as a new message and reset token counter
+        self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="system",
+            kind="compaction_summary",
+            body=f"[Context compacted]\n\n{summary.strip()}",
+            created_at=created_at + 2,
+        )
+
+        object.__setattr__(self, "_accumulated_tokens", 0)
+        object.__setattr__(self, "_compaction_failure_count", 0)
+
+        self.append_event(
+            kind="compaction_completed",
+            summary="Context compacted successfully",
+            created_at=created_at + 2,
+            thread_id=self.main_thread_id,
+        )
+        return summary.strip()
+
     def _approval_mode_for_action(self, action: str) -> str:
         approvals = self.registry.config.get("approvals", {})
         if not isinstance(approvals, dict):
@@ -2979,6 +3110,8 @@ def load_runtime(
         retrieval_index=retrieval_index,
         main_session_id=resolved_session.id,
         main_thread_id=_main_thread_id_for_session(resolved_session.id),
+        _accumulated_tokens=0,
+        _compaction_failure_count=0,
     )
     object.__setattr__(
         runtime,

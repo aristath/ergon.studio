@@ -391,8 +391,7 @@ class ErgonStudioApp(App[None]):
             )
             self._refresh_timeline()
             async for _event in stream:
-                self._refresh_timeline()
-                await asyncio.sleep(0)
+                pass
             await stream.get_final_response()
         except asyncio.CancelledError:
             thinking.hide()

@@ -11,7 +11,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, TextArea
 
-from ergon_studio.live_runtime import LiveRuntimeSubscription
+from ergon_studio.live_runtime import LiveRuntimeEvent, LiveRuntimeSubscription
 from ergon_studio.runtime import RuntimeContext, load_runtime
 from ergon_studio.storage.models import MessageRecord
 from ergon_studio.tui.inspectors import (
@@ -440,14 +440,7 @@ class ErgonStudioApp(App[None]):
             self._refresh_timeline()
             async for _event in stream:
                 pass
-            _user_message, reply_message = await stream.get_final_response()
-            if reply_message is None:
-                self._add_notice(
-                    "The orchestrator could not produce a response for that turn.",
-                    level="error",
-                    title="Send failed",
-                )
-                self._refresh_timeline()
+            await stream.get_final_response()
         except asyncio.CancelledError:
             thinking.hide()
             self._refresh_timeline()
@@ -1183,11 +1176,30 @@ class ErgonStudioApp(App[None]):
         if subscription is None:
             return
         try:
-            async for _event in subscription:
+            async for event in subscription:
+                self._handle_live_runtime_event(event)
                 self._refresh_timeline()
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             return
+
+    def _handle_live_runtime_event(self, event: LiveRuntimeEvent) -> None:
+        if event.kind != "message_failed":
+            return
+        if event.thread_id == self.runtime.main_thread_id:
+            self._add_notice(
+                f"Error: {event.error}" if event.error else "The orchestrator could not produce a response for that turn.",
+                level="error",
+                title="Send failed",
+            )
+            return
+        speaker = event.sender or "agent"
+        detail = f": {event.error}" if event.error else "."
+        self._add_notice(
+            f"{speaker} could not finish a response{detail}",
+            level="error",
+            title="Workroom failed",
+        )
 
     def _next_timestamp(self) -> int:
         self._time_cursor += 1

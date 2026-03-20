@@ -1115,6 +1115,16 @@ class RuntimeContext:
             )
         state["prompt"] = prompt_message
 
+        draft_id = f"draft-{uuid4().hex}"
+        started = self.live_state.start_draft(
+            draft_id=draft_id,
+            thread_id=thread_id,
+            sender=reply_sender,
+            kind="chat",
+            created_at=created_at + 1,
+        )
+        yield started
+
         try:
             agent = self.build_agent(agent_id)
         except (KeyError, ValueError) as exc:
@@ -1124,6 +1134,13 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=thread_id,
             )
+            failed = self.live_state.fail_draft(
+                draft_id=draft_id,
+                error=str(exc),
+                created_at=created_at + 1,
+            )
+            if failed is not None:
+                yield failed
             return
 
         thread = self.get_thread(thread_id)
@@ -1147,15 +1164,6 @@ class RuntimeContext:
             task_id=thread.parent_task_id if thread is not None else None,
             agent_id=agent_id,
         )
-        draft_id = f"draft-{uuid4().hex}"
-        started = self.live_state.start_draft(
-            draft_id=draft_id,
-            thread_id=thread_id,
-            sender=reply_sender,
-            kind="chat",
-            created_at=created_at + 1,
-        )
-        yield started
 
         response_text = ""
         try:

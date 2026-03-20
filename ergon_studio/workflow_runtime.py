@@ -400,6 +400,7 @@ class _GroupChatParticipantExecutor(Executor):
             agent_id=self.agent_id,
             session=session,
         )
+        self.runtime.track_token_usage(response)
         return response
 
 
@@ -560,6 +561,7 @@ async def _run_structured_review(
             task_id=workflow_run.root_task_id,
         )
         return None
+    runtime.track_token_usage(response)
     return response.text.strip() or None
 
 

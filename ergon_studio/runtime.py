@@ -1248,6 +1248,7 @@ class RuntimeContext:
                 )
             except Exception:
                 return None
+            self.track_token_usage(response)
             return response.text.strip() or None
         review_agent = Agent(
             client=client,
@@ -1269,6 +1270,7 @@ class RuntimeContext:
             )
         except Exception:
             return None
+        self.track_token_usage(response)
         return response.text.strip() or None
 
     def _delegation_evidence_lines(self, thread_id: str) -> list[str]:
@@ -1437,6 +1439,7 @@ class RuntimeContext:
                 thread_id=self.main_thread_id,
             )
             return default_groups
+        self.track_token_usage(response)
         try:
             selected_groups = _parse_selected_workflow_step_groups(
                 workflow_id=workflow_id,
@@ -1620,6 +1623,7 @@ class RuntimeContext:
                 thread_id=self.main_thread_id,
             )
             return OrchestratorTurnDecision(mode="act", reply="")
+        self.track_token_usage(response)
         raw = response.text.strip()
         try:
             parsed = _parse_turn_decision_json(raw)
@@ -1684,6 +1688,7 @@ class RuntimeContext:
                 thread_id=self.main_thread_id,
             )
             return False
+        self.track_token_usage(response)
         try:
             parsed = _parse_turn_decision_json(response.text.strip())
         except ValueError:
@@ -1730,6 +1735,7 @@ class RuntimeContext:
                 thread_id=self.main_thread_id,
             )
             return False
+        self.track_token_usage(response)
         try:
             parsed = _parse_turn_decision_json(response.text.strip())
         except ValueError:
@@ -1806,6 +1812,7 @@ class RuntimeContext:
                 thread_id=target_thread_id,
             )
             return None
+        self.track_token_usage(response)
         response_text = response.text.strip()
         return response_text or None
 

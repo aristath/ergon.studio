@@ -3188,6 +3188,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             self.assertEqual(result["status"], "blocked")
+            self.assertIn("Need the target Python version before continuing.", result["blocked_summary"])
             run_view = runtime.describe_workflow_run(result["workflow_run_id"])
             self.assertIsNotNone(run_view)
             assert run_view is not None

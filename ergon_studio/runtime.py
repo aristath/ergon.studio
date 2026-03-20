@@ -1346,6 +1346,7 @@ class RuntimeContext:
             "review_summary": summary.review_summary or "",
             "review_accepted": summary.review_accepted,
             "artifact_id": summary.artifact_id,
+            "blocked_summary": summary.blocked_summary or "",
         }
 
     async def _select_initial_workflow_step_groups(
@@ -1834,8 +1835,11 @@ class RuntimeContext:
         elif review_accepted is False:
             lines.extend(["", "REJECTED: The workflow finished without passing orchestrator review."])
         status = result.get("status")
+        blocked_summary = result.get("blocked_summary")
         if isinstance(status, str) and status != "completed":
             lines.extend(["", f"Status: {status}"])
+            if isinstance(blocked_summary, str) and blocked_summary.strip():
+                lines.extend(["", f"Blocked: {blocked_summary.strip()}"])
         if isinstance(workflow_run_id, str):
             changed_files = self._workflow_changed_files(workflow_run_id)
             if changed_files:

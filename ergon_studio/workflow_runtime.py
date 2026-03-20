@@ -32,6 +32,7 @@ class WorkflowExecutionSummary:
     review_summary: str | None
     review_accepted: bool | None
     artifact_id: str | None
+    blocked_summary: str | None = None
 
 
 @dataclass
@@ -929,9 +930,11 @@ async def _execute_magentic_workflow(
         assistant_only=False,
     )
     if result.get_request_info_events():
+        request_lines = _request_info_lines(result.get_request_info_events())
+        blocked_summary = request_lines[2] if len(request_lines) >= 3 else request_lines[0]
         tracker.blocked_step_index = 0
         tracker.blocked_thread_id = workroom_thread.id
-        tracker.blocked_summary = "The dynamic workroom requested external information before it could continue."
+        tracker.blocked_summary = blocked_summary
         tracker.blocked_reason = "request_info"
         tracker.last_thread_id = workroom_thread.id
         return _finalize_workflow_run(
@@ -1079,16 +1082,15 @@ async def _execute_handoff_workflow(
     request_info_events = result.get_request_info_events()
     if request_info_events:
         request_lines = _request_info_lines(request_info_events)
+        blocked_summary = request_lines[2] if len(request_lines) >= 3 else request_lines[0]
         tracker.blocked_step_index = 0
         tracker.blocked_thread_id = workroom_thread.id
-        tracker.blocked_summary = (
-            "The handoff workroom requested more information before it could continue."
-        )
+        tracker.blocked_summary = blocked_summary
         tracker.blocked_reason = "request_info"
         tracker.last_thread_id = workroom_thread.id
         runtime.append_event(
             kind="workflow_info_requested",
-            summary=request_lines[0],
+            summary=blocked_summary,
             created_at=cursor.next(),
             thread_id=workroom_thread.id,
             task_id=workflow_run.root_task_id,
@@ -2261,11 +2263,11 @@ def _finalize_workflow_run(
     else:
         runtime.append_event(
             kind="workflow_failed",
-            summary=f"Workflow {workflow_run.workflow_id} failed during execution",
-            created_at=cursor.next(),
-            thread_id=tracker.last_thread_id,
-            task_id=workflow_run.root_task_id,
-        )
+        summary=f"Workflow {workflow_run.workflow_id} failed during execution",
+        created_at=cursor.next(),
+        thread_id=tracker.last_thread_id,
+        task_id=workflow_run.root_task_id,
+    )
 
     return WorkflowExecutionSummary(
         workflow_run_id=workflow_run.id,
@@ -2277,6 +2279,7 @@ def _finalize_workflow_run(
         review_summary=tracker.review_summary,
         review_accepted=tracker.review_accepted,
         artifact_id=tracker.artifact_id,
+        blocked_summary=tracker.blocked_summary,
     )
 
 

@@ -2930,7 +2930,12 @@ class RuntimeContext:
         return self._accumulated_tokens >= int(ctx * _COMPACTION_THRESHOLD)
 
     async def auto_compact(self, *, focus: str | None = None, created_at: int | None = None) -> str | None:
-        """Run automatic context compaction. Returns the summary or None on failure."""
+        """Run automatic context compaction. Returns the summary or None on failure.
+
+        Compaction summarizes older messages and DELETES them from the
+        conversation store, keeping only the last few exchanges plus the
+        summary. This actually reduces context window usage.
+        """
         if created_at is None:
             created_at = int(time.time())
         self.append_event(
@@ -2940,16 +2945,30 @@ class RuntimeContext:
             thread_id=self.main_thread_id,
         )
 
-        # Summarize conversation
         messages = self.list_main_messages()
-        if len(messages) < 4:
+        if len(messages) < 6:
             return None
 
+        # Keep the last 4 messages (recent context) — compact everything before
+        keep_count = 4
+        messages_to_compact = messages[:-keep_count]
+        if not messages_to_compact:
+            return None
+
+        # Build the conversation text from messages being compacted only
         conversation_parts: list[str] = []
-        for msg in messages:
+        for msg in messages_to_compact:
             body = self.conversation_store.read_message_body(msg).rstrip("\n")
             conversation_parts.append(f"[{msg.sender}] {body}")
         full_text = "\n\n".join(conversation_parts)
+
+        # Truncate if the conversation text itself is too large for the
+        # compaction request (use ~40% of context window as limit)
+        ctx = self.context_window_size()
+        max_chars = int(ctx * 0.4 * 4)  # ~40% of context, ~4 chars per token
+        if len(full_text) > max_chars:
+            full_text = full_text[-max_chars:]
+
         focus_hint = f"\nFocus especially on: {focus}" if focus else ""
         prompt = f"{_COMPACTION_PROMPT}{focus_hint}\n\nConversation:\n{full_text}"
 
@@ -2970,15 +2989,26 @@ class RuntimeContext:
             return None
 
         if not summary or not summary.strip():
-            object.__setattr__(self, "_compaction_failure_count", self._compaction_failure_count + 1)
+            # Empty output is not a hard failure — don't increment circuit breaker
+            self.append_event(
+                kind="compaction_empty",
+                summary="Compaction returned empty output",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
             return None
 
-        # Inject summary as a new message and reset token counter
+        # Delete the old messages that were compacted
+        self.conversation_store.delete_messages(
+            self.main_thread_id, messages_to_compact,
+        )
+
+        # Inject summary as the new earliest message
         self.append_message_to_main_thread(
             message_id=f"message-{uuid4().hex}",
             sender="system",
             kind="compaction_summary",
-            body=f"[Context compacted]\n\n{summary.strip()}",
+            body=f"[Context compacted — {len(messages_to_compact)} messages summarized]\n\n{summary.strip()}",
             created_at=created_at + 2,
         )
 
@@ -2987,7 +3017,7 @@ class RuntimeContext:
 
         self.append_event(
             kind="compaction_completed",
-            summary="Context compacted successfully",
+            summary=f"Compacted {len(messages_to_compact)} messages, kept last {keep_count}",
             created_at=created_at + 2,
             thread_id=self.main_thread_id,
         )

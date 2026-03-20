@@ -611,6 +611,18 @@ class MetadataStore:
             for row in rows
         ]
 
+    def delete_messages(self, thread_id: str, message_ids: list[str]) -> int:
+        """Delete messages by ID. Returns the number of rows deleted."""
+        if not message_ids:
+            return 0
+        placeholders = ",".join("?" for _ in message_ids)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"DELETE FROM messages WHERE thread_id = ? AND id IN ({placeholders})",
+                [thread_id, *message_ids],
+            )
+            return cursor.rowcount
+
     def insert_event(self, record: EventRecord) -> None:
         with self._connect() as connection:
             connection.execute(

@@ -223,6 +223,7 @@ class ErgonStudioApp(App[None]):
         self._time_cursor = int(time.time())
         self._last_escape_time: float = 0.0
         self._permission_mode: str = "default"  # default, auto-approve, plan
+        self._compacting: bool = False
         self._background_tasks: dict[str, asyncio.Task] = {}
 
     def compose(self) -> ComposeResult:
@@ -463,10 +464,19 @@ class ErgonStudioApp(App[None]):
             chat.write("[dim]Compacting conversation...[/dim]")
             thinking = self.query_one("#thinking", ThinkingIndicator)
             thinking.show("Compacting")
+            # Reset circuit breaker for manual compaction
+            object.__setattr__(self.runtime, "_compaction_failure_count", 0)
             try:
                 summary = await self._compact_conversation(focus)
                 thinking.hide()
-                chat.write(f"[green]Compacted.[/green] Summary:\n{summary}")
+                if summary:
+                    # Reload chat since old messages were deleted
+                    chat.clear()
+                    self._chat_message_count = 0
+                    self._load_existing_messages()
+                    chat.write("[green]Context compacted.[/green]")
+                else:
+                    chat.write("[yellow]Nothing to compact.[/yellow]")
             except Exception as exc:
                 thinking.hide()
                 chat.write(f"[red]Compaction failed:[/red] {exc}")
@@ -1003,8 +1013,11 @@ class ErgonStudioApp(App[None]):
 
     async def _check_auto_compaction(self) -> None:
         """Check if auto-compaction is needed and trigger it."""
+        if self._compacting:
+            return
         if not self.runtime.needs_compaction():
             return
+        self._compacting = True
         chat = self.query_one("#main-chat", RichLog)
         thinking = self.query_one("#thinking", ThinkingIndicator)
         ctx = self.runtime.context_window_size()
@@ -1016,12 +1029,17 @@ class ErgonStudioApp(App[None]):
             summary = await self.runtime.auto_compact(created_at=self._next_timestamp())
         except Exception as exc:
             thinking.hide()
+            self._compacting = False
             chat.write(f"[red]Auto-compaction failed:[/red] {exc}")
             return
         thinking.hide()
+        self._compacting = False
         if summary:
+            # Reload the chat since old messages were deleted
+            chat.clear()
+            self._chat_message_count = 0
+            self._load_existing_messages()
             chat.write("[green]Context compacted.[/green]")
-            self._chat_message_count = len(self.runtime.list_main_messages())
         self._refresh_info()
 
     def _next_timestamp(self) -> int:

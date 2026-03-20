@@ -144,6 +144,17 @@ class ConversationStore:
     def read_message_body(self, message: MessageRecord) -> str:
         return Path(message.body_path).read_text(encoding="utf-8")
 
+    def delete_messages(self, thread_id: str, messages: list[MessageRecord]) -> int:
+        """Delete messages from the store and remove their body files."""
+        if not messages:
+            return 0
+        for msg in messages:
+            try:
+                Path(msg.body_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return self.metadata.delete_messages(thread_id, [m.id for m in messages])
+
 
 def _ensure_trailing_newline(body: str) -> str:
     return body if body.endswith("\n") else f"{body}\n"

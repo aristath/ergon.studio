@@ -7,12 +7,40 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent_framework import AgentSession, Message, ResponseStream
+from agent_framework import AgentResponseUpdate, AgentSession, Message, ResponseStream
 
 from ergon_studio.config import save_global_config
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_collect_output_messages_handles_agent_response_updates(self) -> None:
+        from ergon_studio.workflow_runtime import _collect_output_messages
+
+        messages = _collect_output_messages(
+            [
+                AgentResponseUpdate(
+                    role="assistant",
+                    author_name="architect",
+                    contents=["Streamed recommendation."],
+                ),
+                [
+                    AgentResponseUpdate(
+                        role="assistant",
+                        author_name="reviewer",
+                        contents=["Final recommendation."],
+                    )
+                ],
+            ]
+        )
+
+        self.assertEqual(
+            [(message.author_name, message.text) for message in messages],
+            [
+                ("architect", "Streamed recommendation."),
+                ("reviewer", "Final recommendation."),
+            ],
+        )
+
     def test_adaptive_staffing_support_follows_metadata_flag(self) -> None:
         from ergon_studio.runtime import _workflow_supports_adaptive_staffing
 

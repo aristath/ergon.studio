@@ -8,7 +8,7 @@ import re
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agent_framework import Agent, AgentResponse, Executor, Message, WorkflowBuilder, WorkflowContext, handler
+from agent_framework import Agent, AgentResponse, AgentResponseUpdate, Executor, Message, WorkflowBuilder, WorkflowContext, handler
 from agent_framework.orchestrations import GroupChatBuilder, HandoffBuilder, MagenticBuilder, clean_conversation_for_handoff
 from agent_framework_orchestrations._base_group_chat_orchestrator import GroupChatParticipantMessage, GroupChatRequestMessage, GroupChatResponseMessage
 
@@ -1967,6 +1967,9 @@ def _collect_output_messages(outputs: list[object]) -> list[Message]:
         if isinstance(output, AgentResponse):
             messages.extend(message for message in output.messages if isinstance(message, Message))
             continue
+        if isinstance(output, AgentResponseUpdate):
+            messages.append(_message_from_response_update(output))
+            continue
         if isinstance(output, Message):
             messages.append(output)
             continue
@@ -1975,7 +1978,29 @@ def _collect_output_messages(outputs: list[object]) -> list[Message]:
         for item in output:
             if isinstance(item, Message):
                 messages.append(item)
+                continue
+            if isinstance(item, AgentResponseUpdate):
+                messages.append(_message_from_response_update(item))
     return messages
+
+
+def _message_from_response_update(update: AgentResponseUpdate) -> Message:
+    text_fragments: list[str] = []
+    normalized_contents: list[object] = []
+    for content in getattr(update, "contents", []) or []:
+        if isinstance(content, str):
+            text_fragments.append(content)
+            continue
+        content_text = getattr(content, "text", None)
+        if isinstance(content_text, str) and content_text:
+            text_fragments.append(content_text)
+        normalized_contents.append(content)
+    return Message(
+        role=update.role or "assistant",
+        text="".join(text_fragments).strip(),
+        author_name=update.author_name or update.agent_id,
+        contents=normalized_contents,
+    )
 
 
 def _request_info_lines(events: Sequence[object]) -> list[str]:

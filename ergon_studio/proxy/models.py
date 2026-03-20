@@ -121,10 +121,15 @@ class ProxyContentDeltaEvent:
 @dataclass(frozen=True)
 class ProxyToolCallEvent:
     call: ProxyToolCall
+    index: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.call, ProxyToolCall):
             raise TypeError("call must be a ProxyToolCall")
+        if not isinstance(self.index, int):
+            raise TypeError("index must be an int")
+        if self.index < 0:
+            raise ValueError("index must be non-negative")
 
 
 @dataclass(frozen=True)

@@ -19,7 +19,7 @@ def build_agent(
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
-    provider_name = _resolve_provider_name(registry.config, role, definition.id)
+    provider_name = resolve_provider_name(registry, agent_id)
     provider_config = registry.config["providers"][provider_name]
     provider_capabilities = provider_config.get("capabilities", {})
     if not isinstance(provider_capabilities, dict):
@@ -62,6 +62,33 @@ def compose_instructions(definition: DefinitionDocument) -> str:
         if content:
             parts.append(content)
     return "\n\n".join(parts).strip()
+
+
+def resolve_provider_name(registry: RuntimeRegistry, agent_id: str) -> str:
+    if not registry.config.get("role_assignments") or not registry.config.get("providers"):
+        raise ValueError(f"no provider assigned for role '{agent_id}'")
+    definition = registry.agent_definitions[agent_id]
+    role = str(definition.metadata.get("role", definition.id))
+    return _resolve_provider_name(registry.config, role, definition.id)
+
+
+def provider_capabilities_for_agent(registry: RuntimeRegistry, agent_id: str) -> dict[str, object]:
+    if not registry.config.get("role_assignments") or not registry.config.get("providers"):
+        return {}
+    provider_name = resolve_provider_name(registry, agent_id)
+    provider_config = registry.config["providers"][provider_name]
+    capabilities = provider_config.get("capabilities", {})
+    if not isinstance(capabilities, dict):
+        return {}
+    return capabilities
+
+
+def provider_supports_tool_calling(registry: RuntimeRegistry, agent_id: str) -> bool:
+    capabilities = provider_capabilities_for_agent(registry, agent_id)
+    configured = capabilities.get("tool_calling")
+    if type(configured) is bool:
+        return configured
+    return True
 
 
 def _resolve_provider_name(config: dict[str, Any], role: str, agent_id: str) -> str:

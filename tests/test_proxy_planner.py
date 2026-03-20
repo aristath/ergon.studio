@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.planner import build_turn_planner_prompt, parse_turn_plan
+from ergon_studio.proxy.planner import build_turn_planner_prompt, parse_turn_plan, resolve_workflow_reference
 from ergon_studio.registry import RuntimeRegistry
 
 
@@ -48,6 +48,43 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.mode, "delegate")
         self.assertIsNone(plan.agent_id)
+
+    def test_parse_turn_plan_resolves_workflow_by_name(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            '{"mode":"workflow","workflow_id":"Standard Build"}',
+            registry=registry,
+        )
+
+        self.assertEqual(plan.workflow_id, "standard-build")
+
+    def test_parse_turn_plan_resolves_workflow_by_selection_hint(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            '{"mode":"workflow","workflow_id":"staged_delivery"}',
+            registry=registry,
+        )
+
+        self.assertEqual(plan.workflow_id, "standard-build")
+
+    def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:
+        registry = _make_registry()
+        registry.workflow_definitions["other-build"] = DefinitionDocument(
+            id="other-build",
+            path=Path("other-build.md"),
+            metadata={
+                "id": "other-build",
+                "name": "Other Build",
+                "selection_hints": ["staged_delivery"],
+                "steps": ["coder"],
+            },
+            body="## Purpose\nBuild something else.",
+            sections={"Purpose": "Build something else."},
+        )
+
+        self.assertIsNone(resolve_workflow_reference(registry, "staged_delivery"))
 
 
 def _make_registry():

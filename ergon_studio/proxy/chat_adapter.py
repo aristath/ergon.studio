@@ -39,7 +39,7 @@ def encode_chat_stream_event(
     if isinstance(event, ProxyToolCallEvent):
         delta["tool_calls"] = [
             {
-                "index": 0,
+                "index": event.index,
                 "id": event.call.id,
                 "type": "function",
                 "function": {

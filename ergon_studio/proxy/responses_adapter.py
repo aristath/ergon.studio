@@ -112,7 +112,7 @@ def encode_responses_stream_events(
                 "type": "response.output_item.added",
                 "event_id": f"event_{uuid4().hex}",
                 "response_id": response_id,
-                "output_index": 0,
+                "output_index": event.index,
                 "item": {
                     "id": f"fc_{uuid4().hex}",
                     "type": "function_call",

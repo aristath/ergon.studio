@@ -38,7 +38,8 @@ class ProxyChatAdapterTests(unittest.TestCase):
                     id="call_1",
                     name="read_file",
                     arguments_json="{\"path\":\"main.py\"}",
-                )
+                ),
+                index=2,
             ),
             completion_id="chatcmpl_1",
             model="ergon",
@@ -46,6 +47,7 @@ class ProxyChatAdapterTests(unittest.TestCase):
         )
 
         tool_call = payload["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual(tool_call["index"], 2)
         self.assertEqual(tool_call["id"], "call_1")
         self.assertEqual(tool_call["function"]["name"], "read_file")
         self.assertIsNone(payload["choices"][0]["finish_reason"])

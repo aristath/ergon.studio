@@ -5,10 +5,17 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from agent_framework import Message, ResponseStream
+from agent_framework import Content, Message, ResponseStream
 
-from ergon_studio.agent_factory import build_agent
-from ergon_studio.proxy.continuation import ContinuationState, encode_continuation_tool_call, latest_continuation
+from ergon_studio.agent_factory import build_agent, provider_supports_tool_calling
+from ergon_studio.proxy.continuation import (
+    ContinuationState,
+    PendingContinuation,
+    continuation_result_map,
+    continuation_tool_calls,
+    encode_continuation_tool_call,
+    latest_pending_continuation,
+)
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
@@ -44,26 +51,31 @@ class ProxyOrchestrationCore:
         }
 
         async def _events():
-            continuation = latest_continuation(request.messages)
-            if continuation is not None:
-                state["mode"] = continuation.mode
-                async for event in self._execute_continuation(
-                    request=request,
-                    continuation=continuation,
-                    created_at=created_at,
-                    state=state,
-                ):
-                    yield event
-            else:
-                plan = await self._plan_turn(request)
-                state["mode"] = plan.mode
-                async for event in self._execute_plan(
-                    request=request,
-                    plan=plan,
-                    created_at=created_at,
-                    state=state,
-                ):
-                    yield event
+            try:
+                pending = latest_pending_continuation(request.messages)
+                if pending is not None:
+                    state["mode"] = pending.state.mode
+                    async for event in self._execute_continuation(
+                        request=request,
+                        pending=pending,
+                        created_at=created_at,
+                        state=state,
+                    ):
+                        yield event
+                else:
+                    plan = await self._plan_turn(request)
+                    state["mode"] = plan.mode
+                    async for event in self._execute_plan(
+                        request=request,
+                        plan=plan,
+                        created_at=created_at,
+                        state=state,
+                    ):
+                        yield event
+            except ValueError as exc:
+                state["finish_reason"] = "error"
+                state["content"] = str(exc)
+                yield ProxyContentDeltaEvent(state["content"])
             yield ProxyFinishEvent(state["finish_reason"])
 
         return ResponseStream(
@@ -107,14 +119,16 @@ class ProxyOrchestrationCore:
         self,
         *,
         request,
-        continuation: ContinuationState,
+        pending: PendingContinuation,
         created_at: int,
         state: dict[str, Any],
     ):
+        continuation = pending.state
         if continuation.mode == "workflow" and continuation.workflow_id is not None:
             async for event in self._execute_workflow_continuation(
                 request=request,
                 continuation=continuation,
+                pending=pending,
                 created_at=created_at,
                 state=state,
             ):
@@ -132,13 +146,14 @@ class ProxyOrchestrationCore:
                 created_at=created_at,
                 state=state,
                 current_brief=continuation.current_brief,
+                pending=pending,
             ):
                 yield event
             return
-        async for event in self._execute_direct(request=request, created_at=created_at, state=state):
+        async for event in self._execute_direct(request=request, created_at=created_at, state=state, pending=pending):
             yield event
 
-    async def _execute_direct(self, *, request, created_at: int, state: dict[str, Any]):
+    async def _execute_direct(self, *, request, created_at: int, state: dict[str, Any], pending: PendingContinuation | None = None):
         notice = "Orchestrator: handling this turn directly.\n"
         state["reasoning"] += notice
         yield ProxyReasoningDeltaEvent(notice)
@@ -151,6 +166,7 @@ class ProxyOrchestrationCore:
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
+            pending_continuation=pending,
             final_response_sink=lambda value: _set_response_holder(response_holder, value),
         ):
             state["content"] += delta
@@ -173,6 +189,7 @@ class ProxyOrchestrationCore:
         created_at: int,
         state: dict[str, Any],
         current_brief: str | None = None,
+        pending: PendingContinuation | None = None,
     ):
         agent_id = plan.agent_id or "coder"
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
@@ -194,6 +211,7 @@ class ProxyOrchestrationCore:
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
+            pending_continuation=pending,
             final_response_sink=lambda value: _set_response_holder(response_holder, value),
         ):
             specialist_text += delta
@@ -250,7 +268,7 @@ class ProxyOrchestrationCore:
         current_brief = goal
         workflow_outputs: list[str] = []
         for step_index, group in enumerate(step_groups):
-            for agent_id in group:
+            for agent_index, agent_id in enumerate(group):
                 specialist_prompt = _workflow_step_prompt(
                     workflow_id=definition.id,
                     agent_id=agent_id,
@@ -284,6 +302,7 @@ class ProxyOrchestrationCore:
                             mode="workflow",
                             workflow_id=definition.id,
                             step_index=step_index,
+                            agent_index=agent_index,
                             agent_id=agent_id,
                             goal=goal,
                             current_brief=agent_text.strip() or current_brief,
@@ -319,6 +338,7 @@ class ProxyOrchestrationCore:
         *,
         request,
         continuation: ContinuationState,
+        pending: PendingContinuation,
         created_at: int,
         state: dict[str, Any],
     ):
@@ -336,14 +356,14 @@ class ProxyOrchestrationCore:
         goal = continuation.goal or request.latest_user_text() or ""
         step_groups = workflow_step_groups_for_definition(definition)
         start_index = continuation.step_index or 0
+        start_agent_index = continuation.agent_index or 0
         current_brief = continuation.current_brief or goal
         workflow_outputs: list[str] = list(continuation.workflow_outputs)
         for step_index in range(start_index, len(step_groups)):
             group = step_groups[step_index]
-            agents = group
-            if step_index == start_index:
-                agents = tuple(agent for agent in group if agent == continuation.agent_id) or (continuation.agent_id,)
-            for agent_id in agents:
+            group_start_index = start_agent_index if step_index == start_index else 0
+            agents = tuple(group[group_start_index:]) if group_start_index < len(group) else (continuation.agent_id,)
+            for group_offset, agent_id in enumerate(agents, start=group_start_index):
                 specialist_prompt = _workflow_step_prompt(
                     workflow_id=definition.id,
                     agent_id=agent_id,
@@ -362,6 +382,7 @@ class ProxyOrchestrationCore:
                     host_tools=request.tools,
                     tool_choice=request.tool_choice,
                     parallel_tool_calls=request.parallel_tool_calls,
+                    pending_continuation=pending if step_index == start_index and group_offset == start_agent_index else None,
                     final_response_sink=lambda value: _set_response_holder(response_holder, value),
                 ):
                     agent_text += delta
@@ -377,6 +398,7 @@ class ProxyOrchestrationCore:
                             mode="workflow",
                             workflow_id=definition.id,
                             step_index=step_index,
+                            agent_index=group_offset,
                             agent_id=agent_id,
                             goal=goal,
                             current_brief=agent_text.strip() or current_brief,
@@ -414,9 +436,16 @@ class ProxyOrchestrationCore:
         prompt: str,
         session_id: str,
         preamble: str = "",
+        pending_continuation: PendingContinuation | None = None,
     ) -> str | None:
         full_prompt = _merge_preamble(preamble, prompt)
-        response = await self._run_agent(agent_id=agent_id, prompt=full_prompt, session_id=session_id, stream=False)
+        response = await self._run_agent(
+            agent_id=agent_id,
+            prompt=full_prompt,
+            session_id=session_id,
+            stream=False,
+            pending_continuation=pending_continuation,
+        )
         if response is None:
             return None
         response_text = getattr(response, "text", response)
@@ -434,6 +463,7 @@ class ProxyOrchestrationCore:
         host_tools=(),
         tool_choice=None,
         parallel_tool_calls=None,
+        pending_continuation: PendingContinuation | None = None,
         final_response_sink: Callable[[Any], None] | None = None,
     ):
         full_prompt = _merge_preamble(preamble, prompt)
@@ -445,6 +475,7 @@ class ProxyOrchestrationCore:
             host_tools=host_tools,
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
+            pending_continuation=pending_continuation,
         )
         if hasattr(run_result, "__aiter__") and hasattr(run_result, "get_final_response"):
             emitted = False
@@ -478,6 +509,7 @@ class ProxyOrchestrationCore:
         host_tools=(),
         tool_choice=None,
         parallel_tool_calls=None,
+        pending_continuation: PendingContinuation | None = None,
     ):
         agent = self._agent_builder(
             self.registry,
@@ -488,6 +520,12 @@ class ProxyOrchestrationCore:
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
         )
+        if allowed_tools and not provider_supports_tool_calling(self.registry, agent_id):
+            if tool_options.get("tool_choice") not in (None, "auto", "none"):
+                raise ValueError(f"provider for agent '{agent_id}' does not support tool calling")
+            allowed_tools = ()
+            tool_options.pop("tool_choice", None)
+            tool_options.pop("allow_multiple_tool_calls", None)
         run_kwargs = {
             "session": agent.create_session(session_id=session_id),
             "stream": stream,
@@ -497,13 +535,7 @@ class ProxyOrchestrationCore:
             run_kwargs["tools"] = declaration_tools
         run_kwargs.update(tool_options)
         result = agent.run(
-            [
-                Message(
-                    role="user",
-                    text=prompt,
-                    author_name="proxy",
-                )
-            ],
+            _build_agent_messages(prompt=prompt, pending_continuation=pending_continuation),
             **run_kwargs,
         )
         if stream:
@@ -526,7 +558,7 @@ class ProxyOrchestrationCore:
         )
         state["tool_calls"] = encoded_calls
         state["finish_reason"] = "tool_calls"
-        return [ProxyToolCallEvent(call) for call in encoded_calls]
+        return [ProxyToolCallEvent(call=call, index=index) for index, call in enumerate(encoded_calls)]
 
 
 def _merge_preamble(preamble: str, prompt: str) -> str:
@@ -603,6 +635,49 @@ def _workflow_step_prompt(
             ]
         )
     return "\n".join(lines).strip()
+
+
+def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuation | None) -> list[Message]:
+    messages = [
+        Message(
+            role="user",
+            text=prompt,
+            author_name="proxy",
+        )
+    ]
+    if pending_continuation is None:
+        return messages
+
+    assistant_contents: list[Content | str] = []
+    if pending_continuation.assistant_message.content:
+        assistant_contents.append(pending_continuation.assistant_message.content)
+    for tool_call in continuation_tool_calls(pending_continuation):
+        assistant_contents.append(
+            Content.from_function_call(
+                call_id=tool_call.id,
+                name=tool_call.name,
+                arguments=tool_call.arguments_json,
+            )
+        )
+    if assistant_contents:
+        messages.append(
+            Message(
+                role="assistant",
+                contents=assistant_contents,
+                author_name=pending_continuation.state.agent_id,
+            )
+        )
+
+    for tool_call in continuation_tool_calls(pending_continuation):
+        result_text = continuation_result_map(pending_continuation).get(tool_call.id, "")
+        messages.append(
+            Message(
+                role="tool",
+                contents=[Content.from_function_result(call_id=tool_call.id, result=result_text)],
+                author_name=tool_call.name,
+            )
+        )
+    return messages
 
 
 def _summary_instructions() -> str:

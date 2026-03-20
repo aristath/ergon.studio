@@ -88,9 +88,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     mode = str(payload.get("mode", "act")).strip().lower()
     if mode not in {"act", "delegate", "workflow"}:
         mode = "act"
-    workflow_id = _optional_text(payload.get("workflow_id"))
-    if workflow_id is not None and workflow_id not in registry.workflow_definitions:
-        workflow_id = None
+    workflow_id = resolve_workflow_reference(registry, _optional_text(payload.get("workflow_id")))
     agent_id = _optional_text(payload.get("agent_id"))
     if agent_id is not None and agent_id not in registry.agent_definitions:
         agent_id = None
@@ -102,6 +100,32 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         goal=_optional_text(payload.get("goal")),
         deliverable_expected=bool(payload.get("deliverable_expected", False)),
     )
+
+
+def resolve_workflow_reference(registry: RuntimeRegistry, value: str | None) -> str | None:
+    candidate = _optional_text(value)
+    if candidate is None:
+        return None
+    if candidate in registry.workflow_definitions:
+        return candidate
+
+    lowered = candidate.casefold()
+    by_name = [
+        workflow_id
+        for workflow_id, definition in registry.workflow_definitions.items()
+        if str(definition.metadata.get("name", "")).strip().casefold() == lowered
+    ]
+    if len(by_name) == 1:
+        return by_name[0]
+
+    by_hint = [
+        workflow_id
+        for workflow_id, definition in registry.workflow_definitions.items()
+        if lowered in {hint.casefold() for hint in selection_hints_for_metadata(definition.metadata)}
+    ]
+    if len(by_hint) == 1:
+        return by_hint[0]
+    return None
 
 
 def summarize_conversation(messages: tuple[ProxyInputMessage, ...], *, limit: int = 10) -> str:

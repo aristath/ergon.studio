@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.continuation import ContinuationState, decode_continuation_from_tool_call_id, encode_continuation_tool_call, latest_continuation
+from ergon_studio.proxy.continuation import ContinuationState, decode_continuation_from_tool_call_id, encode_continuation_tool_call, latest_continuation, latest_pending_continuation
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 
 
@@ -29,6 +29,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.agent_id, "architect")
         self.assertEqual(decoded.workflow_id, "standard-build")
         self.assertEqual(decoded.step_index, 2)
+        self.assertEqual(decoded.agent_index, None)
         self.assertEqual(decoded.request_text, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
@@ -46,6 +47,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 agent_id="coder",
                 workflow_id="standard-build",
                 step_index=1,
+                agent_index=0,
                 request_text="Implement A",
                 goal="Build calculator",
                 current_brief="Updating main.py",
@@ -60,25 +62,30 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
         self.assertEqual(decoded.workflow_outputs, ("architect: use main.py",))
+        self.assertEqual(decoded.agent_index, 0)
 
     def test_latest_continuation_uses_latest_tool_message(self) -> None:
+        first_call = encode_continuation_tool_call(
+            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
+            state=ContinuationState(mode="delegate", agent_id="coder"),
+        )
+        second_call = encode_continuation_tool_call(
+            ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
+            state=ContinuationState(mode="act", agent_id="orchestrator"),
+        )
         messages = (
             ProxyInputMessage(role="user", content="Build it"),
+            ProxyInputMessage(role="assistant", content="", tool_calls=(first_call,)),
             ProxyInputMessage(
                 role="tool",
                 content="first output",
-                tool_call_id=encode_continuation_tool_call(
-                    ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-                    state=ContinuationState(mode="delegate", agent_id="coder"),
-                ).id,
+                tool_call_id=first_call.id,
             ),
+            ProxyInputMessage(role="assistant", content="", tool_calls=(second_call,)),
             ProxyInputMessage(
                 role="tool",
                 content="second output",
-                tool_call_id=encode_continuation_tool_call(
-                    ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
-                    state=ContinuationState(mode="act", agent_id="orchestrator"),
-                ).id,
+                tool_call_id=second_call.id,
             ),
         )
 
@@ -87,6 +94,41 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertIsNotNone(decoded)
         self.assertEqual(decoded.mode, "act")
         self.assertEqual(decoded.agent_id, "orchestrator")
+
+    def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
+        tool_call = encode_continuation_tool_call(
+            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
+            state=ContinuationState(mode="delegate", agent_id="coder"),
+        )
+        messages = (
+            ProxyInputMessage(role="user", content="Build it"),
+            ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+            ProxyInputMessage(role="tool", content="file contents", tool_call_id=tool_call.id),
+            ProxyInputMessage(role="assistant", content="Done with that."),
+            ProxyInputMessage(role="user", content="Now do something else"),
+        )
+
+        self.assertIsNone(latest_pending_continuation(messages))
+        self.assertIsNone(latest_continuation(messages))
+
+    def test_latest_pending_continuation_returns_matching_assistant_and_results(self) -> None:
+        tool_call = encode_continuation_tool_call(
+            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
+            state=ContinuationState(mode="delegate", agent_id="coder"),
+        )
+        messages = (
+            ProxyInputMessage(role="user", content="Build it"),
+            ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+            ProxyInputMessage(role="tool", content="file contents", tool_call_id=tool_call.id),
+        )
+
+        pending = latest_pending_continuation(messages)
+
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        self.assertEqual(pending.state.mode, "delegate")
+        self.assertEqual(pending.assistant_message.tool_calls[0].id, tool_call.id)
+        self.assertEqual(pending.tool_results[0].content, "file contents")
 
 
 if __name__ == "__main__":

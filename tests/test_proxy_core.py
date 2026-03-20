@@ -5,10 +5,10 @@ from pathlib import Path
 
 from agent_framework import ResponseStream
 
-from ergon_studio.proxy.continuation import decode_continuation_from_tool_call_id
+from ergon_studio.proxy.continuation import ContinuationState, decode_continuation_from_tool_call_id, encode_continuation_tool_call
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.core import ProxyOrchestrationCore
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyInputMessage, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnRequest
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyInputMessage, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent, ProxyTurnRequest
 from ergon_studio.registry import RuntimeRegistry
 
 
@@ -167,6 +167,84 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed_result.content, "Workflow final summary")
         self.assertEqual(resumed_result.finish_reason, "stop")
 
+    async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
+        tool_call = _host_continuation_tool_call(
+            state=ContinuationState(mode="delegate", agent_id="coder"),
+            call_id="call_1",
+            name="read_file",
+        )
+        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_fake_agent_builder({
+            "orchestrator": ["{\"mode\":\"act\"}", "Fresh reply"],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Build calculator"),
+                ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+                ProxyInputMessage(role="tool", content="file contents", tool_call_id=tool_call.id),
+                ProxyInputMessage(role="assistant", content="That is done."),
+                ProxyInputMessage(role="user", content="Now explain the design"),
+            ),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(event.delta for event in events if isinstance(event, ProxyReasoningDeltaEvent))
+        self.assertIn("handling this turn directly", reasoning.lower())
+        self.assertEqual(result.content, "Fresh reply")
+
+    async def test_workflow_continuation_keeps_remaining_agents_in_same_group(self) -> None:
+        registry = _grouped_workflow_registry()
+        first_core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"workflow\",\"workflow_id\":\"grouped-build\",\"goal\":\"Build calculator\"}",
+            ],
+            "architect": [
+                {
+                    "text": "",
+                    "tool_calls": [
+                        {"id": "call_arch_1", "name": "read_file", "arguments": "{\"path\":\"main.py\"}"},
+                    ],
+                }
+            ],
+        }))
+        first_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
+            tools=(_host_tool("read_file"),),
+        )
+        first_stream = first_core.stream_turn(first_request, created_at=1)
+        first_events = [event async for event in first_stream]
+        tool_call = next(event.call for event in first_events if isinstance(event, ProxyToolCallEvent))
+
+        resumed_core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "architect": ["Architecture plan"],
+            "coder": ["Built feature"],
+            "reviewer": ["Reviewed result"],
+            "orchestrator": ["Workflow final summary"],
+        }))
+        resumed_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Build calculator"),
+                ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+                ProxyInputMessage(role="tool", content="print('current main')", tool_call_id=tool_call.id),
+            ),
+            tools=(_host_tool("read_file"),),
+        )
+
+        resumed_stream = resumed_core.stream_turn(resumed_request, created_at=2)
+        resumed_events = [event async for event in resumed_stream]
+        resumed_result = await resumed_stream.get_final_response()
+
+        reasoning = "".join(event.delta for event in resumed_events if isinstance(event, ProxyReasoningDeltaEvent))
+        self.assertIn("architect: Architecture", reasoning)
+        self.assertIn("coder: Built", reasoning)
+        self.assertIn("reviewer: Reviewed", reasoning)
+        self.assertEqual(resumed_result.content, "Workflow final summary")
+
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
         remaining = {
@@ -200,6 +278,57 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([tool.name for tool in tools], ["write_file"])
         self.assertEqual(kwargs["tool_choice"], {"mode": "required", "required_function_name": "write_file"})
         self.assertFalse(kwargs["allow_multiple_tool_calls"])
+
+    async def test_stream_turn_strips_optional_tools_when_provider_cannot_call_tools(self) -> None:
+        captured: dict[str, object] = {}
+        remaining = {
+            "orchestrator": ["{\"mode\":\"act\"}", {"text": "Done", "tool_calls": []}],
+        }
+
+        class _CaptureAgent(_FakeAgent):
+            def run(self, _messages, *, session, stream: bool = False, tools=None, **kwargs):
+                captured["tools"] = tools
+                captured["kwargs"] = kwargs
+                return super().run(_messages, session=session, stream=stream, tools=tools, **kwargs)
+
+        def _builder(_registry, agent_id: str, **_kwargs):
+            return _CaptureAgent([remaining[agent_id].pop(0)])
+
+        registry = _provider_registry(tool_calling=False)
+        core = ProxyOrchestrationCore(registry, agent_builder=_builder)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
+            tools=(_host_tool("read_file"),),
+            tool_choice="auto",
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertIsNone(captured["tools"])
+        self.assertNotIn("tool_choice", captured["kwargs"])
+
+    async def test_stream_turn_errors_when_required_tool_choice_hits_toolless_provider(self) -> None:
+        registry = _provider_registry(tool_calling=False)
+        core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "orchestrator": ["{\"mode\":\"act\"}", "unused"],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
+            tools=(_host_tool("read_file"),),
+            tool_choice="required",
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertIn("does not support tool calling", result.content)
+        self.assertTrue(any(isinstance(event, ProxyContentDeltaEvent) for event in events))
 
 
 class _FakeRegistry:
@@ -294,6 +423,49 @@ def _fake_registry():
     return _FakeRegistry()
 
 
+def _grouped_workflow_registry():
+    registry = _FakeRegistry()
+    registry.workflow_definitions["grouped-build"] = DefinitionDocument(
+        id="grouped-build",
+        path=Path("grouped-build.md"),
+        metadata={
+            "id": "grouped-build",
+            "orchestration": "concurrent",
+            "step_groups": [["architect", "coder", "reviewer"]],
+        },
+        body="## Purpose\nGrouped build.",
+        sections={"Purpose": "Grouped build."},
+    )
+    return registry
+
+
+def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
+    return RuntimeRegistry(
+        config={
+            "providers": {
+                "local": {
+                    "type": "openai_chat",
+                    "model": "ergon",
+                    "capabilities": {"tool_calling": tool_calling},
+                }
+            },
+            "role_assignments": {
+                "orchestrator": "local",
+            },
+        },
+        agent_definitions={
+            "orchestrator": DefinitionDocument(
+                id="orchestrator",
+                path=Path("orchestrator.md"),
+                metadata={"id": "orchestrator", "role": "orchestrator"},
+                body="## Identity\nLead engineer.",
+                sections={"Identity": "Lead engineer."},
+            ),
+        },
+        workflow_definitions={},
+    )
+
+
 def _response_object(text: str, *, tool_calls: list[dict[str, str]]):
     contents = [type("Content", (), {"type": "text", "text": text})()] if text else []
     for tool_call in tool_calls:
@@ -324,6 +496,13 @@ def _host_tool(name: str):
         name=name,
         description=f"{name} tool",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+
+
+def _host_continuation_tool_call(*, state: ContinuationState, call_id: str, name: str) -> ProxyToolCall:
+    return encode_continuation_tool_call(
+        ProxyToolCall(id=call_id, name=name, arguments_json="{}"),
+        state=state,
     )
 
 

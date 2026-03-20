@@ -2459,6 +2459,36 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 ["orchestrator", "architect"],
             )
 
+    async def test_stream_agent_turn_emits_failed_draft_when_agent_is_unavailable(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            thread = runtime.create_agent_thread(agent_id="architect", created_at=1_710_755_200)
+
+            with patch.object(type(runtime), "build_agent", side_effect=ValueError("missing provider")):
+                stream = runtime._stream_agent_turn(
+                    thread_id=thread.id,
+                    agent_id="architect",
+                    prompt_sender="orchestrator",
+                    reply_sender="architect",
+                    body="Design the next component.",
+                    created_at=1_710_755_201,
+                )
+                events = [event async for event in stream]
+                prompt_message, reply_message = await stream.get_final_response()
+
+            self.assertEqual([event.kind for event in events], ["message_started", "message_failed"])
+            self.assertIsNotNone(prompt_message)
+            self.assertIsNone(reply_message)
+            self.assertEqual(runtime.list_live_message_drafts(), ())
+
     async def test_runtime_blocks_workflow_when_agent_is_unavailable(self) -> None:
         from ergon_studio.runtime import load_runtime
 

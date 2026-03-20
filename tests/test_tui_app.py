@@ -387,6 +387,68 @@ class TestMessages(IsolatedAsyncioTestCase):
             self.assertIn("standard-build", text)
             self.assertNotIn("<live>", text)
 
+    async def test_workflow_turn_surfaces_failed_internal_workroom_activity(self):
+        from ergon_studio.runtime import OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+
+        async def decide(_runtime, *, body: str, created_at: int):
+            del _runtime, created_at
+            return OrchestratorTurnDecision(
+                mode="workflow",
+                workflow_id="standard-build",
+                goal=body,
+                deliverable_expected=True,
+            )
+
+        async def run_workflow(
+            _runtime,
+            *,
+            workflow_id: str,
+            goal: str,
+            created_at: int | None = None,
+            parent_thread_id: str | None = None,
+        ):
+            del workflow_id, goal, parent_thread_id
+            thread = runtime.create_agent_thread(
+                agent_id="coder",
+                created_at=(created_at or 10) + 1,
+            )
+            runtime.live_state.start_draft(
+                draft_id="draft-workflow-fail-1",
+                thread_id=thread.id,
+                sender="coder",
+                kind="chat",
+                created_at=(created_at or 10) + 2,
+            )
+            await asyncio.sleep(0.02)
+            runtime.live_state.fail_draft(
+                draft_id="draft-workflow-fail-1",
+                error="boom",
+                created_at=(created_at or 10) + 3,
+            )
+            return {
+                "status": "blocked",
+                "workflow_run_id": "workflow-run-1",
+                "review_summary": "BLOCKED: coder failed",
+                "last_thread_id": thread.id,
+            }
+
+        async with app.run_test() as pilot:
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                task = asyncio.create_task(app._send_to_orchestrator("build it"))
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if "Workroom failed" in _timeline_text(app):
+                        break
+                self.assertIn("Workroom failed", _timeline_text(app))
+                self.assertIn("coder could not finish a response: boom", _timeline_text(app))
+                await task
+
     async def test_submitting_while_turn_is_running_queues_the_next_message(self):
         from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
 

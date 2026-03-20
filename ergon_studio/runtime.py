@@ -1181,12 +1181,12 @@ class RuntimeContext:
             body=prompt,
             created_at=created_at,
         )
-        raw = await self._run_structured_delegation_review(
+        parsed = await self._run_structured_delegation_review(
             prompt=prompt,
             review_thread=review_thread,
             created_at=created_at + 1,
         )
-        if raw is None:
+        if parsed is None:
             self.append_event(
                 kind="delegation_review_unavailable",
                 summary=f"Delegation review for {agent_id} fell back because no structured reviewer was available",
@@ -1199,7 +1199,7 @@ class RuntimeContext:
                 summary="I could not complete a reliable acceptance review for the delegated result.",
             )
         try:
-            return _parse_delegation_review_verdict(raw)
+            return _delegation_review_verdict_from_payload(parsed)
         except ValueError:
             self.append_event(
                 kind="delegation_review_unavailable",
@@ -1219,37 +1219,30 @@ class RuntimeContext:
         prompt: str,
         review_thread: ThreadRecord,
         created_at: int,
-    ) -> str | None:
+    ) -> dict[str, object] | None:
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id="delegation-orchestrator-review",
+            name="Delegation Orchestrator Review",
+            description="Structured delegation acceptance review",
+            instructions=_delegation_review_instructions(),
+            prompt=prompt,
+            created_at=created_at,
+            session_id=f"{review_thread.id}:delegation-review",
+            failure_event_kind="delegation_review_failed",
+            failure_summary_prefix="Delegation review failed",
+            invalid_event_kind="delegation_review_invalid",
+            invalid_summary_prefix="Delegation review returned invalid JSON",
+        )
+        if parsed is not None:
+            return parsed
         try:
             orchestrator = self.build_agent("orchestrator")
         except (KeyError, ValueError):
             return None
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            try:
-                response = await orchestrator.run(
-                    [
-                        Message(
-                            role="user",
-                            text=prompt,
-                            author_name="workflow",
-                        )
-                    ],
-                    session=orchestrator.create_session(session_id=f"{review_thread.id}:delegation-review"),
-                )
-            except Exception:
-                return None
-            self.track_token_usage(response)
-            return response.text.strip() or None
-        review_agent = Agent(
-            client=client,
-            id="delegation-orchestrator-review",
-            name="Delegation Orchestrator Review",
-            description="Structured delegation acceptance review",
-            instructions=_delegation_review_instructions(),
-        )
+        if getattr(orchestrator, "client", None) is not None:
+            return None
         try:
-            response = await review_agent.run(
+            response = await orchestrator.run(
                 [
                     Message(
                         role="user",
@@ -1257,12 +1250,18 @@ class RuntimeContext:
                         author_name="workflow",
                     )
                 ],
-                session=review_agent.create_session(session_id=f"{review_thread.id}:delegation-review"),
+                session=orchestrator.create_session(session_id=f"{review_thread.id}:delegation-review"),
             )
         except Exception:
             return None
         self.track_token_usage(response)
-        return response.text.strip() or None
+        raw = response.text.strip()
+        if not raw:
+            return None
+        try:
+            return _parse_turn_decision_json(raw)
+        except ValueError:
+            return None
 
     def _delegation_evidence_lines(self, thread_id: str) -> list[str]:
         lines: list[str] = []
@@ -1697,14 +1696,14 @@ class RuntimeContext:
         client = getattr(orchestrator, "client", None)
         if client is None:
             return None
-        internal_agent = Agent(
-            client=client,
-            id=agent_id,
-            name=name,
-            description=description,
-            instructions=instructions,
-        )
         try:
+            internal_agent = Agent(
+                client=client,
+                id=agent_id,
+                name=name,
+                description=description,
+                instructions=instructions,
+            )
             response = await internal_agent.run(
                 [
                     Message(
@@ -3453,6 +3452,10 @@ def _render_delegation_review_prompt(
 
 def _parse_delegation_review_verdict(raw: str) -> DelegationReviewVerdict:
     parsed = _parse_turn_decision_json(raw)
+    return _delegation_review_verdict_from_payload(parsed)
+
+
+def _delegation_review_verdict_from_payload(parsed: dict[str, object]) -> DelegationReviewVerdict:
     summary = _optional_text(parsed.get("summary")) or "No delegation review summary provided."
     findings_raw = parsed.get("findings", [])
     findings: list[str] = []

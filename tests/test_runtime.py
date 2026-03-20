@@ -3690,7 +3690,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("workflow_auto_replan_started", event_kinds)
             self.assertNotIn("workflow_scripted_fallback_used", event_kinds)
 
-    async def test_runtime_uses_scripted_fallback_only_when_followup_is_unavailable(self) -> None:
+    async def test_runtime_blocks_when_followup_is_unavailable(self) -> None:
         from ergon_studio.runtime import load_runtime
 
         class FakeAgent:
@@ -3768,13 +3768,13 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     created_at=1_710_755_200,
                 )
 
-            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["status"], "blocked")
             workflow_run = runtime.get_workflow_run(result["workflow_run_id"])
             self.assertIsNotNone(workflow_run)
             assert workflow_run is not None
             event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
-            self.assertIn("workflow_scripted_fallback_used", event_kinds)
-            self.assertIn("workflow_auto_repair_started", event_kinds)
+            self.assertNotIn("workflow_scripted_fallback_used", event_kinds)
+            self.assertNotIn("workflow_auto_repair_started", event_kinds)
 
     async def test_runtime_recovers_blocked_step_with_orchestrator_clarification(self) -> None:
         from ergon_studio.runtime import load_runtime

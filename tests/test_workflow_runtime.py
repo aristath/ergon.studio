@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _next_followup_cycle, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _required_tool_names_for_workflow, _workflow_review_evidence_lines
+from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _required_tool_names_for_workflow, _workflow_review_evidence_lines
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
@@ -166,40 +166,3 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 "",
             ],
         )
-
-    def test_next_followup_cycle_stops_for_request_info_blocks(self) -> None:
-        runtime = SimpleNamespace(
-            registry=SimpleNamespace(
-                agent_definitions={"coder": object()},
-                workflow_definitions={
-                    "specialist-handoff": SimpleNamespace(
-                        metadata={"max_clarification_cycles": 2, "max_repair_cycles": 1}
-                    )
-                },
-            ),
-            _workflow_changed_files=lambda workflow_run_id: [],
-        )
-        tracker = _ExecutionTracker(
-            blocked_step_index=0,
-            blocked_thread_id="thread-1",
-            blocked_summary="Need more information.",
-            blocked_reason="request_info",
-        )
-        run_view = SimpleNamespace(
-            workflow_run=SimpleNamespace(id="workflow-run-1"),
-            steps=(
-                SimpleNamespace(
-                    threads=(SimpleNamespace(id="thread-1", assigned_agent_id="coder", summary="coder"),),
-                ),
-            ),
-        )
-
-        followup = _next_followup_cycle(
-            runtime=runtime,
-            workflow_id="specialist-handoff",
-            goal="Decide the next step.",
-            tracker=tracker,
-            run_view=run_view,
-        )
-
-        self.assertIsNone(followup)

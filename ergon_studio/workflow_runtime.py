@@ -91,7 +91,6 @@ class WorkflowFollowupDecision:
 @dataclass(frozen=True)
 class WorkflowFollowupSelection:
     plan: WorkflowFollowupPlan | None
-    allow_scripted_fallback: bool = False
 
 
 class _TimestampCursor:
@@ -655,26 +654,6 @@ async def execute_defined_workflow(
         followup = followup_selection.plan
         if tracker.blocked_step_index is None and tracker.review_accepted is not False:
             break
-        if (
-            followup is None
-            and tracker.blocked_step_index is None
-            and followup_selection.allow_scripted_fallback
-        ):
-            followup = _next_followup_cycle(
-                runtime=runtime,
-                workflow_id=active_workflow_run.workflow_id,
-                goal=goal,
-                tracker=tracker,
-                run_view=active_run_view,
-            )
-            if followup is not None:
-                runtime.append_event(
-                    kind="workflow_scripted_fallback_used",
-                    summary="Used scripted workflow recovery because orchestrator follow-up was unavailable",
-                    created_at=cursor.next(),
-                    thread_id=review_thread.id,
-                    task_id=active_workflow_run.root_task_id,
-                )
         if followup is None:
             break
         runtime.append_event(
@@ -1897,27 +1876,27 @@ async def _decide_followup_action(
         extra_instructions=_workflow_followup_decision_instructions(),
     )
     if not response:
-        return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=True)
+        return WorkflowFollowupSelection(plan=None)
     try:
         decision = _parse_followup_decision(response)
     except ValueError:
-        return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+        return WorkflowFollowupSelection(plan=None)
 
     if decision.action == "stop":
-        return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+        return WorkflowFollowupSelection(plan=None)
 
     if decision.action == "clarify":
         if tracker.clarification_cycles >= _max_clarification_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         if decision.request is None:
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         step_groups = decision.step_groups
         if step_groups:
             if not _is_valid_followup_step_groups(runtime, step_groups):
-                return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+                return WorkflowFollowupSelection(plan=None)
         else:
             if decision.agent_id is None or decision.agent_id not in runtime.registry.agent_definitions:
-                return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+                return WorkflowFollowupSelection(plan=None)
             step_groups = ((decision.agent_id,),)
         tracker.clarification_cycles += 1
         primary_agent = step_groups[0][0]
@@ -1944,9 +1923,9 @@ async def _decide_followup_action(
     if decision.action == "repair":
         repair_groups = decision.step_groups or _repair_step_groups(runtime, workflow_run.workflow_id)
         if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         if not repair_groups or tracker.repair_cycles >= _max_repair_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         tracker.repair_cycles += 1
         return WorkflowFollowupSelection(
             plan=WorkflowFollowupPlan(
@@ -1970,9 +1949,9 @@ async def _decide_followup_action(
     if decision.action == "replan":
         replan_groups = decision.step_groups or _replan_step_groups(runtime, workflow_run.workflow_id)
         if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         if not replan_groups or tracker.replan_cycles >= _max_replan_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
+            return WorkflowFollowupSelection(plan=None)
         tracker.replan_cycles += 1
         return WorkflowFollowupSelection(
             plan=WorkflowFollowupPlan(
@@ -1993,77 +1972,7 @@ async def _decide_followup_action(
             ),
         )
 
-    return WorkflowFollowupSelection(plan=None, allow_scripted_fallback=False)
-
-
-def _next_followup_cycle(
-    *,
-    runtime: RuntimeContext,
-    workflow_id: str,
-    goal: str,
-    tracker: _ExecutionTracker,
-    run_view: WorkflowRunView | None,
-) -> WorkflowFollowupPlan | None:
-    if tracker.blocked_reason == "request_info":
-        return None
-
-    if tracker.review_requires_replan:
-        replan_groups = _replan_step_groups(runtime, workflow_id)
-        if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
-            tracker.replan_cycles += 1
-            summary = tracker.review_replan_summary or f"Starting replanning cycle {tracker.replan_cycles} for {workflow_id}"
-            return WorkflowFollowupPlan(
-                cycle_kind="replan",
-                step_groups=replan_groups,
-                event_kind="workflow_auto_replan_started",
-                event_summary=summary,
-                payload=_render_followup_payload(
-                    runtime=runtime,
-                    workflow_id=workflow_id,
-                    goal=goal,
-                    tracker=tracker,
-                    run_view=run_view,
-                    cycle_kind="replan",
-                ),
-            )
-
-    repair_groups = _repair_step_groups(runtime, workflow_id)
-    if repair_groups and tracker.repair_cycles < _max_repair_cycles(runtime, workflow_id):
-        tracker.repair_cycles += 1
-        return WorkflowFollowupPlan(
-            cycle_kind="repair",
-            step_groups=repair_groups,
-            event_kind="workflow_auto_repair_started",
-            event_summary=f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_id}",
-            payload=_render_followup_payload(
-                runtime=runtime,
-                workflow_id=workflow_id,
-                goal=goal,
-                tracker=tracker,
-                run_view=run_view,
-                cycle_kind="repair",
-            ),
-        )
-
-    replan_groups = _replan_step_groups(runtime, workflow_id)
-    if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
-        tracker.replan_cycles += 1
-        return WorkflowFollowupPlan(
-            cycle_kind="replan",
-            step_groups=replan_groups,
-            event_kind="workflow_auto_replan_started",
-            event_summary=f"Escalating {workflow_id} to replanning after the current approach was rejected",
-            payload=_render_followup_payload(
-                runtime=runtime,
-                workflow_id=workflow_id,
-                goal=goal,
-                tracker=tracker,
-                run_view=run_view,
-                cycle_kind="replan",
-            ),
-        )
-
-    return None
+    return WorkflowFollowupSelection(plan=None)
 
 
 def _render_followup_payload(

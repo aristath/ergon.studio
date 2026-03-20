@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from agent_framework import ResponseStream
 
 from ergon_studio.proxy.core import ProxyTurnResult
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 
 
@@ -132,10 +132,81 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn("\"type\":\"response.output_text.delta\"", body)
         self.assertIn("\"type\":\"response.completed\"", body)
 
+    def test_chat_completions_returns_tool_calls(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [ProxyFinishEvent("tool_calls")],
+                tool_calls=(
+                    ProxyToolCall(
+                        id="call_1",
+                        name="read_file",
+                        arguments_json="{\"path\":\"main.py\"}",
+                    ),
+                ),
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Inspect main.py"}],
+                    "stream": False,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual(payload["choices"][0]["finish_reason"], "tool_calls")
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "read_file")
+
+    def test_responses_returns_function_calls(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [ProxyFinishEvent("tool_calls")],
+                tool_calls=(
+                    ProxyToolCall(
+                        id="call_1",
+                        name="read_file",
+                        arguments_json="{\"path\":\"main.py\"}",
+                    ),
+                ),
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Inspect main.py",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["output"][0]["type"], "function_call")
+        self.assertEqual(payload["output"][0]["call_id"], "call_1")
+
 
 class _FakeCore:
-    def __init__(self, events):
+    def __init__(self, events, *, tool_calls=()):
         self._events = list(events)
+        self._tool_calls = tuple(tool_calls)
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)
@@ -156,6 +227,7 @@ class _FakeCore:
                 content=content,
                 reasoning="",
                 mode="act",
+                tool_calls=self._tool_calls,
             ),
         )
 

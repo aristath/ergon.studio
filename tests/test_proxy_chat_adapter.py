@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from ergon_studio.proxy.chat_adapter import encode_chat_stream_done, encode_chat_stream_event, encode_chat_stream_sse
+from ergon_studio.proxy.chat_adapter import build_chat_completion_response, encode_chat_stream_done, encode_chat_stream_event, encode_chat_stream_sse
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
 
 
@@ -75,6 +75,26 @@ class ProxyChatAdapterTests(unittest.TestCase):
 
     def test_done_marker_is_openai_compatible(self) -> None:
         self.assertEqual(encode_chat_stream_done(), b"data: [DONE]\n\n")
+
+    def test_non_stream_response_includes_tool_calls(self) -> None:
+        payload = build_chat_completion_response(
+            completion_id="chatcmpl_1",
+            model="ergon",
+            created_at=123,
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json="{\"path\":\"main.py\"}",
+                ),
+            ),
+        )
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual(payload["choices"][0]["finish_reason"], "tool_calls")
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "read_file")
 
 
 if __name__ == "__main__":

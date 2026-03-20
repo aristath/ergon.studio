@@ -134,3 +134,18 @@ class ProxyFinishEvent:
     def __post_init__(self) -> None:
         if self.reason not in _VALID_FINISH_REASONS:
             raise ValueError(f"unsupported finish reason: {self.reason}")
+
+
+@dataclass(frozen=True)
+class ProxyTurnResult:
+    finish_reason: str
+    content: str
+    reasoning: str
+    mode: str
+    tool_calls: tuple[ProxyToolCall, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.finish_reason not in _VALID_FINISH_REASONS:
+            raise ValueError(f"unsupported finish reason: {self.finish_reason}")
+        if not isinstance(self.tool_calls, tuple):
+            raise TypeError("tool_calls must be a tuple")

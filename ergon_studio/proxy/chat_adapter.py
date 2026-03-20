@@ -87,6 +87,7 @@ def build_chat_completion_response(
     content: str,
     finish_reason: str,
     reasoning: str = "",
+    tool_calls: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
         "role": "assistant",
@@ -94,6 +95,18 @@ def build_chat_completion_response(
     }
     if reasoning:
         message["reasoning_content"] = reasoning
+    if tool_calls:
+        message["tool_calls"] = [
+            {
+                "id": tool_call.id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments_json,
+                },
+            }
+            for tool_call in tool_calls
+        ]
     return {
         "id": completion_id,
         "object": "chat.completion",

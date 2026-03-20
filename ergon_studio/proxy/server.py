@@ -101,6 +101,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 content=result.content,
                 reasoning=result.reasoning,
                 finish_reason=result.finish_reason,
+                tool_calls=result.tool_calls,
             ),
         )
 
@@ -161,6 +162,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
+                tool_calls=result.tool_calls,
             ),
         )
 

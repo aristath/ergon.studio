@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent
 
 
 def build_responses_response(
@@ -13,6 +13,7 @@ def build_responses_response(
     created_at: int,
     content: str,
     reasoning: str = "",
+    tool_calls: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     output: list[dict[str, Any]] = []
     if reasoning:
@@ -29,6 +30,18 @@ def build_responses_response(
                 "content": [],
             }
         )
+    if tool_calls:
+        for tool_call in tool_calls:
+            output.append(
+                {
+                    "id": f"fc_{uuid4().hex}",
+                    "type": "function_call",
+                    "call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments_json,
+                    "status": "completed",
+                }
+            )
     output.append(
         {
             "id": f"msg_{uuid4().hex}",
@@ -57,7 +70,7 @@ def build_responses_response(
 
 def encode_responses_stream_events(
     *,
-    event: ProxyReasoningDeltaEvent | ProxyContentDeltaEvent | ProxyFinishEvent,
+    event: ProxyReasoningDeltaEvent | ProxyContentDeltaEvent | ProxyToolCallEvent | ProxyFinishEvent,
     response_id: str,
     model: str,
     created_at: int,
@@ -88,6 +101,24 @@ def encode_responses_stream_events(
                 "output_index": 0,
                 "content_index": 0,
                 "delta": event.delta,
+                "sequence_number": sequence_number,
+            }
+        ]
+    if isinstance(event, ProxyToolCallEvent):
+        return [
+            {
+                "type": "response.output_item.added",
+                "event_id": f"event_{uuid4().hex}",
+                "response_id": response_id,
+                "output_index": 0,
+                "item": {
+                    "id": f"fc_{uuid4().hex}",
+                    "type": "function_call",
+                    "call_id": event.call.id,
+                    "name": event.call.name,
+                    "arguments": event.call.arguments_json,
+                    "status": "completed",
+                },
                 "sequence_number": sequence_number,
             }
         ]

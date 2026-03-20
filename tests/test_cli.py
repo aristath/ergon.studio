@@ -287,7 +287,7 @@ class CliTests(unittest.TestCase):
                 def run(self) -> None:
                     captured["ran"] = True
 
-            with patch("ergon_studio.cli.ErgonStudioApp", FakeApp):
+            with patch("ergon_studio.cli._load_tui_app_class", return_value=FakeApp):
                 exit_code = main(
                     [
                         "tui",
@@ -323,7 +323,7 @@ class CliTests(unittest.TestCase):
                 def run(self) -> None:
                     captured["ran"] = True
 
-            with patch("ergon_studio.cli.ErgonStudioApp", FakeApp):
+            with patch("ergon_studio.cli._load_tui_app_class", return_value=FakeApp):
                 exit_code = main(
                     [
                         "tui",

@@ -5,14 +5,34 @@ from pathlib import Path
 import time
 
 from ergon_studio.bootstrap import bootstrap_proxy_home, bootstrap_workspace
-from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry_from_global_paths
-from ergon_studio.session_store import SessionStore
-from ergon_studio.runtime import load_runtime
-from ergon_studio.tui.app import ErgonStudioApp
+
+
+def _load_runtime_loader():
+    from ergon_studio.runtime import load_runtime
+
+    return load_runtime
+
+
+def _load_session_store_class():
+    from ergon_studio.session_store import SessionStore
+
+    return SessionStore
+
+
+def _load_tui_app_class():
+    from ergon_studio.tui.app import ErgonStudioApp
+
+    return ErgonStudioApp
+
+
+def _load_eval_functions():
+    from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
+
+    return run_builtin_evals, summarize_results, write_eval_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "tui":
+        SessionStore = _load_session_store_class()
+        load_runtime = _load_runtime_loader()
+        ErgonStudioApp = _load_tui_app_class()
+
         open_session_picker_on_mount = False
         if args.pick_session and args.session_id is None and not args.new_session:
             paths = bootstrap_workspace(
@@ -110,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "eval":
+        run_builtin_evals, summarize_results, write_eval_report = _load_eval_functions()
+        load_runtime = _load_runtime_loader()
+
         runtime = load_runtime(
             project_root=args.project_root,
             home_dir=args.home_dir,
@@ -152,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sessions":
+        SessionStore = _load_session_store_class()
+
         paths = bootstrap_workspace(
             project_root=args.project_root,
             home_dir=args.home_dir,

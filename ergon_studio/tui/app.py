@@ -12,6 +12,7 @@ from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.live_runtime import LiveRuntimeSubscription
 from ergon_studio.runtime import RuntimeContext, load_runtime
+from ergon_studio.storage.models import MessageRecord
 from ergon_studio.tui.inspectors import (
     InspectorScreen,
     build_approval_entries,
@@ -222,7 +223,7 @@ class ErgonStudioApp(App[None]):
         self._permission_mode: str = "default"  # default, auto-approve, plan
         self._compacting: bool = False
         self._active_turn_task: asyncio.Task[None] | None = None
-        self._queued_turns: list[tuple[str, int]] = []
+        self._queued_turns: list[tuple[MessageRecord, str, int]] = []
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
@@ -360,8 +361,13 @@ class ErgonStudioApp(App[None]):
 
     def _submit_orchestrator_turn(self, body: str) -> None:
         created_at = self._next_timestamp()
+        user_message = self.runtime.record_user_message_to_main_thread(
+            body=body,
+            created_at=created_at,
+        )
+        self._refresh_timeline()
         if self._active_turn_task is not None and not self._active_turn_task.done():
-            self._queued_turns.append((body, created_at))
+            self._queued_turns.append((user_message, body, created_at))
             self._add_notice(
                 f"Queued message for the orchestrator. {len(self._queued_turns)} waiting.",
                 level="info",
@@ -369,25 +375,46 @@ class ErgonStudioApp(App[None]):
             self._refresh_timeline()
             self._refresh_info()
             return
-        self._start_orchestrator_turn(body=body, created_at=created_at)
+        self._start_orchestrator_turn(
+            user_message=user_message,
+            body=body,
+            created_at=created_at,
+        )
 
-    def _start_orchestrator_turn(self, *, body: str, created_at: int) -> None:
+    def _start_orchestrator_turn(
+        self,
+        *,
+        user_message: MessageRecord,
+        body: str,
+        created_at: int,
+    ) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
         self._turn_backgrounded = False
         thinking.show("Thinking")
         self._active_turn_task = asyncio.create_task(
-            self._run_orchestrator_turn(body=body, created_at=created_at)
+            self._run_orchestrator_turn(
+                user_message=user_message,
+                body=body,
+                created_at=created_at,
+            )
         )
         self._refresh_timeline()
         self._refresh_info()
 
-    async def _run_orchestrator_turn(self, *, body: str, created_at: int) -> None:
+    async def _run_orchestrator_turn(
+        self,
+        *,
+        user_message: MessageRecord,
+        body: str,
+        created_at: int,
+    ) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
         current_task = asyncio.current_task()
         try:
             stream = self.runtime.stream_user_message_to_orchestrator(
                 body=body,
                 created_at=created_at,
+                user_message=user_message,
             )
             self._refresh_timeline()
             async for _event in stream:
@@ -417,9 +444,13 @@ class ErgonStudioApp(App[None]):
             return
         if not self._queued_turns:
             return
-        body, created_at = self._queued_turns.pop(0)
+        user_message, body, created_at = self._queued_turns.pop(0)
         self._add_notice("Continuing with the next queued message.", level="info")
-        self._start_orchestrator_turn(body=body, created_at=created_at)
+        self._start_orchestrator_turn(
+            user_message=user_message,
+            body=body,
+            created_at=created_at,
+        )
 
     async def _handle_slash_command(self, text: str) -> None:
         parts = text.split(None, 1)

@@ -851,6 +851,25 @@ class RuntimeContext:
             created_at=created_at,
         )
 
+    def record_user_message_to_main_thread(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> MessageRecord:
+        user_message = self.append_message_to_main_thread(
+            message_id=f"message-{uuid4().hex}",
+            sender="user",
+            kind="chat",
+            body=body,
+            created_at=created_at,
+        )
+        self._refresh_session_title_from_user_turn(
+            body=body,
+            created_at=created_at,
+        )
+        return user_message
+
     async def send_user_message_to_orchestrator(
         self,
         *,
@@ -870,13 +889,19 @@ class RuntimeContext:
         *,
         body: str,
         created_at: int,
+        user_message: MessageRecord | None = None,
     ) -> ResponseStream[LiveRuntimeEvent, tuple[MessageRecord, MessageRecord | None]]:
-        state: dict[str, MessageRecord | None] = {"user": None, "reply": None}
+        resolved_user_message = user_message or self.record_user_message_to_main_thread(
+            body=body,
+            created_at=created_at,
+        )
+        state: dict[str, MessageRecord | None] = {"user": resolved_user_message, "reply": None}
 
         async def _events():
             prepared = await self._prepare_orchestrator_turn(
                 body=body,
                 created_at=created_at,
+                user_message=resolved_user_message,
             )
             state["user"] = prepared.user_message
             decision = prepared.decision
@@ -945,18 +970,8 @@ class RuntimeContext:
         *,
         body: str,
         created_at: int,
+        user_message: MessageRecord,
     ) -> PreparedOrchestratorTurn:
-        user_message = self.append_message_to_main_thread(
-            message_id=f"message-{uuid4().hex}",
-            sender="user",
-            kind="chat",
-            body=body,
-            created_at=created_at,
-        )
-        self._refresh_session_title_from_user_turn(
-            body=body,
-            created_at=created_at,
-        )
         decision = await self._decide_orchestrator_turn(body=body, created_at=created_at + 1)
         delivery_audit = await self._audit_orchestrator_delivery_turn(
             body=body,

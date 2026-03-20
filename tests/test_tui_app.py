@@ -398,6 +398,7 @@ class TestMessages(IsolatedAsyncioTestCase):
                 await pilot.press("enter")
                 await pilot.pause()
                 self.assertEqual(len(app._queued_turns), 1)
+                self.assertIn("user: second", _timeline_text(app))
                 self.assertIn("Queued message for the orchestrator", _timeline_text(app))
                 first_release.set()
                 second_release.set()

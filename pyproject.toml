@@ -5,29 +5,23 @@ build-backend = "hatchling.build"
 [project]
 name = "ergon-studio"
 version = "0.1.0"
-description = "Local-first AI coding environment built on Microsoft Agent Framework."
-readme = "PROJECT_PLAN.md"
+description = "OpenAI-compatible orchestration proxy for local coding models."
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "agent-framework-core",
   "agent-framework-orchestrations",
   "PyYAML",
-  "qdrant-client[fastembed]",
 ]
 
 [project.optional-dependencies]
-native = [
-  "textual",
-]
 dev = [
   "pytest",
   "pytest-cov",
-  "textual",
 ]
 
 [project.scripts]
-ergon-studio = "ergon_studio.cli:main"
-ergon-studio-proxy = "ergon_studio.proxy_cli:main"
+ergon-studio = "ergon_studio.proxy_cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

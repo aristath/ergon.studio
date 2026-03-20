@@ -1,4 +1,4 @@
-from ergon_studio.cli import main
+from ergon_studio.proxy_cli import main
 
 
 if __name__ == "__main__":

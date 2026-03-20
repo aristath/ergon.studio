@@ -11,7 +11,7 @@ from ergon_studio.registry import load_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ergon-studio-proxy")
+    parser = argparse.ArgumentParser(prog="ergon-studio")
     parser.add_argument("--home-dir", type=Path, default=Path.home())
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)

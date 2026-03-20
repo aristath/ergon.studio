@@ -807,15 +807,25 @@ class RuntimeContext:
     def list_main_messages(self) -> list[MessageRecord]:
         return self.conversation_store.list_messages(self.main_thread_id)
 
-    def latest_main_user_message_body(self) -> str | None:
-        for message in reversed(self.list_main_messages()):
+    def list_main_messages_up_to(self, *, created_at: int | None = None) -> list[MessageRecord]:
+        messages = self.list_main_messages()
+        if created_at is None:
+            return messages
+        return [message for message in messages if message.created_at <= created_at]
+
+    def latest_main_user_message_body(self, *, up_to_created_at: int | None = None) -> str | None:
+        for message in reversed(self.list_main_messages_up_to(created_at=up_to_created_at)):
             if message.sender != "user":
                 continue
             return self.conversation_store.read_message_body(message).rstrip("\n")
         return None
 
-    def recent_main_user_context(self, *, limit: int = 4) -> str:
-        user_messages = [message for message in self.list_main_messages() if message.sender == "user"]
+    def recent_main_user_context(self, *, limit: int = 4, up_to_created_at: int | None = None) -> str:
+        user_messages = [
+            message
+            for message in self.list_main_messages_up_to(created_at=up_to_created_at)
+            if message.sender == "user"
+        ]
         if not user_messages:
             return ""
         selected = user_messages[-limit:]
@@ -994,7 +1004,7 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
-        delivery_context = self.recent_main_user_context(limit=4) or body
+        delivery_context = self.recent_main_user_context(limit=4, up_to_created_at=created_at) or body
         resolved_goal = decision.goal or delivery_context
         resolved_request = decision.request or resolved_goal
         if decision.deliverable_expected and decision.mode in {"workflow", "delegate"}:
@@ -1759,7 +1769,7 @@ class RuntimeContext:
             name="Orchestrator Turn Planner",
             description="Internal orchestration planner",
             instructions=_orchestrator_turn_planner_instructions(self),
-            prompt=_orchestrator_turn_planner_prompt(self, body),
+            prompt=_orchestrator_turn_planner_prompt(self, body, created_at=created_at),
             created_at=created_at,
             session_id=f"main-turn-planner:{created_at}",
             failure_event_kind="orchestrator_planner_failed",
@@ -1794,7 +1804,7 @@ class RuntimeContext:
             name="Orchestrator Delivery Auditor",
             description="Internal delivery alignment audit",
             instructions=_delivery_audit_instructions(),
-            prompt=_delivery_audit_prompt(self, body, decision),
+            prompt=_delivery_audit_prompt(self, body, decision, created_at=created_at),
             created_at=created_at,
             session_id=f"main-delivery-audit:{created_at}",
             failure_event_kind="orchestrator_delivery_audit_failed",
@@ -1835,7 +1845,7 @@ class RuntimeContext:
             name="Orchestrator Delivery Reconsideration Planner",
             description="Internal delivery replanner",
             instructions=_delivery_reconsideration_instructions(self, reason),
-            prompt=_orchestrator_turn_planner_prompt(self, body),
+            prompt=_orchestrator_turn_planner_prompt(self, body, created_at=created_at),
             created_at=created_at,
             session_id=f"main-delivery-reconsideration:{created_at}",
             failure_event_kind="orchestrator_reconsideration_failed",
@@ -3482,8 +3492,13 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
     )
 
 
-def _orchestrator_turn_planner_prompt(runtime: RuntimeContext, body: str) -> str:
-    recent_messages = runtime.list_main_messages()[-8:]
+def _orchestrator_turn_planner_prompt(
+    runtime: RuntimeContext,
+    body: str,
+    *,
+    created_at: int | None = None,
+) -> str:
+    recent_messages = runtime.list_main_messages_up_to(created_at=created_at)[-8:]
     transcript_lines = []
     for message in recent_messages:
         text = runtime.conversation_store.read_message_body(message).rstrip("\n")
@@ -3570,8 +3585,10 @@ def _delivery_audit_prompt(
     runtime: RuntimeContext,
     body: str,
     decision: OrchestratorTurnDecision,
+    *,
+    created_at: int | None = None,
 ) -> str:
-    recent_messages = runtime.list_main_messages()[-8:]
+    recent_messages = runtime.list_main_messages_up_to(created_at=created_at)[-8:]
     transcript_lines = []
     for message in recent_messages:
         text = runtime.conversation_store.read_message_body(message).rstrip("\n")

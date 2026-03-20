@@ -91,6 +91,87 @@ Ship a design deliverable.
             self.assertEqual(summaries["standard-build"]["selection_hints"], ("staged_delivery",))
             self.assertEqual(summaries["dynamic-open-ended"]["selection_hints"], ("adaptive_delivery",))
 
+    def test_recent_main_user_context_can_be_bounded_by_timestamp(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="msg-user-1",
+                sender="user",
+                kind="chat",
+                body="first request",
+                created_at=10,
+            )
+            runtime.append_message_to_main_thread(
+                message_id="msg-orch-1",
+                sender="orchestrator",
+                kind="chat",
+                body="ack",
+                created_at=11,
+            )
+            runtime.append_message_to_main_thread(
+                message_id="msg-user-2",
+                sender="user",
+                kind="chat",
+                body="second request",
+                created_at=12,
+            )
+
+            self.assertEqual(
+                runtime.recent_main_user_context(limit=4, up_to_created_at=10),
+                "first request",
+            )
+            self.assertEqual(
+                runtime.recent_main_user_context(limit=4, up_to_created_at=11),
+                "first request",
+            )
+            self.assertEqual(
+                runtime.recent_main_user_context(limit=4, up_to_created_at=12),
+                "first request\n\nsecond request",
+            )
+
+    def test_orchestrator_turn_planner_prompt_ignores_future_messages(self) -> None:
+        from ergon_studio.runtime import _orchestrator_turn_planner_prompt, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.append_message_to_main_thread(
+                message_id="msg-user-1",
+                sender="user",
+                kind="chat",
+                body="first request",
+                created_at=10,
+            )
+            runtime.append_message_to_main_thread(
+                message_id="msg-user-2",
+                sender="user",
+                kind="chat",
+                body="future request",
+                created_at=20,
+            )
+
+            prompt = _orchestrator_turn_planner_prompt(
+                runtime,
+                "first request",
+                created_at=10,
+            )
+
+            self.assertIn("first request", prompt)
+            self.assertNotIn("future request", prompt)
+
     def test_load_runtime_combines_paths_registry_and_tools(self) -> None:
         from ergon_studio.runtime import load_runtime
 

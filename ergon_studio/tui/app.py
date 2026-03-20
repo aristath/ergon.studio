@@ -11,6 +11,17 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext, load_runtime
+from ergon_studio.tui.inspectors import (
+    InspectorScreen,
+    build_approval_entries,
+    build_artifact_entries,
+    build_event_entries,
+    build_memory_entries,
+    build_task_entries,
+    build_thread_entries,
+    build_workflow_definition_entries,
+    build_workflow_run_entries,
+)
 from ergon_studio.tui.timeline_builder import build_session_timeline
 from ergon_studio.tui.timeline_models import NoticeItem
 from ergon_studio.tui.timeline_widgets import TimelineView
@@ -33,8 +44,11 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/doctor", "Diagnose configuration issues"),
     ("/team", "Show agent roster with status"),
     ("/workflows", "List workflow definitions"),
+    ("/runs", "Inspect workflow runs"),
     ("/workflow", "Select a workflow by name"),
     ("/agent", "Open a direct thread with an agent"),
+    ("/tasks", "Inspect session tasks"),
+    ("/artifacts", "Inspect session artifacts"),
     ("/memory", "Show memory facts"),
     ("/threads", "List all threads"),
     ("/approvals", "Show approval history"),
@@ -486,11 +500,9 @@ class ErgonStudioApp(App[None]):
         elif command == "/config":
             self._open_config_wizard()
         elif command == "/workflows":
-            lines = ["[bold]Workflows:[/bold]"]
-            for wf_id in self.runtime.list_workflow_ids():
-                marker = "> " if wf_id == self.selected_workflow_id else "  "
-                lines.append(f"  {marker}{wf_id}")
-            self._add_notice("\n".join(lines), title="Workflows")
+            self._open_workflow_definition_inspector()
+        elif command == "/runs":
+            self._open_workflow_run_inspector()
         elif command == "/workflow":
             if not args:
                 self._add_notice("Usage: /workflow <name>", level="error")
@@ -508,25 +520,13 @@ class ErgonStudioApp(App[None]):
             else:
                 self._add_notice(f"Unknown agent: {args}", level="error")
         elif command == "/memory":
-            facts = self.runtime.list_memory_facts()
-            if not facts:
-                self._add_notice("No memory facts yet.", level="info")
-            else:
-                lines = ["[bold]Memory facts:[/bold]"]
-                for fact in facts[-10:]:
-                    lines.append(f"  [{fact.kind}] {fact.content}")
-                self._add_notice("\n".join(lines), title="Memory")
+            self._open_memory_inspector()
         elif command == "/threads":
-            threads = self.runtime.list_threads()
-            if not threads:
-                self._add_notice("No threads yet.", level="info")
-            else:
-                lines = ["[bold]Threads:[/bold]"]
-                for thread in threads:
-                    agent = thread.assigned_agent_id or thread.kind
-                    count = len(self.runtime.list_thread_messages(thread.id))
-                    lines.append(f"  {agent} ({thread.kind}) [{count} msgs]")
-                self._add_notice("\n".join(lines), title="Threads")
+            self._open_thread_inspector()
+        elif command == "/tasks":
+            self._open_task_inspector()
+        elif command == "/artifacts":
+            self._open_artifact_inspector()
         elif command == "/model":
             if not args:
                 lines = ["[bold]Model assignments:[/bold]"]
@@ -576,24 +576,9 @@ class ErgonStudioApp(App[None]):
                 lines.append(f"  [{color}]{sprite}[/{color}] {agent_id}: {summary}")
             self._add_notice("\n".join(lines), title="Team")
         elif command == "/approvals":
-            all_approvals = self.runtime.list_approvals()
-            if not all_approvals:
-                self._add_notice("No approvals yet.", level="info")
-            else:
-                lines = ["[bold]Approvals:[/bold]"]
-                for a in all_approvals[-10:]:
-                    status_color = {"approved": "green", "rejected": "red"}.get(a.status, "yellow")
-                    lines.append(f"  [{status_color}]{a.status}[/{status_color}] {a.action} by {a.requester}")
-                self._add_notice("\n".join(lines), title="Approvals")
+            self._open_approval_inspector()
         elif command == "/events":
-            events = self.runtime.list_events()
-            if not events:
-                self._add_notice("No events yet.", level="info")
-            else:
-                lines = ["[bold]Recent events:[/bold]"]
-                for e in events[-15:]:
-                    lines.append(f"  [dim]{e.kind}:[/dim] {e.summary}")
-                self._add_notice("\n".join(lines), title="Events")
+            self._open_event_inspector()
         elif command == "/init":
             self._add_notice(
                 "[dim]Project already initialized.\n"
@@ -699,6 +684,78 @@ class ErgonStudioApp(App[None]):
             self.query_one(AgentStatusBar).refresh_from_runtime()
 
         self.push_screen(ConfigWizardScreen(self.runtime), on_dismiss)
+
+    def _open_thread_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Threads",
+                entries=build_thread_entries(self.runtime),
+                empty_message="No internal threads in this session yet.",
+            )
+        )
+
+    def _open_task_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Tasks",
+                entries=build_task_entries(self.runtime),
+                empty_message="No tasks in this session yet.",
+            )
+        )
+
+    def _open_workflow_run_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Workflow Runs",
+                entries=build_workflow_run_entries(self.runtime),
+                empty_message="No workflow runs in this session yet.",
+            )
+        )
+
+    def _open_workflow_definition_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Workflow Definitions",
+                entries=build_workflow_definition_entries(self.runtime),
+                empty_message="No workflow definitions loaded.",
+            )
+        )
+
+    def _open_artifact_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Artifacts",
+                entries=build_artifact_entries(self.runtime),
+                empty_message="No artifacts in this session yet.",
+            )
+        )
+
+    def _open_memory_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Memory Facts",
+                entries=build_memory_entries(self.runtime),
+                empty_message="No memory facts available yet.",
+            )
+        )
+
+    def _open_approval_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Approvals",
+                entries=build_approval_entries(self.runtime),
+                empty_message="No approvals in this session yet.",
+            )
+        )
+
+    def _open_event_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Events",
+                entries=build_event_entries(self.runtime),
+                empty_message="No events in this session yet.",
+            )
+        )
 
     def _open_session_picker(self) -> None:
         sessions = self.runtime.list_sessions()

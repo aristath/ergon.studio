@@ -130,7 +130,7 @@ class InfoBar(Static):
         permission_mode: str = "default",
     ) -> None:
         line1 = self._build_status_line(selected_workflow_run_id, selected_workflow_id, permission_mode)
-        line2 = "/help /config /workflows /agent <name> /memory /threads"
+        line2 = "/help /config /workflows /runs /tasks /artifacts /memory /threads"
         self.update(f"{line1}\n{line2}")
 
     def _build_status_line(

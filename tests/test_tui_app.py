@@ -11,6 +11,7 @@ from textual.widgets import Input, OptionList
 
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
+from ergon_studio.tui.inspectors import InspectorScreen
 from ergon_studio.tui.timeline_widgets import TimelineView
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar
 
@@ -421,8 +422,79 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             inp.value = "/workflows"
             await pilot.press("enter")
             await pilot.pause()
-            text = _timeline_text(app)
-            self.assertIn("Workflows", text)
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Workflow Definitions")
+
+    async def test_runs_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.workflow_store.create_workflow_run(
+            session_id=runtime.main_session_id,
+            workflow_run_id="run-1",
+            workflow_id="standard-build",
+            state="running",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/runs"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Workflow Runs")
+
+    async def test_threads_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.create_thread(
+            thread_id="t-coder",
+            kind="agent_direct",
+            created_at=1000,
+            assigned_agent_id="coder",
+            summary="implement auth",
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/threads"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Threads")
+
+    async def test_tasks_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.create_task(
+            task_id="task-1",
+            title="Build feature",
+            state="in_progress",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/tasks"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Tasks")
+
+    async def test_artifacts_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.create_artifact(
+            artifact_id="artifact-1",
+            kind="report",
+            title="Workflow report",
+            content="Completed successfully.",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/artifacts"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Artifacts")
 
     async def test_workflow_selects_workflow(self):
         _, runtime, app = _make_env()
@@ -451,6 +523,59 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
                 text = _timeline_text(app)
                 self.assertIn("Workroom opened", text)
                 self.assertIn("orchestrator", str(inp.placeholder))
+
+    async def test_memory_opens_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.add_memory_fact(
+            fact_id="fact-1",
+            scope="project",
+            kind="decision",
+            content="Use migrations for schema changes.",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/memory"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Memory Facts")
+
+    async def test_approvals_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.request_approval(
+            approval_id="appr-1",
+            requester="coder",
+            action="write_file",
+            risk_class="moderate",
+            reason="update readme",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/approvals"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Approvals")
+
+    async def test_events_open_inspector(self):
+        _, runtime, app = _make_env()
+        runtime.append_event(
+            kind="note",
+            summary="Something happened.",
+            created_at=1000,
+        )
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/events"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Events")
 
     async def test_unknown_command_shows_error(self):
         _, _, app = _make_env()

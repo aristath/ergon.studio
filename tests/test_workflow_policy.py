@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode, step_groups_for_metadata
 
 
 class WorkflowPolicyTests(unittest.TestCase):
@@ -23,3 +23,19 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("minimal working delivery", acceptance_rule_for_mode("delivery"))
         self.assertIn("decision-ready recommendation", acceptance_criteria_for_mode("decision_ready"))
         self.assertIn("minimal working result", acceptance_criteria_for_mode("delivery"))
+
+    def test_step_groups_for_metadata_validates_and_normalizes(self) -> None:
+        self.assertEqual(
+            step_groups_for_metadata(
+                workflow_id="w",
+                metadata={"repair_step_groups": [["fixer"], "reviewer"]},
+                metadata_key="repair_step_groups",
+            ),
+            (("fixer",), ("reviewer",)),
+        )
+        with self.assertRaisesRegex(ValueError, "must be a list"):
+            step_groups_for_metadata(
+                workflow_id="w",
+                metadata={"repair_step_groups": "fixer"},
+                metadata_key="repair_step_groups",
+            )

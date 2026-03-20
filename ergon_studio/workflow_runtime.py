@@ -15,7 +15,7 @@ from agent_framework_orchestrations._base_group_chat_orchestrator import GroupCh
 from ergon_studio.agent_factory import compose_instructions
 from ergon_studio.context_providers import WORKSPACE_STATE_KEY
 from ergon_studio.tool_context import ToolExecutionContext, use_tool_execution_context
-from ergon_studio.workflow_policy import acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_planning_acceptance_mode
+from ergon_studio.workflow_policy import acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_planning_acceptance_mode, step_groups_for_metadata
 
 if TYPE_CHECKING:
     from ergon_studio.runtime import RuntimeContext, WorkflowRunView
@@ -1285,27 +1285,11 @@ def _workflow_step_group_metadata(
     workflow_id: str,
     key: str,
 ) -> tuple[tuple[str, ...], ...]:
-    value = runtime.registry.workflow_definitions[workflow_id].metadata.get(key)
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ValueError(f"workflow '{workflow_id}' metadata '{key}' must be a list")
-    groups: list[tuple[str, ...]] = []
-    for group in value:
-        if isinstance(group, str):
-            if not group:
-                raise ValueError(f"workflow '{workflow_id}' metadata '{key}' contains an empty step")
-            groups.append((group,))
-            continue
-        if not isinstance(group, list) or not group:
-            raise ValueError(f"workflow '{workflow_id}' metadata '{key}' must contain non-empty lists")
-        validated: list[str] = []
-        for item in group:
-            if not isinstance(item, str) or not item:
-                raise ValueError(f"workflow '{workflow_id}' metadata '{key}' contains an invalid step")
-            validated.append(item)
-        groups.append(tuple(validated))
-    return tuple(groups)
+    return step_groups_for_metadata(
+        workflow_id=workflow_id,
+        metadata=runtime.registry.workflow_definitions[workflow_id].metadata,
+        metadata_key=key,
+    )
 
 
 def _workflow_max_rounds(runtime: RuntimeContext, workflow_id: str) -> int | None:

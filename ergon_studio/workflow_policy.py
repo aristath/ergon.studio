@@ -45,3 +45,32 @@ def acceptance_criteria_for_mode(acceptance_mode: str) -> str:
     if acceptance_mode == "revised_plan":
         return "Produce an explicit revised plan that realigns the work and passes orchestrator review."
     return "Deliver a minimal working result that satisfies the goal and passes orchestrator review."
+
+
+def step_groups_for_metadata(
+    *,
+    workflow_id: str,
+    metadata: Mapping[str, object],
+    metadata_key: str,
+) -> tuple[tuple[str, ...], ...]:
+    configured = metadata.get(metadata_key)
+    if configured is None:
+        return ()
+    if not isinstance(configured, list):
+        raise ValueError(f"workflow '{workflow_id}' metadata '{metadata_key}' must be a list")
+    groups: list[tuple[str, ...]] = []
+    for group in configured:
+        if isinstance(group, str):
+            if not group:
+                raise ValueError(f"workflow '{workflow_id}' metadata '{metadata_key}' contains an empty step")
+            groups.append((group,))
+            continue
+        if not isinstance(group, list) or not group:
+            raise ValueError(f"workflow '{workflow_id}' metadata '{metadata_key}' must contain non-empty lists")
+        validated: list[str] = []
+        for item in group:
+            if not isinstance(item, str) or not item:
+                raise ValueError(f"workflow '{workflow_id}' metadata '{metadata_key}' contains an invalid step")
+            validated.append(item)
+        groups.append(tuple(validated))
+    return tuple(groups)

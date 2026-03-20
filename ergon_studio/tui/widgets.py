@@ -6,10 +6,9 @@ from rich.text import Text
 
 from textual.message import Message
 from textual.timer import Timer
-from textual.widgets import Collapsible, Static, TextArea
+from textual.widgets import Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext
-from ergon_studio.storage.models import ThreadRecord
 
 THINKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -103,71 +102,6 @@ class AgentStatusBar(Static):
             if i < len(agent_ids) - 1:
                 text.append(" ")
         return text
-
-
-class SideThreadBlock(Collapsible):
-    """Collapsible block showing a side thread's messages."""
-
-    DEFAULT_CSS = """
-    SideThreadBlock {
-        height: auto;
-        margin: 0;
-        padding: 0;
-        background: transparent;
-        border-top: none;
-        padding-left: 0;
-        padding-bottom: 0;
-    }
-
-    SideThreadBlock:focus-within {
-        background-tint: transparent;
-    }
-
-    SideThreadBlock > CollapsibleTitle {
-        background: transparent;
-        padding: 0 1;
-    }
-
-    SideThreadBlock > CollapsibleTitle:hover {
-        background: transparent;
-    }
-
-    SideThreadBlock > CollapsibleTitle:focus {
-        background: transparent;
-    }
-
-    SideThreadBlock > Contents {
-        background: transparent;
-        padding: 1 0 0 2;
-    }
-    """
-
-    def __init__(self, thread: ThreadRecord, runtime: RuntimeContext, **kwargs) -> None:
-        self._thread = thread
-        self._runtime = runtime
-        self._message_count = len(runtime.list_thread_messages(thread.id))
-        title = self._build_title()
-        self._content_widget = Static("", classes="thread-content")
-        super().__init__(self._content_widget, title=title, collapsed=True, **kwargs)
-
-    def _build_title(self) -> str:
-        agent = self._thread.assigned_agent_id or self._thread.kind
-        sprite = AGENT_SPRITES.get(agent, "")
-        summary = self._thread.summary or self._thread.kind
-        return f"{sprite} {agent} › {summary} [{self._message_count} msgs]"
-
-    def refresh_messages(self) -> None:
-        messages = self._runtime.list_thread_messages(self._thread.id)
-        self._message_count = len(messages)
-        self.title = self._build_title()
-        if not messages:
-            self._content_widget.update("No messages yet.")
-            return
-        lines = []
-        for msg in messages:
-            body = self._runtime.conversation_store.read_message_body(msg).rstrip("\n")
-            lines.append(f"[bold]{msg.sender}[/bold] {body}")
-        self._content_widget.update("\n".join(lines))
 
 
 class InfoBar(Static):

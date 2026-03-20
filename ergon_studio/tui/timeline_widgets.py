@@ -172,6 +172,7 @@ class TimelineApprovalWidget(Static, _TimelineItemWidget):
 
 
 class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
+    can_focus = True
     DEFAULT_CSS = """
     TimelineWorkroomSegmentWidget {
         height: auto;
@@ -179,6 +180,10 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
         padding: 0;
         background: transparent;
         border-left: solid $accent;
+    }
+
+    TimelineWorkroomSegmentWidget:focus {
+        border: tall $accent;
     }
 
     TimelineWorkroomSegmentWidget > CollapsibleTitle {
@@ -203,6 +208,9 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
     def __init__(self, item: WorkroomSegmentItem, **kwargs) -> None:
         self.item_id = item.item_id
         self.item = item
+        self.thread_id = item.thread_id
+        self.thread_kind = item.thread_kind
+        self.assigned_agent_id = item.assigned_agent_id
         self._body = Static(_workroom_body(item), classes="timeline-workroom-body")
         super().__init__(self._body, title=item.title, collapsed=False, **kwargs)
 
@@ -210,6 +218,9 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
         assert isinstance(item, WorkroomSegmentItem)
         self.item_id = item.item_id
         self.item = item
+        self.thread_id = item.thread_id
+        self.thread_kind = item.thread_kind
+        self.assigned_agent_id = item.assigned_agent_id
         self.title = item.title
         self._body.update(_workroom_body(item))
 
@@ -219,6 +230,9 @@ class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):
             suffix = " <live>" if message.is_live else ""
             lines.append(f"{message.sender}: {message.body}{suffix}")
         return "\n".join(lines)
+
+    def on_click(self) -> None:
+        self.focus()
 
 
 def _widget_for_item(item: TimelineItem) -> _TimelineItemWidget:
@@ -273,10 +287,20 @@ def _approval_renderable(item: ApprovalItem):
 
 
 def _workroom_body(item: WorkroomSegmentItem) -> str:
-    return "\n\n".join(
+    body = "\n\n".join(
         _message_markup(message.sender, message.body, is_live=message.is_live)
         for message in item.messages
     )
+    hint = _workroom_hint(item)
+    if hint:
+        return f"{body}\n\n{hint}"
+    return body
+
+
+def _workroom_hint(item: WorkroomSegmentItem) -> str:
+    if item.thread_kind == "agent_direct" and item.assigned_agent_id:
+        return "[dim]Enter to reply here · Ctrl+I to inspect[/dim]"
+    return "[dim]Ctrl+I to inspect this workroom[/dim]"
 
 
 def _message_markup(sender: str, body: str, *, is_live: bool = False) -> str:

@@ -22,13 +22,14 @@ from ergon_studio.tui.inspectors import (
     build_event_entries,
     build_memory_entries,
     build_task_entries,
+    build_thread_entry,
     build_thread_entries,
     build_workflow_definition_entries,
     build_workflow_run_entries,
 )
 from ergon_studio.tui.timeline_builder import build_session_timeline
 from ergon_studio.tui.timeline_models import NoticeItem
-from ergon_studio.tui.timeline_widgets import TimelineView
+from ergon_studio.tui.timeline_widgets import TimelineView, TimelineWorkroomSegmentWidget
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, ThinkingIndicator
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
@@ -193,6 +194,8 @@ class SessionPickerScreen(ModalScreen[str | None]):
 class ErgonStudioApp(App[None]):
     TITLE = "ergon.studio"
     BINDINGS = [
+        ("enter", "activate_focused_workroom", "Use Workroom"),
+        ("ctrl+i", "inspect_focused_workroom", "Inspect Workroom"),
         ("ctrl+o", "open_session_picker", "Sessions"),
         ("ctrl+y", "approve_pending", "Approve"),
         ("ctrl+r", "reject_pending", "Reject"),
@@ -1107,6 +1110,28 @@ class ErgonStudioApp(App[None]):
             return
         self._open_session_picker()
 
+    def action_activate_focused_workroom(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, TimelineWorkroomSegmentWidget):
+            return
+        if focused.thread_kind == "agent_direct" and focused.assigned_agent_id:
+            self._set_compose_target_to_thread(focused.thread_id)
+            self._add_notice(
+                f"Composer now targets {focused.assigned_agent_id}. Use /main to return to the orchestrator.",
+                level="info",
+                title="Direct thread",
+            )
+            self._refresh_timeline()
+            self.set_focus(self.query_one("#composer-input", ComposerTextArea))
+            return
+        self._open_thread_detail(focused.thread_id)
+
+    def action_inspect_focused_workroom(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, TimelineWorkroomSegmentWidget):
+            return
+        self._open_thread_detail(focused.thread_id)
+
     def _open_config_wizard(self) -> None:
         from ergon_studio.tui.config_wizard import ConfigWizardScreen
 
@@ -1122,6 +1147,20 @@ class ErgonStudioApp(App[None]):
                 title="Threads",
                 entries=build_thread_entries(self.runtime),
                 empty_message="No internal threads in this session yet.",
+            )
+        )
+
+    def _open_thread_detail(self, thread_id: str) -> None:
+        entry = build_thread_entry(self.runtime, thread_id)
+        if entry is None:
+            self._add_notice(f"Unknown thread: {thread_id}", level="error")
+            self._refresh_timeline()
+            return
+        self.push_screen(
+            InspectorScreen(
+                title="Thread",
+                entries=[entry],
+                empty_message="Thread not found.",
             )
         )
 

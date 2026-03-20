@@ -131,33 +131,40 @@ def build_thread_entries(runtime: RuntimeContext) -> list[InspectorEntry]:
     for thread in runtime.list_threads():
         if thread.id == runtime.main_thread_id:
             continue
-        messages = runtime.list_thread_messages(thread.id)
-        lines = [
-            f"[b]{thread.summary or thread.id}[/b]",
-            f"ID: {thread.id}",
-            f"Kind: {thread.kind}",
-            f"Agent: {thread.assigned_agent_id or '-'}",
-            f"Task: {thread.parent_task_id or '-'}",
-            f"Parent thread: {thread.parent_thread_id or '-'}",
-            "",
-            "[b]Transcript[/b]",
-        ]
-        if not messages:
-            lines.append("No messages yet.")
-        else:
-            for message in messages:
-                body = runtime.conversation_store.read_message_body(message).rstrip("\n")
-                lines.append(f"{message.sender}: {body}")
-                lines.append("")
-        label = f"{thread.assigned_agent_id or thread.kind} · {thread.summary or thread.id}"
-        entries.append(
-            InspectorEntry(
-                entry_id=thread.id,
-                label=label,
-                detail="\n".join(lines).strip(),
-            )
-        )
+        entry = build_thread_entry(runtime, thread.id)
+        if entry is not None:
+            entries.append(entry)
     return entries
+
+
+def build_thread_entry(runtime: RuntimeContext, thread_id: str) -> InspectorEntry | None:
+    thread = runtime.get_thread(thread_id)
+    if thread is None or thread.id == runtime.main_thread_id:
+        return None
+    messages = runtime.list_thread_messages(thread.id)
+    lines = [
+        f"[b]{thread.summary or thread.id}[/b]",
+        f"ID: {thread.id}",
+        f"Kind: {thread.kind}",
+        f"Agent: {thread.assigned_agent_id or '-'}",
+        f"Task: {thread.parent_task_id or '-'}",
+        f"Parent thread: {thread.parent_thread_id or '-'}",
+        "",
+        "[b]Transcript[/b]",
+    ]
+    if not messages:
+        lines.append("No messages yet.")
+    else:
+        for message in messages:
+            body = runtime.conversation_store.read_message_body(message).rstrip("\n")
+            lines.append(f"{message.sender}: {body}")
+            lines.append("")
+    label = f"{thread.assigned_agent_id or thread.kind} · {thread.summary or thread.id}"
+    return InspectorEntry(
+        entry_id=thread.id,
+        label=label,
+        detail="\n".join(lines).strip(),
+    )
 
 
 def build_task_entries(runtime: RuntimeContext) -> list[InspectorEntry]:

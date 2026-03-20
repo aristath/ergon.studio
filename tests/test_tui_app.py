@@ -15,7 +15,7 @@ from textual.widgets import Input, OptionList, Static
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
 from ergon_studio.tui.inspectors import InspectorScreen
-from ergon_studio.tui.timeline_widgets import TimelineApprovalWidget, TimelineView
+from ergon_studio.tui.timeline_widgets import TimelineApprovalWidget, TimelineView, TimelineWorkroomSegmentWidget
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, ThinkingIndicator
 
 
@@ -1317,6 +1317,58 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             thread_messages = runtime.list_thread_messages(target_thread_id)
             self.assertEqual([message.sender for message in thread_messages], ["user", agent_id])
             self.assertIn("I can take it from here.", _timeline_text(app))
+
+    async def test_enter_on_focused_workroom_targets_that_direct_thread(self):
+        _, runtime, app = _make_env()
+        thread = runtime.create_thread(
+            thread_id="t-coder",
+            kind="agent_direct",
+            created_at=1000,
+            assigned_agent_id="coder",
+            summary="Direct thread with coder",
+        )
+        runtime.append_message_to_thread(
+            thread_id=thread.id,
+            message_id="m-1",
+            sender="coder",
+            kind="chat",
+            body="I have a draft ready.",
+            created_at=1001,
+        )
+        async with app.run_test() as pilot:
+            widget = app.query_one(TimelineWorkroomSegmentWidget)
+            app.set_focus(widget)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            self.assertIn("coder", str(inp.placeholder))
+            self.assertIn("target: coder", str(app.query_one("#info-bar", InfoBar).content))
+
+    async def test_ctrl_i_on_focused_workroom_opens_thread_detail(self):
+        _, runtime, app = _make_env()
+        thread = runtime.create_thread(
+            thread_id="t-review",
+            kind="review",
+            created_at=1000,
+            summary="Review findings",
+        )
+        runtime.append_message_to_thread(
+            thread_id=thread.id,
+            message_id="m-1",
+            sender="reviewer",
+            kind="chat",
+            body="This needs one more pass.",
+            created_at=1001,
+        )
+        async with app.run_test() as pilot:
+            widget = app.query_one(TimelineWorkroomSegmentWidget)
+            app.set_focus(widget)
+            await pilot.pause()
+            await pilot.press("ctrl+i")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            self.assertEqual(app.screen.title, "Thread")
 
     async def test_memory_opens_inspector(self):
         _, runtime, app = _make_env()

@@ -25,10 +25,25 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
 
     tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
-    messages = tuple(_parse_input_item(item) for item in _normalize_input(payload.get("input")))
+    messages: list[ProxyInputMessage] = []
+    instructions = optional_non_empty_text(payload.get("instructions")) if payload.get("instructions") is not None else None
+    if instructions is not None:
+        messages.append(
+            ProxyInputMessage(
+                role="system",
+                content=instructions,
+            )
+        )
+
+    raw_input = payload.get("input")
+    if raw_input is None:
+        if not messages:
+            raise ValueError("responses input must be a string or an array")
+    else:
+        messages.extend(_parse_input_item(item) for item in _normalize_input(raw_input))
     return ProxyTurnRequest(
         model=model.strip(),
-        messages=messages,
+        messages=tuple(messages),
         tools=tools,
         stream=stream,
         tool_choice=tool_choice,

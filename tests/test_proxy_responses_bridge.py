@@ -20,6 +20,31 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[0].role, "user")
         self.assertEqual(request.messages[0].content, "Build it")
 
+    def test_parses_top_level_instructions_as_leading_system_message(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "instructions": "Always explain tradeoffs.",
+                "input": "Build it",
+            }
+        )
+
+        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
+        self.assertEqual(request.messages[1].content, "Build it")
+
+    def test_allows_instruction_only_requests(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "instructions": "You are reviewing prior work.",
+            }
+        )
+
+        self.assertEqual(len(request.messages), 1)
+        self.assertEqual(request.messages[0].role, "system")
+        self.assertEqual(request.messages[0].content, "You are reviewing prior work.")
+
     def test_parses_message_and_function_call_output_items(self) -> None:
         request = parse_responses_request(
             {

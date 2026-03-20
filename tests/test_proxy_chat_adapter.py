@@ -18,6 +18,7 @@ class ProxyChatAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload["object"], "chat.completion.chunk")
         self.assertEqual(payload["choices"][0]["delta"]["reasoning_content"], "Orchestrator: planning.")
+        self.assertEqual(payload["choices"][0]["delta"]["reasoning"], "Orchestrator: planning.")
         self.assertIsNone(payload["choices"][0]["finish_reason"])
 
     def test_content_delta_encodes_to_chat_chunk(self) -> None:
@@ -97,6 +98,20 @@ class ProxyChatAdapterTests(unittest.TestCase):
         message = payload["choices"][0]["message"]
         self.assertEqual(payload["choices"][0]["finish_reason"], "tool_calls")
         self.assertEqual(message["tool_calls"][0]["function"]["name"], "read_file")
+
+    def test_non_stream_response_includes_reasoning_alias(self) -> None:
+        payload = build_chat_completion_response(
+            completion_id="chatcmpl_1",
+            model="ergon",
+            created_at=123,
+            content="Done.",
+            finish_reason="stop",
+            reasoning="Orchestrator: planning.",
+        )
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual(message["reasoning_content"], "Orchestrator: planning.")
+        self.assertEqual(message["reasoning"], "Orchestrator: planning.")
 
 
 if __name__ == "__main__":

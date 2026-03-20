@@ -32,6 +32,7 @@ def encode_chat_stream_event(
 
     if isinstance(event, ProxyReasoningDeltaEvent):
         delta["reasoning_content"] = event.delta
+        delta["reasoning"] = event.delta
         return base
     if isinstance(event, ProxyContentDeltaEvent):
         delta["content"] = event.delta
@@ -94,6 +95,7 @@ def build_chat_completion_response(
     }
     if reasoning:
         message["reasoning_content"] = reasoning
+        message["reasoning"] = reasoning
     if tool_calls:
         message["tool_calls"] = [
             {

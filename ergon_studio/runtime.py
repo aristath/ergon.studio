@@ -1386,62 +1386,40 @@ class RuntimeContext:
             default_step_groups=default_groups,
         ):
             return default_groups
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return default_groups
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return default_groups
-        selector = Agent(
-            client=client,
-            id=f"{workflow_id}-staffing-selector",
+        known_agents = tuple(
+            agent_id
+            for agent_id in self.list_agent_ids()
+            if agent_id != "orchestrator"
+        )
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id=f"{workflow_id}-staffing-selector",
             name="Workflow Staffing Selector",
             description="Chooses the initial specialist sequence for a workflow run",
             instructions=_workflow_staffing_selector_instructions(
                 workflow_id=workflow_id,
                 orchestration=orchestration,
-                available_agents=tuple(
-                    agent_id
-                    for agent_id in self.list_agent_ids()
-                    if agent_id != "orchestrator"
-                ),
+                available_agents=known_agents,
             ),
-        )
-        try:
-            response = await selector.run(
-                [
-                    Message(
-                        role="user",
-                        text=_workflow_staffing_selector_prompt(
-                            workflow_id=workflow_id,
-                            orchestration=orchestration,
-                            goal=goal,
-                            default_step_groups=default_groups,
-                        ),
-                        author_name="workflow",
-                    )
-                ],
-                session=selector.create_session(session_id=f"workflow-staffing:{workflow_id}:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="workflow_staffing_selector_failed",
-                summary=f"Workflow staffing selector failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return default_groups
-        self.track_token_usage(response)
-        try:
-            selected_groups = _parse_selected_workflow_step_groups(
+            prompt=_workflow_staffing_selector_prompt(
                 workflow_id=workflow_id,
-                raw=response.text.strip(),
-                known_agents=tuple(
-                    agent_id
-                    for agent_id in self.list_agent_ids()
-                    if agent_id != "orchestrator"
-                ),
+                orchestration=orchestration,
+                goal=goal,
+                default_step_groups=default_groups,
+            ),
+            created_at=created_at,
+            session_id=f"workflow-staffing:{workflow_id}:{created_at}",
+            failure_event_kind="workflow_staffing_selector_failed",
+            failure_summary_prefix="Workflow staffing selector failed",
+            invalid_event_kind="workflow_staffing_selector_invalid",
+            invalid_summary_prefix="Workflow staffing selector returned invalid JSON",
+        )
+        if parsed is None:
+            return default_groups
+        try:
+            selected_groups = _selected_workflow_step_groups_from_payload(
+                workflow_id=workflow_id,
+                payload=parsed,
+                known_agents=known_agents,
             )
         except ValueError:
             return default_groups
@@ -3641,6 +3619,19 @@ def _parse_selected_workflow_step_groups(
     known_agents: tuple[str, ...],
 ) -> tuple[tuple[str, ...], ...]:
     payload = _parse_turn_decision_json(raw)
+    return _selected_workflow_step_groups_from_payload(
+        workflow_id=workflow_id,
+        payload=payload,
+        known_agents=known_agents,
+    )
+
+
+def _selected_workflow_step_groups_from_payload(
+    *,
+    workflow_id: str,
+    payload: dict[str, object],
+    known_agents: tuple[str, ...],
+) -> tuple[tuple[str, ...], ...]:
     raw_step_groups = payload.get("step_groups")
     if not isinstance(raw_step_groups, list):
         raise ValueError("step_groups is required")

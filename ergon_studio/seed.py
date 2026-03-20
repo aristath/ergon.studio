@@ -358,6 +358,11 @@ orchestration: direct
 delivery_candidate: true
 steps:
   - coder
+tool_evidence:
+  coder: [write_file, patch_file]
+  fixer: [write_file, patch_file, run_command]
+  tester: [run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 3
 repair_step_groups:
   - [tester]
@@ -420,6 +425,11 @@ steps:
   - coder
   - tester
   - reviewer
+tool_evidence:
+  coder: [write_file, patch_file]
+  fixer: [write_file, patch_file, run_command]
+  tester: [run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 2
 repair_step_groups:
   - [fixer]
@@ -455,6 +465,10 @@ orchestration: concurrent
 step_groups:
   - [coder, coder, coder]
   - [reviewer]
+tool_evidence:
+  coder: [write_file, patch_file]
+  fixer: [write_file, patch_file, run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 2
 repair_step_groups:
   - [fixer]
@@ -608,6 +622,9 @@ orchestration: sequential
 steps:
   - reviewer
   - fixer
+tool_evidence:
+  fixer: [write_file, patch_file, run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 2
 repair_step_groups:
   - [fixer]
@@ -641,6 +658,9 @@ orchestration: sequential
 steps:
   - reviewer
   - fixer
+tool_evidence:
+  fixer: [write_file, patch_file, run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 2
 repair_step_groups:
   - [fixer]
@@ -675,6 +695,10 @@ steps:
   - tester
   - fixer
   - reviewer
+tool_evidence:
+  fixer: [write_file, patch_file, run_command]
+  tester: [run_command]
+  reviewer: [list_files, read_file, search_files, run_command]
 max_repair_cycles: 2
 repair_step_groups:
   - [fixer]

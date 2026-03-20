@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _next_followup_cycle, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _supports_auto_repair, _workflow_review_evidence_lines
+from ergon_studio.workflow_runtime import _ExecutionTracker, WorkflowFollowupDecision, WorkflowReviewVerdict, _format_review_summary, _has_required_tool_calls, _next_followup_cycle, _parse_followup_decision, _parse_review_verdict, _required_tool_names, _required_tool_names_for_workflow, _supports_auto_repair, _workflow_review_evidence_lines
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
@@ -81,6 +81,35 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertEqual(_required_tool_names("coder"), ("write_file", "patch_file"))
         self.assertEqual(_required_tool_names("tester"), ("run_command",))
         self.assertEqual(_required_tool_names("architect"), ())
+
+    def test_workflow_required_tool_names_use_metadata_override(self) -> None:
+        runtime = SimpleNamespace(
+            registry=SimpleNamespace(
+                workflow_definitions={
+                    "custom": SimpleNamespace(
+                        metadata={
+                            "tool_evidence": {
+                                "coder": ["run_command"],
+                                "tester": [],
+                            }
+                        }
+                    )
+                }
+            )
+        )
+
+        self.assertEqual(
+            _required_tool_names_for_workflow(runtime=runtime, workflow_id="custom", agent_id="coder"),
+            ("run_command",),
+        )
+        self.assertEqual(
+            _required_tool_names_for_workflow(runtime=runtime, workflow_id="custom", agent_id="tester"),
+            (),
+        )
+        self.assertEqual(
+            _required_tool_names_for_workflow(runtime=runtime, workflow_id="custom", agent_id="reviewer"),
+            ("list_files", "read_file", "search_files", "run_command"),
+        )
 
     def test_required_tool_check_uses_completed_new_calls(self) -> None:
         tool_calls = [

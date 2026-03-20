@@ -204,7 +204,11 @@ class _ThreadExecutor(Executor):
         tool_mode = self.tracker.thread_tool_modes.get(self.thread.id, "default")
         if tool_mode == "none":
             return reply, reply_body
-        required_tools = _required_tool_names(self.thread.assigned_agent_id or "")
+        required_tools = _required_tool_names_for_workflow(
+            runtime=self.runtime,
+            workflow_id=self.workflow_id,
+            agent_id=self.thread.assigned_agent_id or "",
+        )
         if not required_tools:
             return reply, reply_body
         if _has_required_tool_calls(
@@ -223,7 +227,10 @@ class _ThreadExecutor(Executor):
             thread_id=self.thread.id,
             task_id=self.thread.parent_task_id,
         )
-        retry_prompt = _render_tool_requirement_retry(self.thread.assigned_agent_id or "")
+        retry_prompt = _render_tool_requirement_retry(
+            agent_id=self.thread.assigned_agent_id or "",
+            required_tools=required_tools,
+        )
         before_retry_ids = {
             tool_call.id
             for tool_call in self.runtime.list_tool_calls()
@@ -2576,6 +2583,26 @@ def _required_tool_names(agent_id: str) -> tuple[str, ...]:
     return requirements.get(agent_id, ())
 
 
+def _required_tool_names_for_workflow(
+    *,
+    runtime: RuntimeContext,
+    workflow_id: str,
+    agent_id: str,
+) -> tuple[str, ...]:
+    metadata = runtime.registry.workflow_definitions[workflow_id].metadata
+    configured = metadata.get("tool_evidence")
+    if isinstance(configured, dict):
+        agent_tools = configured.get(agent_id)
+        if isinstance(agent_tools, list):
+            validated = tuple(
+                item for item in agent_tools if isinstance(item, str) and item.strip()
+            )
+            if validated:
+                return validated
+            return ()
+    return _required_tool_names(agent_id)
+
+
 def _has_required_tool_calls(
     *,
     tool_calls,
@@ -2596,28 +2623,32 @@ def _has_required_tool_calls(
     return False
 
 
-def _render_tool_requirement_retry(agent_id: str) -> str:
-    if agent_id == "coder":
+def _render_tool_requirement_retry(*, agent_id: str, required_tools: tuple[str, ...]) -> str:
+    if agent_id == "coder" and required_tools == ("write_file", "patch_file"):
         return (
             "Your last turn did not record any real file-edit tool call. "
             "Use `write_file` or `patch_file` now and then summarize the actual implementation."
         )
-    if agent_id == "fixer":
+    if agent_id == "fixer" and required_tools == ("write_file", "patch_file", "run_command"):
         return (
             "Your last turn did not record any real repair action. "
             "Use `write_file`, `patch_file`, or `run_command` now to apply and verify the fix."
         )
-    if agent_id == "tester":
+    if agent_id == "tester" and required_tools == ("run_command",):
         return (
             "Your last turn did not record any real verification command. "
             "Use `run_command` now against the actual implementation and report the concrete result."
         )
-    if agent_id == "reviewer":
+    if agent_id == "reviewer" and required_tools == ("list_files", "read_file", "search_files", "run_command"):
         return (
             "Your last turn did not record any real inspection or verification tool use. "
             "Use `list_files`, `read_file`, `search_files`, or `run_command` now, then return the review."
         )
-    return "Use the appropriate workspace tools now and return the concrete result."
+    tools = ", ".join(f"`{tool}`" for tool in required_tools)
+    return (
+        "Your last turn did not record the required workspace-tool evidence. "
+        f"Use one of {tools} now and then return the concrete result."
+    )
 
 
 def _orchestrator_review_instructions() -> str:

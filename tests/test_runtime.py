@@ -2738,8 +2738,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3304,8 +3304,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3374,8 +3374,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3448,8 +3448,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3517,8 +3517,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3608,8 +3608,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=fake_generate,
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3696,8 +3696,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=fake_generate,
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",
@@ -3758,8 +3758,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda agent_id: ("write_file",) if agent_id == "coder" else (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **kwargs: ("write_file",) if kwargs.get("agent_id") == "coder" else (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="single-agent-execution",
@@ -3834,8 +3834,8 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 autospec=True,
                 side_effect=lambda _runtime, agent_id: fake_agents[agent_id],
             ), patch(
-                "ergon_studio.workflow_runtime._required_tool_names",
-                side_effect=lambda _agent_id: (),
+                "ergon_studio.workflow_runtime._required_tool_names_for_workflow",
+                side_effect=lambda **_: (),
             ):
                 result = await runtime.run_workflow(
                     workflow_id="standard-build",

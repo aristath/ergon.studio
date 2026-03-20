@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from uuid import uuid4
 
 from textual.app import App, ComposeResult, ScreenStackError
@@ -57,6 +58,14 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/events", "Show recent activity"),
     ("/init", "Initialize project configuration"),
 ]
+
+
+@dataclass
+class PendingTurn:
+    user_message: MessageRecord
+    body: str
+    created_at: int
+    completion: asyncio.Future[None]
 
 
 class DefinitionEditorScreen(ModalScreen[None]):
@@ -222,8 +231,9 @@ class ErgonStudioApp(App[None]):
         self._last_escape_time: float = 0.0
         self._permission_mode: str = "default"  # default, auto-approve, plan
         self._compacting: bool = False
+        self._active_turn: PendingTurn | None = None
         self._active_turn_task: asyncio.Task[None] | None = None
-        self._queued_turns: list[tuple[MessageRecord, str, int]] = []
+        self._queued_turns: list[PendingTurn] = []
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
@@ -263,6 +273,13 @@ class ErgonStudioApp(App[None]):
         if self._active_turn_task is not None:
             self._active_turn_task.cancel()
             self._active_turn_task = None
+        if self._active_turn is not None and not self._active_turn.completion.done():
+            self._active_turn.completion.cancel()
+            self._active_turn = None
+        for turn in self._queued_turns:
+            if not turn.completion.done():
+                turn.completion.cancel()
+        self._queued_turns = []
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "composer-input":
@@ -366,50 +383,42 @@ class ErgonStudioApp(App[None]):
         event.text_area.value = ""
 
     async def _send_to_orchestrator(self, body: str) -> None:
-        self._submit_orchestrator_turn(body)
-        while self._active_turn_task is not None:
-            task = self._active_turn_task
-            await task
-            if self._active_turn_task is task:
-                break
+        turn = self._submit_orchestrator_turn(body)
+        await turn.completion
 
-    def _submit_orchestrator_turn(self, body: str) -> None:
+    def _submit_orchestrator_turn(self, body: str) -> PendingTurn:
         created_at = self._next_timestamp()
         user_message = self.runtime.record_user_message_to_main_thread(
             body=body,
             created_at=created_at,
         )
+        turn = PendingTurn(
+            user_message=user_message,
+            body=body,
+            created_at=created_at,
+            completion=asyncio.get_running_loop().create_future(),
+        )
         self._refresh_timeline()
         if self._active_turn_task is not None and not self._active_turn_task.done():
-            self._queued_turns.append((user_message, body, created_at))
+            self._queued_turns.append(turn)
             self._add_notice(
                 f"Queued message for the orchestrator. {len(self._queued_turns)} waiting.",
                 level="info",
             )
             self._refresh_timeline()
             self._refresh_info()
-            return
-        self._start_orchestrator_turn(
-            user_message=user_message,
-            body=body,
-            created_at=created_at,
-        )
+            return turn
+        self._start_orchestrator_turn(turn)
+        return turn
 
-    def _start_orchestrator_turn(
-        self,
-        *,
-        user_message: MessageRecord,
-        body: str,
-        created_at: int,
-    ) -> None:
+    def _start_orchestrator_turn(self, turn: PendingTurn) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
         self._turn_backgrounded = False
         thinking.show("Thinking")
+        self._active_turn = turn
         self._active_turn_task = asyncio.create_task(
             self._run_orchestrator_turn(
-                user_message=user_message,
-                body=body,
-                created_at=created_at,
+                turn=turn,
             )
         )
         self._refresh_timeline()
@@ -418,17 +427,15 @@ class ErgonStudioApp(App[None]):
     async def _run_orchestrator_turn(
         self,
         *,
-        user_message: MessageRecord,
-        body: str,
-        created_at: int,
+        turn: PendingTurn,
     ) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
         current_task = asyncio.current_task()
         try:
             stream = self.runtime.stream_user_message_to_orchestrator(
-                body=body,
-                created_at=created_at,
-                user_message=user_message,
+                body=turn.body,
+                created_at=turn.created_at,
+                user_message=turn.user_message,
             )
             self._refresh_timeline()
             async for _event in stream:
@@ -437,18 +444,26 @@ class ErgonStudioApp(App[None]):
         except asyncio.CancelledError:
             thinking.hide()
             self._refresh_timeline()
+            if not turn.completion.done():
+                turn.completion.cancel()
             raise
         except Exception as exc:
             thinking.hide()
             self._add_notice(f"Error: {exc}", level="error", title="Send failed")
             self._refresh_timeline()
+            if not turn.completion.done():
+                turn.completion.set_exception(exc)
         else:
             thinking.hide()
             self._refresh_timeline()
             await self._check_auto_compaction()
+            if not turn.completion.done():
+                turn.completion.set_result(None)
         finally:
             if self._active_turn_task is current_task:
                 self._active_turn_task = None
+            if self._active_turn is turn:
+                self._active_turn = None
             self._turn_backgrounded = False
             self._refresh_info()
         self._start_next_queued_turn()
@@ -458,13 +473,9 @@ class ErgonStudioApp(App[None]):
             return
         if not self._queued_turns:
             return
-        user_message, body, created_at = self._queued_turns.pop(0)
+        turn = self._queued_turns.pop(0)
         self._add_notice("Continuing with the next queued message.", level="info")
-        self._start_orchestrator_turn(
-            user_message=user_message,
-            body=body,
-            created_at=created_at,
-        )
+        self._start_orchestrator_turn(turn)
 
     async def _handle_slash_command(self, text: str) -> None:
         parts = text.split(None, 1)

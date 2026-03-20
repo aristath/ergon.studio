@@ -502,6 +502,66 @@ class TestMessages(IsolatedAsyncioTestCase):
                 await task
                 await pilot.pause()
 
+    async def test_send_to_orchestrator_only_waits_for_its_own_turn(self):
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+        orchestrator_agents = [
+            GateStreamingAgent(["first reply"], release_event=first_release),
+            GateStreamingAgent(["second reply"], release_event=second_release),
+        ]
+
+        def build_agent(_runtime, agent_id: str):
+            if agent_id == "orchestrator" and orchestrator_agents:
+                return orchestrator_agents.pop(0)
+            return FakeAgent(f"{agent_id} ready")
+
+        async with app.run_test() as pilot:
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=build_agent,
+            ), patch.object(
+                type(runtime),
+                "_decide_orchestrator_turn",
+                autospec=True,
+                return_value=OrchestratorTurnDecision(mode="act", request=""),
+            ), patch.object(
+                type(runtime),
+                "_audit_orchestrator_delivery_turn",
+                autospec=True,
+                return_value=DeliveryAuditDecision(
+                    deliverable_expected=False,
+                    reconsider=False,
+                    reason="",
+                ),
+            ):
+                first_task = asyncio.create_task(app._send_to_orchestrator("first"))
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if app._active_turn_task is not None and runtime.list_live_message_drafts():
+                        break
+                app._submit_orchestrator_turn("second")
+                await pilot.pause()
+                self.assertFalse(first_task.done())
+                first_release.set()
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if first_task.done():
+                        break
+                self.assertTrue(first_task.done())
+                self.assertIsNotNone(app._active_turn_task)
+                self.assertFalse(app._active_turn_task.done())
+                second_release.set()
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+                await pilot.pause()
+
     async def test_session_switch_is_blocked_while_turn_is_running(self):
         from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
 

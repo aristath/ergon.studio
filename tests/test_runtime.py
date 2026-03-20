@@ -1807,6 +1807,71 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 [event.kind for event in runtime.list_events()],
             )
 
+    async def test_runtime_can_use_reconsidered_delivery_workflow(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            captured: dict[str, str] = {}
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="architecture-first",
+                    goal="Design only.",
+                    deliverable_expected=True,
+                )
+
+            async def reconsider(_runtime, *, body: str, created_at: int, reason: str):
+                captured["reason"] = reason
+                return OrchestratorTurnDecision(
+                    mode="workflow",
+                    reply="",
+                    workflow_id="standard-build",
+                    goal=body,
+                    deliverable_expected=True,
+                )
+
+            async def run_workflow(
+                _runtime,
+                *,
+                workflow_id: str,
+                goal: str,
+                created_at: int | None = None,
+                parent_thread_id: str | None = None,
+            ):
+                captured["workflow_id"] = workflow_id
+                captured["goal"] = goal
+                return {
+                    "status": "completed",
+                    "workflow_run_id": "workflow-run-1",
+                    "review_summary": "ACCEPTED: implemented",
+                    "last_thread_id": "thread-1",
+                }
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_reconsider_delivery_turn", side_effect=reconsider, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                _, reply = await runtime.send_user_message_to_orchestrator(
+                    body="Build the feature now.",
+                    created_at=10,
+                )
+
+            self.assertIsNotNone(reply)
+            assert reply is not None
+            self.assertEqual(captured["workflow_id"], "standard-build")
+            self.assertEqual(captured["goal"], "Build the feature now.")
+            self.assertIn("delivery work", captured["reason"].lower())
+
     async def test_runtime_keeps_full_delivery_goal_for_workflow_runs(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 

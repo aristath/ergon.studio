@@ -875,6 +875,7 @@ class RuntimeContext:
             resolved_goal = delivery_context
             resolved_request = delivery_context
         delivery_reason = ""
+        reconsider_delivery = False
         if (
             decision.mode == "workflow"
             and decision.workflow_id is not None
@@ -892,13 +893,7 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
-            decision = OrchestratorTurnDecision(
-                mode="act",
-                reply="",
-                goal=delivery_context,
-                request=delivery_context,
-                deliverable_expected=True,
-            )
+            reconsider_delivery = True
         elif (
             decision.deliverable_expected
             and decision.mode == "workflow"
@@ -906,22 +901,10 @@ class RuntimeContext:
             and self._workflow_is_non_delivery(decision.workflow_id)
         ):
             delivery_reason = "Escalated a non-delivery workflow back to the orchestrator for delivery work"
-            decision = OrchestratorTurnDecision(
-                mode="act",
-                reply="",
-                goal=delivery_context,
-                request=delivery_context,
-                deliverable_expected=True,
-            )
+            reconsider_delivery = True
         if decision.deliverable_expected and decision.mode == "reply":
             delivery_reason = "Escalated a reply-only turn back to the orchestrator for delivery work"
-            decision = OrchestratorTurnDecision(
-                mode="act",
-                reply="",
-                goal=delivery_context,
-                request=delivery_context,
-                deliverable_expected=True,
-            )
+            reconsider_delivery = True
         if delivery_reason:
             self.append_event(
                 kind="orchestrator_delivery_reconsidered",
@@ -929,6 +912,22 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
+        if reconsider_delivery:
+            reconsidered = await self._reconsider_delivery_turn(
+                body=delivery_context,
+                created_at=created_at + 1,
+                reason=delivery_reason,
+            )
+            if reconsidered is not None:
+                decision = reconsidered
+            else:
+                decision = OrchestratorTurnDecision(
+                    mode="act",
+                    reply="",
+                    goal=delivery_context,
+                    request=delivery_context,
+                    deliverable_expected=True,
+                )
         self.append_event(
             kind="orchestrator_turn_planned",
             summary=f"Orchestrator selected {decision.mode}",
@@ -1694,6 +1693,72 @@ class RuntimeContext:
         except ValueError:
             return False
         return _as_bool(parsed.get("deliverable_expected"))
+
+    async def _reconsider_delivery_turn(
+        self,
+        *,
+        body: str,
+        created_at: int,
+        reason: str,
+    ) -> OrchestratorTurnDecision | None:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return None
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return None
+        decision_agent = Agent(
+            client=client,
+            id="orchestrator-delivery-reconsideration-planner",
+            name="Orchestrator Delivery Reconsideration Planner",
+            description="Internal delivery replanner",
+            instructions=_delivery_reconsideration_instructions(self, reason),
+        )
+        try:
+            response = await decision_agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=_orchestrator_turn_planner_prompt(self, body),
+                        author_name="system",
+                    )
+                ],
+                session=decision_agent.create_session(session_id=f"main-delivery-reconsideration:{created_at}"),
+            )
+        except Exception as exc:
+            self.append_event(
+                kind="orchestrator_reconsideration_failed",
+                summary=f"Delivery reconsideration failed: {type(exc).__name__}: {exc}",
+                created_at=created_at,
+                thread_id=self.main_thread_id,
+            )
+            return None
+        self.track_token_usage(response)
+        try:
+            parsed = _parse_turn_decision_json(response.text.strip())
+        except ValueError:
+            return None
+        mode = str(parsed.get("mode", "act")).strip().lower()
+        if mode not in {"workflow", "delegate", "act"}:
+            return None
+        workflow_id = _optional_text(parsed.get("workflow_id"))
+        if mode == "workflow":
+            if workflow_id is None or self._workflow_is_non_delivery(workflow_id):
+                return None
+        agent_id = _optional_text(parsed.get("agent_id"))
+        if mode == "delegate" and agent_id is None:
+            return None
+        return OrchestratorTurnDecision(
+            mode=mode,
+            reply="",
+            workflow_id=workflow_id,
+            agent_id=agent_id,
+            title=_optional_text(parsed.get("title")),
+            request=_optional_text(parsed.get("request")) or body,
+            goal=_optional_text(parsed.get("goal")) or body,
+            deliverable_expected=True,
+        )
 
     async def _allow_non_delivery_workflow(
         self,
@@ -3315,6 +3380,49 @@ def _deliverable_classifier_instructions() -> str:
             "Set `deliverable_expected` to true when the recent conversation already settled the direction and the latest user turn is approval to proceed.",
             "Set it to false for discussion-only, brainstorming-only, or planning-only turns.",
             "Use the whole recent conversation, not just the latest short acknowledgment.",
+        ]
+    )
+
+
+def _delivery_reconsideration_instructions(runtime: RuntimeContext, reason: str) -> str:
+    workflow_lines = []
+    for summary in runtime.list_workflow_summaries():
+        workflow_lines.append(
+            f"- {summary['id']}: orchestration={summary['orchestration']} purpose={summary['purpose']}"
+        )
+    agent_lines = []
+    for summary in runtime.list_agent_summaries():
+        if summary["id"] == "orchestrator":
+            continue
+        agent_lines.append(f"- {summary['id']}: role={summary['role']}")
+    return "\n".join(
+        [
+            "You are the internal delivery replanner for the orchestrator.",
+            f"The previous decision was rejected for this reason: {reason}",
+            "The user still expects concrete delivery work now.",
+            "Choose the best next move for delivery.",
+            "Output JSON only.",
+            "",
+            "Allowed modes:",
+            '- "act": let the orchestrator handle the turn directly with its normal tool-enabled run.',
+            '- "delegate": hand the work to one specialist thread.',
+            '- "workflow": run a named delivery workflow end to end.',
+            "",
+            "Rules:",
+            "- Do not choose reply.",
+            "- Do not choose a non-delivery workflow.",
+            "- Preserve the full delivery goal from the recent conversation.",
+            "- Prefer workflow when implementation, verification, or review loops are likely needed.",
+            "- Prefer delegate only for narrow specialist work.",
+            "",
+            "Available workflows:",
+            *workflow_lines,
+            "",
+            "Available specialists:",
+            *agent_lines,
+            "",
+            "Required JSON shape:",
+            '{"mode":"workflow|delegate|act","workflow_id":null,"agent_id":null,"title":"","request":"","goal":""}',
         ]
     )
 

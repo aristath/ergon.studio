@@ -88,11 +88,6 @@ class WorkflowFollowupDecision:
     tool_mode: str = "default"
 
 
-@dataclass(frozen=True)
-class WorkflowFollowupSelection:
-    plan: WorkflowFollowupPlan | None
-
-
 class _TimestampCursor:
     def __init__(self, start_at: int) -> None:
         self._counter = count(start_at)
@@ -642,7 +637,7 @@ async def execute_defined_workflow(
         )
         if tracker.failed:
             break
-        followup_selection = await _decide_followup_action(
+        followup = await _decide_followup_action(
             runtime=runtime,
             workflow_run=active_workflow_run,
             run_view=active_run_view,
@@ -651,7 +646,6 @@ async def execute_defined_workflow(
             cursor=cursor,
             tracker=tracker,
         )
-        followup = followup_selection.plan
         if tracker.blocked_step_index is None and tracker.review_accepted is not False:
             break
         if followup is None:
@@ -1861,7 +1855,7 @@ async def _decide_followup_action(
     review_thread: ThreadRecord,
     cursor: _TimestampCursor,
     tracker: _ExecutionTracker,
-) -> WorkflowFollowupSelection:
+) -> WorkflowFollowupPlan | None:
     response = await runtime.generate_agent_text_without_tools(
         agent_id="orchestrator",
         body=_workflow_followup_decision_prompt(
@@ -1876,103 +1870,97 @@ async def _decide_followup_action(
         extra_instructions=_workflow_followup_decision_instructions(),
     )
     if not response:
-        return WorkflowFollowupSelection(plan=None)
+        return None
     try:
         decision = _parse_followup_decision(response)
     except ValueError:
-        return WorkflowFollowupSelection(plan=None)
+        return None
 
     if decision.action == "stop":
-        return WorkflowFollowupSelection(plan=None)
+        return None
 
     if decision.action == "clarify":
         if tracker.clarification_cycles >= _max_clarification_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None)
+            return None
         if decision.request is None:
-            return WorkflowFollowupSelection(plan=None)
+            return None
         step_groups = decision.step_groups
         if step_groups:
             if not _is_valid_followup_step_groups(runtime, step_groups):
-                return WorkflowFollowupSelection(plan=None)
+                return None
         else:
             if decision.agent_id is None or decision.agent_id not in runtime.registry.agent_definitions:
-                return WorkflowFollowupSelection(plan=None)
+                return None
             step_groups = ((decision.agent_id,),)
         tracker.clarification_cycles += 1
         primary_agent = step_groups[0][0]
         summary = decision.summary or f"Requesting clarification from {primary_agent}"
-        return WorkflowFollowupSelection(
-            plan=WorkflowFollowupPlan(
+        return WorkflowFollowupPlan(
+            cycle_kind="clarify",
+            step_groups=step_groups,
+            event_kind="workflow_clarification_requested",
+            event_summary=summary,
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
                 cycle_kind="clarify",
-                step_groups=step_groups,
-                event_kind="workflow_clarification_requested",
-                event_summary=summary,
-                payload=_render_followup_payload(
-                    runtime=runtime,
-                    workflow_id=workflow_run.workflow_id,
-                    goal=goal,
-                    tracker=tracker,
-                    run_view=run_view,
-                    cycle_kind="clarify",
-                    custom_request=decision.request,
-                ),
-                tool_mode=decision.tool_mode,
+                custom_request=decision.request,
             ),
+            tool_mode=decision.tool_mode,
         )
 
     if decision.action == "repair":
         repair_groups = decision.step_groups or _repair_step_groups(runtime, workflow_run.workflow_id)
         if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
-            return WorkflowFollowupSelection(plan=None)
+            return None
         if not repair_groups or tracker.repair_cycles >= _max_repair_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None)
+            return None
         tracker.repair_cycles += 1
-        return WorkflowFollowupSelection(
-            plan=WorkflowFollowupPlan(
+        return WorkflowFollowupPlan(
+            cycle_kind="repair",
+            step_groups=repair_groups,
+            event_kind="workflow_auto_repair_started",
+            event_summary=decision.summary or f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_run.workflow_id}",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
                 cycle_kind="repair",
-                step_groups=repair_groups,
-                event_kind="workflow_auto_repair_started",
-                event_summary=decision.summary or f"Starting automatic fix cycle {tracker.repair_cycles} for {workflow_run.workflow_id}",
-                payload=_render_followup_payload(
-                    runtime=runtime,
-                    workflow_id=workflow_run.workflow_id,
-                    goal=goal,
-                    tracker=tracker,
-                    run_view=run_view,
-                    cycle_kind="repair",
-                    custom_request=decision.request,
-                ),
-                tool_mode=decision.tool_mode,
+                custom_request=decision.request,
             ),
+            tool_mode=decision.tool_mode,
         )
 
     if decision.action == "replan":
         replan_groups = decision.step_groups or _replan_step_groups(runtime, workflow_run.workflow_id)
         if decision.step_groups and not _is_valid_followup_step_groups(runtime, decision.step_groups):
-            return WorkflowFollowupSelection(plan=None)
+            return None
         if not replan_groups or tracker.replan_cycles >= _max_replan_cycles(runtime, workflow_run.workflow_id):
-            return WorkflowFollowupSelection(plan=None)
+            return None
         tracker.replan_cycles += 1
-        return WorkflowFollowupSelection(
-            plan=WorkflowFollowupPlan(
+        return WorkflowFollowupPlan(
+            cycle_kind="replan",
+            step_groups=replan_groups,
+            event_kind="workflow_auto_replan_started",
+            event_summary=decision.summary or tracker.review_replan_summary or f"Escalating {workflow_run.workflow_id} to replanning",
+            payload=_render_followup_payload(
+                runtime=runtime,
+                workflow_id=workflow_run.workflow_id,
+                goal=goal,
+                tracker=tracker,
+                run_view=run_view,
                 cycle_kind="replan",
-                step_groups=replan_groups,
-                event_kind="workflow_auto_replan_started",
-                event_summary=decision.summary or tracker.review_replan_summary or f"Escalating {workflow_run.workflow_id} to replanning",
-                payload=_render_followup_payload(
-                    runtime=runtime,
-                    workflow_id=workflow_run.workflow_id,
-                    goal=goal,
-                    tracker=tracker,
-                    run_view=run_view,
-                    cycle_kind="replan",
-                    custom_request=decision.request,
-                ),
-                tool_mode=decision.tool_mode,
+                custom_request=decision.request,
             ),
+            tool_mode=decision.tool_mode,
         )
 
-    return WorkflowFollowupSelection(plan=None)
+    return None
 
 
 def _render_followup_payload(

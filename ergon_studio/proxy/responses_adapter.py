@@ -89,6 +89,7 @@ def encode_responses_stream_events(
     reasoning_output_index: int = 0,
     message_output_index: int = 0,
     tool_output_index: int = 0,
+    tool_item_id: str | None = None,
     reasoning_text: str = "",
     message_text: str = "",
     include_output_done: bool = True,
@@ -120,6 +121,7 @@ def encode_responses_stream_events(
             }
         ]
     if isinstance(event, ProxyToolCallEvent):
+        item_id = tool_item_id or f"fc_{uuid4().hex}"
         return [
             {
                 "type": "response.output_item.added",
@@ -127,7 +129,7 @@ def encode_responses_stream_events(
                 "response_id": response_id,
                 "output_index": tool_output_index,
                 "item": {
-                    "id": f"fc_{uuid4().hex}",
+                    "id": item_id,
                     "type": "function_call",
                     "call_id": event.call.id,
                     "name": event.call.name,
@@ -142,7 +144,7 @@ def encode_responses_stream_events(
                 "response_id": response_id,
                 "output_index": tool_output_index,
                 "item": {
-                    "id": f"fc_{uuid4().hex}",
+                    "id": item_id,
                     "type": "function_call",
                     "call_id": event.call.id,
                     "name": event.call.name,

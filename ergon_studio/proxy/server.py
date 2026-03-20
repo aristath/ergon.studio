@@ -184,6 +184,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         reasoning_text = ""
         message_text = ""
         output_items: list[ProxyOutputItemRef] = []
+        tool_item_ids: dict[str, str] = {}
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
@@ -218,6 +219,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                     output_items,
                     ProxyOutputItemRef(kind="tool_call", call_id=event.call.id),
                 )
+                tool_item_ids.setdefault(event.call.id, f"fc_{uuid4().hex}")
             for payload in encode_responses_stream_events(
                 event=event,
                 response_id=response_id,
@@ -229,6 +231,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 reasoning_output_index=reasoning_output_index,
                 message_output_index=message_output_index,
                 tool_output_index=tool_output_index,
+                tool_item_id=tool_item_ids.get(event.call.id) if isinstance(event, ProxyToolCallEvent) else None,
                 reasoning_text=reasoning_text,
                 message_text=message_text,
                 include_output_done=content_emitted,

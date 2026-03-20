@@ -227,8 +227,15 @@ class ProxyServerTests(unittest.TestCase):
 
         reasoning = next(item for item in payloads if item["type"] == "response.reasoning_text.delta")
         tool = next(item for item in payloads if item["type"] == "response.output_item.added")
+        tool_done = next(
+            item
+            for item in payloads
+            if item["type"] == "response.output_item.done" and item["item"]["type"] == "function_call"
+        )
         self.assertEqual(reasoning["output_index"], 0)
         self.assertEqual(tool["output_index"], 1)
+        self.assertEqual(tool_done["output_index"], 1)
+        self.assertEqual(tool["item"]["id"], tool_done["item"]["id"])
 
     def test_chat_completions_returns_tool_calls(self) -> None:
         handle = start_proxy_server_in_thread(

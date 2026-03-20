@@ -995,7 +995,9 @@ class ErgonStudioApp(App[None]):
                 permission_mode=self._permission_mode,
                 turn_status=self._turn_status_text(),
             )
-            self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
+            status_bar = self.query_one("#agent-status-bar", AgentStatusBar)
+            status_bar.refresh_from_runtime()
+            status_bar.set_agent_state("orchestrator", self._orchestrator_status_bar_state())
         except (NoMatches, ScreenStackError):
             return
 
@@ -1131,6 +1133,19 @@ class ErgonStudioApp(App[None]):
         if self._queued_turns:
             label = f"{label} (+{len(self._queued_turns)} queued)"
         return label
+
+    def _orchestrator_status_bar_state(self) -> str:
+        summary = self.runtime.agent_status_summary("orchestrator")
+        active = self._active_turn_task is not None and not self._active_turn_task.done()
+        if self._turn_backgrounded and active:
+            return "waiting"
+        if active:
+            return "working"
+        if "not configured" in summary or "error" in summary:
+            return "error"
+        if "ready" in summary:
+            return "ready"
+        return "idle"
 
     def _start_live_subscription(self) -> None:
         self._stop_live_subscription()

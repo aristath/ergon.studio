@@ -432,6 +432,8 @@ class TestMessages(IsolatedAsyncioTestCase):
                 self.assertIn("Queued message for the orchestrator", _timeline_text(app))
                 info = app.query_one("#info-bar", InfoBar)
                 self.assertIn("orchestrator: working (+1 queued)", str(info.content))
+                status_bar = app.query_one("#agent-status-bar", AgentStatusBar)
+                self.assertEqual(status_bar._agent_states["orchestrator"], "working")
                 first_release.set()
                 second_release.set()
                 for _ in range(20):
@@ -494,6 +496,8 @@ class TestMessages(IsolatedAsyncioTestCase):
                 self.assertIn("Operation continues in background", _timeline_text(app))
                 info = app.query_one("#info-bar", InfoBar)
                 self.assertIn("orchestrator: backgrounded", str(info.content))
+                status_bar = app.query_one("#agent-status-bar", AgentStatusBar)
+                self.assertEqual(status_bar._agent_states["orchestrator"], "waiting")
                 release.set()
                 await task
                 await pilot.pause()

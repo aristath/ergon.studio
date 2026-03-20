@@ -42,6 +42,7 @@ class _ExecutionTracker:
     blocked_step_index: int | None = None
     blocked_thread_id: str | None = None
     blocked_summary: str | None = None
+    blocked_reason: str | None = None
     failed: bool = False
     last_thread_id: str | None = None
     review_summary: str | None = None
@@ -165,6 +166,7 @@ class _ThreadExecutor(Executor):
             self.tracker.blocked_summary = (
                 f"{self.thread.assigned_agent_id or self.thread.id} did not produce a reply."
             )
+            self.tracker.blocked_reason = "no_reply"
             self.tracker.last_thread_id = self.thread.id
             if task_id is not None:
                 self.runtime.update_task_state(
@@ -229,6 +231,7 @@ class _ThreadExecutor(Executor):
             self.tracker.blocked_summary = (
                 f"{self.thread.assigned_agent_id or self.thread.id} did not answer the retry request for tool-backed evidence."
             )
+            self.tracker.blocked_reason = "retry_no_reply"
             self.tracker.last_thread_id = self.thread.id
             raise RuntimeError(f"workflow step blocked after retry: {self.thread.assigned_agent_id or self.thread.id}")
 
@@ -247,6 +250,7 @@ class _ThreadExecutor(Executor):
             f"{self.thread.assigned_agent_id or self.thread.id} replied without the required tool evidence "
             f"({', '.join(required_tools)})."
         )
+        self.tracker.blocked_reason = "missing_tool_evidence"
         self.tracker.last_thread_id = self.thread.id
         if self.thread.parent_task_id is not None:
             self.runtime.update_task_state(
@@ -682,6 +686,7 @@ async def execute_defined_workflow(
         tracker.blocked_step_index = None
         tracker.blocked_thread_id = None
         tracker.blocked_summary = None
+        tracker.blocked_reason = None
         refreshed_view = runtime.describe_workflow_run(active_workflow_run.id)
         if refreshed_view is None:
             tracker.failed = True
@@ -927,6 +932,7 @@ async def _execute_magentic_workflow(
         tracker.blocked_step_index = 0
         tracker.blocked_thread_id = workroom_thread.id
         tracker.blocked_summary = "The dynamic workroom requested external information before it could continue."
+        tracker.blocked_reason = "request_info"
         tracker.last_thread_id = workroom_thread.id
         return _finalize_workflow_run(
             runtime=runtime,
@@ -1078,6 +1084,7 @@ async def _execute_handoff_workflow(
         tracker.blocked_summary = (
             "The handoff workroom requested more information before it could continue."
         )
+        tracker.blocked_reason = "request_info"
         tracker.last_thread_id = workroom_thread.id
         runtime.append_event(
             kind="workflow_info_requested",
@@ -1978,6 +1985,38 @@ def _next_followup_cycle(
     tracker: _ExecutionTracker,
     run_view: WorkflowRunView | None,
 ) -> WorkflowFollowupPlan | None:
+    if tracker.blocked_reason == "request_info":
+        return None
+
+    if tracker.blocked_reason == "missing_tool_evidence":
+        blocked_agent = _blocked_agent_id(run_view=run_view, tracker=tracker)
+        if (
+            blocked_agent is not None
+            and blocked_agent in runtime.registry.agent_definitions
+            and tracker.clarification_cycles < _max_clarification_cycles(runtime, workflow_id)
+        ):
+            tracker.clarification_cycles += 1
+            return WorkflowFollowupPlan(
+                cycle_kind="clarify",
+                step_groups=((blocked_agent,),),
+                event_kind="workflow_clarification_requested",
+                event_summary=f"Requesting evidence clarification from {blocked_agent}",
+                payload=_render_followup_payload(
+                    runtime=runtime,
+                    workflow_id=workflow_id,
+                    goal=goal,
+                    tracker=tracker,
+                    run_view=run_view,
+                    cycle_kind="clarify",
+                    custom_request=(
+                        "Explain whether the current workspace already satisfies the goal and cite the concrete "
+                        "files, artifacts, or command results that prove it. If no further tool use is needed, "
+                        "state why plainly and directly."
+                    ),
+                ),
+                tool_mode="none",
+            )
+
     if tracker.review_requires_replan:
         replan_groups = _replan_step_groups(runtime, workflow_id)
         if replan_groups and tracker.replan_cycles < _max_replan_cycles(runtime, workflow_id):
@@ -2570,6 +2609,7 @@ def _workflow_followup_decision_prompt(
                 "",
                 "Blocked step:",
                 _blocked_agent_label(run_view=run_view, tracker=tracker),
+                f"Blocked reason: {tracker.blocked_reason or '(unknown)'}",
                 "",
                 "Blocked summary:",
                 tracker.blocked_summary or "(no blocked summary)",
@@ -2619,12 +2659,23 @@ def _blocked_agent_label(
     run_view: WorkflowRunView | None,
     tracker: _ExecutionTracker,
 ) -> str:
+    blocked_agent = _blocked_agent_id(run_view=run_view, tracker=tracker)
+    if blocked_agent is not None:
+        return blocked_agent
+    return tracker.blocked_thread_id or "(unknown)"
+
+
+def _blocked_agent_id(
+    *,
+    run_view: WorkflowRunView | None,
+    tracker: _ExecutionTracker,
+) -> str | None:
     if run_view is not None and tracker.blocked_thread_id is not None:
         for step in run_view.steps:
             for thread in step.threads:
                 if thread.id == tracker.blocked_thread_id:
-                    return thread.assigned_agent_id or thread.summary or thread.id
-    return tracker.blocked_thread_id or "(unknown)"
+                    return thread.assigned_agent_id
+    return None
 
 
 def _parse_review_verdict(raw: str) -> WorkflowReviewVerdict:

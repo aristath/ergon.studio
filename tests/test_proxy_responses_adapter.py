@@ -204,7 +204,3 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(reasoning[0]["output_index"], 0)
         self.assertEqual(tool[0]["output_index"], 1)
         self.assertEqual(content[0]["output_index"], 2)
-
-
-if __name__ == "__main__":
-    unittest.main()

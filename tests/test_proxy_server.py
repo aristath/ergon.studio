@@ -941,7 +941,3 @@ def _response_object(text: str, *, tool_calls: list[dict[str, str]]):
 
 async def _immediate_response(text: str, *, tool_calls: list[dict[str, str]]):
     return _response_object(text, tool_calls=tool_calls)
-
-
-if __name__ == "__main__":
-    unittest.main()

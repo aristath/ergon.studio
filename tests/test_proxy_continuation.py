@@ -155,7 +155,3 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(original.id, tool_call.id)
         self.assertEqual(original.name, "read_file")
         self.assertEqual(original.arguments_json, "{\"path\":\"main.py\"}")
-
-
-if __name__ == "__main__":
-    unittest.main()

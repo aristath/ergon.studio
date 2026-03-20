@@ -50,7 +50,3 @@ class ProxyCliTests(unittest.TestCase):
     def test_proxy_cli_requires_definitions_dir(self) -> None:
         with self.assertRaisesRegex(ValueError, "missing definitions directory"):
             main(["--upstream-base-url", "http://localhost:8080/v1"])
-
-
-if __name__ == "__main__":
-    unittest.main()

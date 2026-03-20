@@ -803,7 +803,3 @@ def _host_continuation_tool_call(*, state: ContinuationState, call_id: str, name
         ProxyToolCall(id=call_id, name=name, arguments_json="{}"),
         state=state,
     )
-
-
-if __name__ == "__main__":
-    unittest.main()

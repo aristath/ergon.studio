@@ -54,7 +54,3 @@ class ProxyToolPassthroughTests(unittest.TestCase):
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(tool_calls[0].name, "read_file")
         self.assertEqual(tool_calls[0].arguments_json, "{\"path\":\"main.py\"}")
-
-
-if __name__ == "__main__":
-    unittest.main()

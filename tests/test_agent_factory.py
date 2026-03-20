@@ -95,7 +95,3 @@ def _registry_with_agent(home_dir: Path, *, metadata_extra: dict[str, object] | 
         root_dir,
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
     )
-
-
-if __name__ == "__main__":
-    unittest.main()

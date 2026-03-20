@@ -71,7 +71,3 @@ class ProxyModelsTests(unittest.TestCase):
             ).call.name,
             "read_file",
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

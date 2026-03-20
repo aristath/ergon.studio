@@ -112,7 +112,3 @@ class ProxyChatAdapterTests(unittest.TestCase):
         message = payload["choices"][0]["message"]
         self.assertEqual(message["reasoning_content"], "Orchestrator: planning.")
         self.assertEqual(message["reasoning"], "Orchestrator: planning.")
-
-
-if __name__ == "__main__":
-    unittest.main()

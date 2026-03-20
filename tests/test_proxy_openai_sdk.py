@@ -264,7 +264,3 @@ def _client(port: int) -> OpenAI:
         api_key="test",
         base_url=f"http://127.0.0.1:{port}/v1",
     )
-
-
-if __name__ == "__main__":
-    unittest.main()

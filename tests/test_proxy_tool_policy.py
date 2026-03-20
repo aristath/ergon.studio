@@ -64,7 +64,3 @@ class ProxyToolPolicyTests(unittest.TestCase):
 
         self.assertEqual(tools, ())
         self.assertEqual(options, {"tool_choice": "none"})
-
-
-if __name__ == "__main__":
-    unittest.main()

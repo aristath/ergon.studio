@@ -132,7 +132,3 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         )
 
         self.assertEqual(request.tool_choice, {"type": "function", "function": {"name": "read_file"}})
-
-
-if __name__ == "__main__":
-    unittest.main()

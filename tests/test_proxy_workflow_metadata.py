@@ -43,7 +43,3 @@ class ProxyWorkflowMetadataTests(unittest.TestCase):
         self.assertEqual(workflow_start_agent_for_definition(definition), "architect")
         self.assertEqual(workflow_finalizers_for_definition(definition), ("reviewer",))
         self.assertEqual(workflow_handoffs_for_definition(definition), {"architect": ("reviewer", "brainstormer")})
-
-
-if __name__ == "__main__":
-    unittest.main()

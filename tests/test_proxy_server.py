@@ -10,7 +10,7 @@ from agent_framework import ResponseStream
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, encode_continuation_tool_call
 from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 from ergon_studio.registry import RuntimeRegistry
 
@@ -311,7 +311,10 @@ class ProxyServerTests(unittest.TestCase):
                         arguments_json="{\"path\":\"main.py\"}",
                     ),
                 ),
-                output_order=("content", "tool_calls"),
+                output_items=(
+                    ProxyOutputItemRef(kind="content"),
+                    ProxyOutputItemRef(kind="tool_call", call_id="call_1"),
+                ),
             ),
         )
         self.addCleanup(handle.close)
@@ -674,10 +677,10 @@ class ProxyServerTests(unittest.TestCase):
 
 
 class _FakeCore:
-    def __init__(self, events, *, tool_calls=(), output_order=()):
+    def __init__(self, events, *, tool_calls=(), output_items=()):
         self._events = list(events)
         self._tool_calls = tuple(tool_calls)
-        self._output_order = tuple(output_order)
+        self._output_items = tuple(output_items)
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)
@@ -699,7 +702,7 @@ class _FakeCore:
                 reasoning="",
                 mode="act",
                 tool_calls=self._tool_calls,
-                output_order=self._output_order,
+                output_items=self._output_items,
             ),
         )
 

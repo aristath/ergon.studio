@@ -6,6 +6,7 @@ from typing import Any
 
 _VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 _VALID_FINISH_REASONS = {"stop", "tool_calls", "length", "content_filter", "error"}
+_VALID_OUTPUT_ITEM_KINDS = {"reasoning", "content", "tool_call"}
 
 
 @dataclass(frozen=True)
@@ -142,18 +143,33 @@ class ProxyFinishEvent:
 
 
 @dataclass(frozen=True)
+class ProxyOutputItemRef:
+    kind: str
+    call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in _VALID_OUTPUT_ITEM_KINDS:
+            raise ValueError(f"unsupported output item kind: {self.kind}")
+        if self.kind == "tool_call":
+            if not self.call_id:
+                raise ValueError("tool_call output items require a call_id")
+        elif self.call_id is not None:
+            raise ValueError("only tool_call output items may include a call_id")
+
+
+@dataclass(frozen=True)
 class ProxyTurnResult:
     finish_reason: str
     content: str
     reasoning: str
     mode: str
     tool_calls: tuple[ProxyToolCall, ...] = ()
-    output_order: tuple[str, ...] = ()
+    output_items: tuple[ProxyOutputItemRef, ...] = ()
 
     def __post_init__(self) -> None:
         if self.finish_reason not in _VALID_FINISH_REASONS:
             raise ValueError(f"unsupported finish reason: {self.finish_reason}")
         if not isinstance(self.tool_calls, tuple):
             raise TypeError("tool_calls must be a tuple")
-        if not isinstance(self.output_order, tuple):
-            raise TypeError("output_order must be a tuple")
+        if not isinstance(self.output_items, tuple):
+            raise TypeError("output_items must be a tuple")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent
 
 
 def build_responses_response(
@@ -14,12 +14,14 @@ def build_responses_response(
     content: str,
     reasoning: str = "",
     tool_calls: tuple[Any, ...] = (),
-    output_order: tuple[str, ...] = (),
+    output_items: tuple[ProxyOutputItemRef, ...] = (),
 ) -> dict[str, Any]:
     output: list[dict[str, Any]] = []
-    ordered_kinds = _normalize_output_order(output_order, reasoning=reasoning, content=content, tool_calls=tool_calls)
-    for kind in ordered_kinds:
-        if kind == "reasoning":
+    ordered_items = _normalize_output_items(output_items, reasoning=reasoning, content=content, tool_calls=tool_calls)
+    tool_calls_by_id = {tool_call.id: tool_call for tool_call in tool_calls}
+    tool_calls_emitted: set[str] = set()
+    for item in ordered_items:
+        if item.kind == "reasoning":
             output.append(
                 {
                     "id": f"rs_{uuid4().hex}",
@@ -33,19 +35,22 @@ def build_responses_response(
                     "content": [],
                 }
             )
-        elif kind == "tool_calls":
-            for tool_call in tool_calls:
-                output.append(
-                    {
-                        "id": f"fc_{uuid4().hex}",
-                        "type": "function_call",
-                        "call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "arguments": tool_call.arguments_json,
-                        "status": "completed",
-                    }
-                )
-        elif kind == "content":
+        elif item.kind == "tool_call":
+            tool_call = tool_calls_by_id.get(item.call_id or "")
+            if tool_call is None or tool_call.id in tool_calls_emitted:
+                continue
+            output.append(
+                {
+                    "id": f"fc_{uuid4().hex}",
+                    "type": "function_call",
+                    "call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments_json,
+                    "status": "completed",
+                }
+            )
+            tool_calls_emitted.add(tool_call.id)
+        elif item.kind == "content":
             output.append(
                 {
                     "id": f"msg_{uuid4().hex}",
@@ -83,7 +88,7 @@ def encode_responses_stream_events(
     message_item_id: str,
     reasoning_output_index: int = 0,
     message_output_index: int = 0,
-    tool_output_offset: int = 0,
+    tool_output_index: int = 0,
     include_output_done: bool = True,
 ) -> list[dict[str, Any]]:
     if isinstance(event, ProxyReasoningDeltaEvent):
@@ -118,7 +123,7 @@ def encode_responses_stream_events(
                 "type": "response.output_item.added",
                 "event_id": f"event_{uuid4().hex}",
                 "response_id": response_id,
-                "output_index": tool_output_offset + event.index,
+                "output_index": tool_output_index,
                 "item": {
                     "id": f"fc_{uuid4().hex}",
                     "type": "function_call",
@@ -170,22 +175,31 @@ def encode_responses_stream_sse(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode("utf-8")
 
 
-def _normalize_output_order(output_order: tuple[str, ...], *, reasoning: str, content: str, tool_calls: tuple[Any, ...]) -> tuple[str, ...]:
-    ordered: list[str] = []
-    for kind in output_order:
-        if kind not in {"reasoning", "content", "tool_calls"} or kind in ordered:
+def _normalize_output_items(
+    output_items: tuple[ProxyOutputItemRef, ...],
+    *,
+    reasoning: str,
+    content: str,
+    tool_calls: tuple[Any, ...],
+) -> tuple[ProxyOutputItemRef, ...]:
+    ordered: list[ProxyOutputItemRef] = []
+    for item in output_items:
+        if item in ordered:
             continue
-        if kind == "reasoning" and not reasoning:
+        if item.kind == "reasoning" and not reasoning:
             continue
-        if kind == "content" and not (content or not tool_calls):
+        if item.kind == "content" and not (content or not tool_calls):
             continue
-        if kind == "tool_calls" and not tool_calls:
+        if item.kind == "tool_call" and not any(tool_call.id == item.call_id for tool_call in tool_calls):
             continue
-        ordered.append(kind)
-    if reasoning and "reasoning" not in ordered:
-        ordered.append("reasoning")
-    if tool_calls and "tool_calls" not in ordered:
-        ordered.append("tool_calls")
-    if (content or not tool_calls) and "content" not in ordered:
-        ordered.append("content")
+        ordered.append(item)
+    if reasoning and ProxyOutputItemRef(kind="reasoning") not in ordered:
+        ordered.append(ProxyOutputItemRef(kind="reasoning"))
+    for tool_call in tool_calls:
+        ref = ProxyOutputItemRef(kind="tool_call", call_id=tool_call.id)
+        if ref not in ordered:
+            ordered.append(ref)
+    content_ref = ProxyOutputItemRef(kind="content")
+    if (content or not tool_calls) and content_ref not in ordered:
+        ordered.append(content_ref)
     return tuple(ordered)

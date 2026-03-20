@@ -18,7 +18,7 @@ from ergon_studio.proxy.continuation import (
     latest_pending_continuation,
     original_tool_call_id,
 )
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.tool_passthrough import build_declaration_tools, extract_tool_calls
@@ -59,7 +59,7 @@ class ProxyOrchestrationCore:
             "mode": "act",
             "finish_reason": "stop",
             "tool_calls": (),
-            "output_order": (),
+            "output_items": (),
         }
 
         async def _events():
@@ -98,7 +98,7 @@ class ProxyOrchestrationCore:
                 reasoning=state["reasoning"],
                 mode=state["mode"],
                 tool_calls=state["tool_calls"],
-                output_order=state["output_order"],
+                output_items=state["output_items"],
             ),
         )
 
@@ -169,7 +169,7 @@ class ProxyOrchestrationCore:
     async def _execute_direct(self, *, request, created_at: int, state: dict[str, Any], pending: PendingContinuation | None = None):
         notice = "Orchestrator: handling this turn directly.\n"
         state["reasoning"] += notice
-        _record_output_kind(state, "reasoning")
+        _record_output_item(state, "reasoning")
         yield ProxyReasoningDeltaEvent(notice)
         prompt = _direct_reply_prompt(request)
         response_holder: dict[str, Any] = {}
@@ -184,7 +184,7 @@ class ProxyOrchestrationCore:
             final_response_sink=lambda value: _set_response_holder(response_holder, value),
         ):
             state["content"] += delta
-            _record_output_kind(state, "content")
+            _record_output_item(state, "content")
             yield ProxyContentDeltaEvent(delta)
         response = response_holder.get("response")
         if response is not None:
@@ -209,7 +209,7 @@ class ProxyOrchestrationCore:
         agent_id = plan.agent_id or "coder"
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
         state["reasoning"] += intro
-        _record_output_kind(state, "reasoning")
+        _record_output_item(state, "reasoning")
         yield ProxyReasoningDeltaEvent(intro)
         specialist_prompt = _specialist_prompt(
             specialist_id=agent_id,
@@ -234,7 +234,7 @@ class ProxyOrchestrationCore:
             reasoning_delta = f"{agent_id}: {delta}" if first else delta
             first = False
             state["reasoning"] += reasoning_delta
-            _record_output_kind(state, "reasoning")
+            _record_output_item(state, "reasoning")
             yield ProxyReasoningDeltaEvent(reasoning_delta)
         response = response_holder.get("response")
         if response is not None:
@@ -266,7 +266,7 @@ class ProxyOrchestrationCore:
             final_text = specialist_text.strip()
         state["content"] = final_text
         if final_text:
-            _record_output_kind(state, "content")
+            _record_output_item(state, "content")
             yield ProxyContentDeltaEvent(final_text)
 
     async def _execute_workflow(self, *, request, plan: ProxyTurnPlan, created_at: int, state: dict[str, Any]):
@@ -279,7 +279,7 @@ class ProxyOrchestrationCore:
             return
         intro = f"Orchestrator: running workflow {definition.id}.\n"
         state["reasoning"] += intro
-        _record_output_kind(state, "reasoning")
+        _record_output_item(state, "reasoning")
         yield ProxyReasoningDeltaEvent(intro)
 
         goal = plan.goal or request.latest_user_text() or ""
@@ -340,7 +340,7 @@ class ProxyOrchestrationCore:
             return
         intro = f"Orchestrator: continuing workflow {definition.id} with {continuation.agent_id}.\n"
         state["reasoning"] += intro
-        _record_output_kind(state, "reasoning")
+        _record_output_item(state, "reasoning")
         yield ProxyReasoningDeltaEvent(intro)
 
         goal = continuation.goal or request.latest_user_text() or ""
@@ -436,7 +436,7 @@ class ProxyOrchestrationCore:
                     reasoning_delta = f"{agent_id}: {delta}" if first else delta
                     first = False
                     state["reasoning"] += reasoning_delta
-                    _record_output_kind(state, "reasoning")
+                    _record_output_item(state, "reasoning")
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                 response = response_holder.get("response")
                 if response is not None:
@@ -516,7 +516,7 @@ class ProxyOrchestrationCore:
                 reasoning_delta = f"{agent_id}: {delta}" if first else delta
                 first = False
                 state["reasoning"] += reasoning_delta
-                _record_output_kind(state, "reasoning")
+                _record_output_item(state, "reasoning")
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -601,7 +601,7 @@ class ProxyOrchestrationCore:
                 reasoning_delta = f"{agent_id}: {delta}" if first else delta
                 first = False
                 state["reasoning"] += reasoning_delta
-                _record_output_kind(state, "reasoning")
+                _record_output_item(state, "reasoning")
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -679,7 +679,7 @@ class ProxyOrchestrationCore:
                 reasoning_delta = f"{current_agent}: {delta}" if first else delta
                 first = False
                 state["reasoning"] += reasoning_delta
-                _record_output_kind(state, "reasoning")
+                _record_output_item(state, "reasoning")
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -737,7 +737,7 @@ class ProxyOrchestrationCore:
             final_text = current_brief.strip()
         state["content"] = final_text
         if final_text:
-            _record_output_kind(state, "content")
+            _record_output_item(state, "content")
             yield ProxyContentDeltaEvent(final_text)
 
     async def _select_manager_agent(
@@ -919,7 +919,8 @@ class ProxyOrchestrationCore:
         )
         state["tool_calls"] = encoded_calls
         state["finish_reason"] = "tool_calls"
-        _record_output_kind(state, "tool_calls")
+        for call in encoded_calls:
+            _record_output_item(state, "tool_call", call_id=call.id)
         return [ProxyToolCallEvent(call=call, index=index) for index, call in enumerate(encoded_calls)]
 
 
@@ -931,13 +932,14 @@ def _merge_preamble(preamble: str, prompt: str) -> str:
     return preamble or prompt
 
 
-def _record_output_kind(state: dict[str, Any], kind: str) -> None:
-    current = state.get("output_order", ())
+def _record_output_item(state: dict[str, Any], kind: str, *, call_id: str | None = None) -> None:
+    current = state.get("output_items", ())
     if not isinstance(current, tuple):
         current = ()
-    if kind in current:
+    item = ProxyOutputItemRef(kind=kind, call_id=call_id)
+    if item in current:
         return
-    state["output_order"] = (*current, kind)
+    state["output_items"] = (*current, item)
 
 
 def _direct_reply_prompt(request) -> str:

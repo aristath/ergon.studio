@@ -16,7 +16,7 @@ from ergon_studio.proxy.chat_adapter import (
 )
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
 from ergon_studio.proxy.health import build_proxy_health_snapshot
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent
 from ergon_studio.proxy.responses_adapter import (
     build_responses_response,
     encode_responses_stream_events,
@@ -173,7 +173,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 content=result.content,
                 reasoning=result.reasoning,
                 tool_calls=result.tool_calls,
-                output_order=result.output_order,
+                output_items=result.output_items,
             ),
         )
 
@@ -181,8 +181,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
         content_emitted = False
-        reasoning_emitted = False
-        tool_calls_emitted = 0
+        output_items: list[ProxyOutputItemRef] = []
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
@@ -200,10 +199,20 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         sequence_number = 2
         stream = self.server.core.stream_turn(request, created_at=created_at)
         async for event in stream:
-            if isinstance(event, ProxyReasoningDeltaEvent):
-                reasoning_emitted = True
             if isinstance(event, ProxyContentDeltaEvent) and event.delta:
                 content_emitted = True
+            reasoning_output_index = _response_output_index(output_items, ProxyOutputItemRef(kind="reasoning"))
+            if isinstance(event, ProxyReasoningDeltaEvent):
+                reasoning_output_index = _ensure_response_output_item(output_items, ProxyOutputItemRef(kind="reasoning"))
+            message_output_index = _response_output_index(output_items, ProxyOutputItemRef(kind="content"))
+            if isinstance(event, ProxyContentDeltaEvent) or (isinstance(event, ProxyFinishEvent) and content_emitted):
+                message_output_index = _ensure_response_output_item(output_items, ProxyOutputItemRef(kind="content"))
+            tool_output_index = 0
+            if isinstance(event, ProxyToolCallEvent):
+                tool_output_index = _ensure_response_output_item(
+                    output_items,
+                    ProxyOutputItemRef(kind="tool_call", call_id=event.call.id),
+                )
             for payload in encode_responses_stream_events(
                 event=event,
                 response_id=response_id,
@@ -212,16 +221,14 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 sequence_number=sequence_number,
                 reasoning_item_id=reasoning_item_id,
                 message_item_id=message_item_id,
-                reasoning_output_index=0,
-                tool_output_offset=1 if reasoning_emitted else 0,
-                message_output_index=(1 if reasoning_emitted else 0) + tool_calls_emitted,
+                reasoning_output_index=reasoning_output_index,
+                message_output_index=message_output_index,
+                tool_output_index=tool_output_index,
                 include_output_done=content_emitted,
             ):
                 self.wfile.write(encode_responses_stream_sse(payload))
                 self.wfile.flush()
                 sequence_number += 1
-            if isinstance(event, ProxyToolCallEvent):
-                tool_calls_emitted += 1
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = self.headers.get("Content-Length")
@@ -296,3 +303,18 @@ def start_proxy_server_in_thread(*, host: str, port: int, core, model_id: str = 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return ProxyServerHandle(server, thread)
+
+
+def _ensure_response_output_item(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int:
+    existing = _response_output_index(output_items, item)
+    if existing is not None:
+        return existing
+    output_items.append(item)
+    return len(output_items) - 1
+
+
+def _response_output_index(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int | None:
+    try:
+        return output_items.index(item)
+    except ValueError:
+        return None

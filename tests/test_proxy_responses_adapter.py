@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.responses_adapter import build_responses_response, encode_responses_stream_events
 
 
@@ -86,7 +86,10 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
                     arguments_json="{\"path\":\"main.py\"}",
                 ),
             ),
-            output_order=("content", "tool_calls"),
+            output_items=(
+                ProxyOutputItemRef(kind="content"),
+                ProxyOutputItemRef(kind="tool_call", call_id="call_1"),
+            ),
         )
 
         self.assertEqual([item["type"] for item in payload["output"]], ["message", "function_call"])
@@ -153,7 +156,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
             sequence_number=2,
             reasoning_item_id="rs_1",
             message_item_id="msg_1",
-            tool_output_offset=1,
+            tool_output_index=1,
         )
         content = encode_responses_stream_events(
             event=ProxyContentDeltaEvent("Done."),

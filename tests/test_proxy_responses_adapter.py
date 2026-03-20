@@ -122,9 +122,13 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(payload[0]["item"]["type"], "function_call")
         self.assertEqual(payload[0]["output_index"], 0)
         self.assertEqual(payload[0]["item"]["id"], "fc_fixed")
-        self.assertEqual(payload[1]["type"], "response.output_item.done")
-        self.assertEqual(payload[1]["output_index"], 0)
-        self.assertEqual(payload[1]["item"]["id"], "fc_fixed")
+        self.assertEqual(payload[1]["type"], "response.function_call_arguments.delta")
+        self.assertEqual(payload[1]["item_id"], "fc_fixed")
+        self.assertEqual(payload[2]["type"], "response.function_call_arguments.done")
+        self.assertEqual(payload[2]["item_id"], "fc_fixed")
+        self.assertEqual(payload[3]["type"], "response.output_item.done")
+        self.assertEqual(payload[3]["output_index"], 0)
+        self.assertEqual(payload[3]["item"]["id"], "fc_fixed")
 
     def test_finish_event_can_skip_output_done_when_no_content_was_streamed(self) -> None:
         payload = encode_responses_stream_events(

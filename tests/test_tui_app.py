@@ -104,6 +104,36 @@ class TestAppRendering(IsolatedAsyncioTestCase):
         async with app.run_test():
             self.assertEqual(app.selected_workflow_id, "standard-build")
 
+    async def test_app_prefers_metadata_default_over_workflow_id_order(self):
+        _, runtime, _ = _make_env()
+        with (
+            patch.object(
+                type(runtime),
+                "list_workflow_summaries",
+                autospec=True,
+                return_value=[
+                    {
+                        "id": "aaa-first",
+                        "selection_hints": (),
+                        "delivery_candidate": False,
+                    },
+                    {
+                        "id": "zzz-staged",
+                        "selection_hints": ("staged_delivery",),
+                        "delivery_candidate": True,
+                    },
+                ],
+            ),
+            patch.object(
+                type(runtime),
+                "list_workflow_ids",
+                autospec=True,
+                return_value=["aaa-first", "zzz-staged"],
+            ),
+        ):
+            app = ErgonStudioApp(runtime)
+        self.assertEqual(app.selected_workflow_id, "zzz-staged")
+
     async def test_app_renders_status_bar(self):
         _, _, app = _make_env()
         async with app.run_test():

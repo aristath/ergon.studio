@@ -213,7 +213,7 @@ class ErgonStudioApp(App[None]):
         super().__init__()
         self.runtime = runtime
         self.open_session_picker_on_mount = open_session_picker_on_mount
-        self.selected_workflow_id = "standard-build"
+        self.selected_workflow_id = self._default_workflow_id()
         self.selected_workflow_run_id: str | None = None
         self._timeline_notices: list[NoticeItem] = []
         self._hidden_main_message_ids: set[str] = set()
@@ -227,6 +227,20 @@ class ErgonStudioApp(App[None]):
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
+
+    def _default_workflow_id(self) -> str | None:
+        summaries = self.runtime.list_workflow_summaries()
+        for summary in summaries:
+            hints = tuple(summary.get("selection_hints", ()))
+            if "staged_delivery" in hints:
+                return str(summary["id"])
+        for summary in summaries:
+            if bool(summary.get("delivery_candidate")):
+                return str(summary["id"])
+        workflow_ids = self.runtime.list_workflow_ids()
+        if workflow_ids:
+            return workflow_ids[0]
+        return None
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")

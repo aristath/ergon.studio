@@ -1656,7 +1656,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_runtime_rejects_non_delivery_workflow_for_implementation_turns(self) -> None:
-        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -1676,11 +1676,13 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     deliverable_expected=False,
                 )
 
-            async def classify(_runtime, *, body: str, created_at: int) -> bool:
-                return False
-
-            async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
-                return False
+            async def audit(_runtime, *, body: str, decision, created_at: int):
+                del body, decision, created_at
+                return DeliveryAuditDecision(
+                    deliverable_expected=True,
+                    reconsider=True,
+                    reason="Rejected a non-delivery workflow for an implementation turn",
+                )
 
             async def run_agent_turn(
                 _runtime,
@@ -1706,8 +1708,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
-                patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
+                patch.object(type(runtime), "_audit_orchestrator_delivery_turn", side_effect=audit, autospec=True),
                 patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
@@ -1956,7 +1957,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Design the architecture only", captured["goal"])
 
     async def test_runtime_keeps_full_delivery_goal_when_reconsidering_delivery_workflow(self) -> None:
-        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -1977,11 +1978,13 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     deliverable_expected=False,
                 )
 
-            async def classify(_runtime, *, body: str, created_at: int) -> bool:
-                return False
-
-            async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
-                return False
+            async def audit(_runtime, *, body: str, decision, created_at: int):
+                del body, decision, created_at
+                return DeliveryAuditDecision(
+                    deliverable_expected=True,
+                    reconsider=True,
+                    reason="Rejected a non-delivery workflow for an implementation turn",
+                )
 
             async def run_agent_turn(
                 _runtime,
@@ -2006,8 +2009,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
-                patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
+                patch.object(type(runtime), "_audit_orchestrator_delivery_turn", side_effect=audit, autospec=True),
                 patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
             ):
                 await runtime.send_user_message_to_orchestrator(

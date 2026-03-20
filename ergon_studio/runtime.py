@@ -68,6 +68,13 @@ class OrchestratorTurnDecision:
 
 
 @dataclass(frozen=True)
+class DeliveryAuditDecision:
+    deliverable_expected: bool
+    reconsider: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class DelegationReviewVerdict:
     accepted: bool
     summary: str
@@ -847,77 +854,58 @@ class RuntimeContext:
             created_at=created_at,
         )
         decision = await self._decide_orchestrator_turn(body=body, created_at=created_at + 1)
-        if not decision.deliverable_expected:
-            deliverable_expected = await self._classify_deliverable_intent(
-                body=body,
-                created_at=created_at + 1,
+        delivery_audit = await self._audit_orchestrator_delivery_turn(
+            body=body,
+            decision=decision,
+            created_at=created_at + 1,
+        )
+        if delivery_audit.deliverable_expected and not decision.deliverable_expected:
+            decision = OrchestratorTurnDecision(
+                mode=decision.mode,
+                reply=decision.reply,
+                workflow_id=decision.workflow_id,
+                agent_id=decision.agent_id,
+                title=decision.title,
+                request=decision.request,
+                goal=decision.goal,
+                deliverable_expected=True,
             )
-            if deliverable_expected:
-                decision = OrchestratorTurnDecision(
-                    mode=decision.mode,
-                    reply=decision.reply,
-                    workflow_id=decision.workflow_id,
-                    agent_id=decision.agent_id,
-                    title=decision.title,
-                    request=decision.request,
-                    goal=decision.goal,
-                    deliverable_expected=True,
-                )
-                self.append_event(
-                    kind="orchestrator_deliverable_detected",
-                    summary="Detected delivery intent for the current turn",
-                    created_at=created_at + 1,
-                    thread_id=self.main_thread_id,
-                )
+            self.append_event(
+                kind="orchestrator_deliverable_detected",
+                summary="Detected delivery intent for the current turn",
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
         delivery_context = self.recent_main_user_context(limit=4) or body
         resolved_goal = decision.goal or delivery_context
         resolved_request = decision.request or resolved_goal
         if decision.deliverable_expected and decision.mode in {"workflow", "delegate"}:
             resolved_goal = delivery_context
             resolved_request = delivery_context
-        delivery_reason = ""
-        reconsider_delivery = False
         if (
-            decision.mode == "workflow"
-            and decision.workflow_id is not None
-            and self._workflow_is_non_delivery(decision.workflow_id)
-            and not await self._allow_non_delivery_workflow(
-                body=body,
-                workflow_id=decision.workflow_id,
-                created_at=created_at + 1,
-            )
-        ):
-            delivery_reason = "Rejected a non-delivery workflow for an implementation turn"
-            self.append_event(
-                kind="orchestrator_non_delivery_rejected",
-                summary=delivery_reason,
-                created_at=created_at + 1,
-                thread_id=self.main_thread_id,
-            )
-            reconsider_delivery = True
-        elif (
-            decision.deliverable_expected
+            delivery_audit.reconsider
             and decision.mode == "workflow"
             and decision.workflow_id is not None
             and self._workflow_is_non_delivery(decision.workflow_id)
         ):
-            delivery_reason = "Escalated a non-delivery workflow back to the orchestrator for delivery work"
-            reconsider_delivery = True
-        if decision.deliverable_expected and decision.mode == "reply":
-            delivery_reason = "Escalated a reply-only turn back to the orchestrator for delivery work"
-            reconsider_delivery = True
-        if delivery_reason:
             self.append_event(
-                kind="orchestrator_delivery_reconsidered",
-                summary=delivery_reason,
+                kind="orchestrator_non_delivery_rejected",
+                summary="Planner selected a non-delivery workflow for a delivery-sensitive turn",
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
-        if reconsider_delivery:
+        if delivery_audit.reconsider and delivery_audit.reason:
+            self.append_event(
+                kind="orchestrator_delivery_reconsidered",
+                summary=delivery_audit.reason,
+                created_at=created_at + 1,
+                thread_id=self.main_thread_id,
+            )
+        if delivery_audit.reconsider:
             reconsidered = await self._reconsider_delivery_turn(
                 body=delivery_context,
                 created_at=created_at + 1,
-                reason=delivery_reason,
+                reason=delivery_audit.reason,
             )
             if reconsidered is not None:
                 decision = reconsidered
@@ -1621,26 +1609,49 @@ class RuntimeContext:
             deliverable_expected=_as_bool(parsed.get("deliverable_expected")),
         )
 
-    async def _classify_deliverable_intent(
+    async def _audit_orchestrator_delivery_turn(
         self,
         *,
         body: str,
+        decision: OrchestratorTurnDecision,
         created_at: int,
-    ) -> bool:
+    ) -> DeliveryAuditDecision:
         parsed = await self._run_orchestrator_json_agent(
-            agent_id="orchestrator-deliverable-classifier",
-            name="Orchestrator Deliverable Classifier",
-            description="Internal delivery intent classifier",
-            instructions=_deliverable_classifier_instructions(),
-            prompt=_deliverable_classifier_prompt(self, body),
+            agent_id="orchestrator-delivery-auditor",
+            name="Orchestrator Delivery Auditor",
+            description="Internal delivery alignment audit",
+            instructions=_delivery_audit_instructions(),
+            prompt=_delivery_audit_prompt(self, body, decision),
             created_at=created_at,
-            session_id=f"main-deliverable:{created_at}",
-            failure_event_kind="orchestrator_classifier_failed",
-            failure_summary_prefix="Deliverable classifier failed",
+            session_id=f"main-delivery-audit:{created_at}",
+            failure_event_kind="orchestrator_delivery_audit_failed",
+            failure_summary_prefix="Delivery audit failed",
         )
         if parsed is None:
-            return False
-        return _as_bool(parsed.get("deliverable_expected"))
+            reconsider = False
+            reason = ""
+            deliverable_expected = decision.deliverable_expected
+            if decision.deliverable_expected and decision.mode == "reply":
+                reconsider = True
+                reason = "Escalated a reply-only turn back to the orchestrator for delivery work"
+            elif (
+                decision.deliverable_expected
+                and decision.mode == "workflow"
+                and decision.workflow_id is not None
+                and self._workflow_is_non_delivery(decision.workflow_id)
+            ):
+                reconsider = True
+                reason = "Escalated a non-delivery workflow back to the orchestrator for delivery work"
+            return DeliveryAuditDecision(
+                deliverable_expected=deliverable_expected,
+                reconsider=reconsider,
+                reason=reason,
+            )
+        return DeliveryAuditDecision(
+            deliverable_expected=_as_bool(parsed.get("deliverable_expected")),
+            reconsider=_as_bool(parsed.get("reconsider")),
+            reason=_optional_text(parsed.get("reason")) or "",
+        )
 
     async def _reconsider_delivery_turn(
         self,
@@ -1682,28 +1693,6 @@ class RuntimeContext:
             goal=_optional_text(parsed.get("goal")) or body,
             deliverable_expected=True,
         )
-
-    async def _allow_non_delivery_workflow(
-        self,
-        *,
-        body: str,
-        workflow_id: str,
-        created_at: int,
-    ) -> bool:
-        parsed = await self._run_orchestrator_json_agent(
-            agent_id="orchestrator-non-delivery-guard",
-            name="Orchestrator Non-Delivery Guard",
-            description="Internal non-delivery workflow guard",
-            instructions=_non_delivery_workflow_guard_instructions(workflow_id),
-            prompt=_deliverable_classifier_prompt(self, body),
-            created_at=created_at,
-            session_id=f"main-non-delivery:{created_at}:{workflow_id}",
-            failure_event_kind="orchestrator_non_delivery_guard_failed",
-            failure_summary_prefix="Non-delivery guard failed",
-        )
-        if parsed is None:
-            return False
-        return _as_bool(parsed.get("allowed"))
 
     async def _run_orchestrator_json_agent(
         self,
@@ -3337,19 +3326,20 @@ def _orchestrator_turn_planner_prompt(runtime: RuntimeContext, body: str) -> str
     )
 
 
-def _deliverable_classifier_instructions() -> str:
+def _delivery_audit_instructions() -> str:
     return "\n".join(
         [
-            "You are a narrow internal classifier for the orchestrator.",
-            "Decide whether the user expects concrete delivery work to happen now in the repo.",
+            "You are a narrow internal delivery audit for the orchestrator.",
+            "Decide whether the current planner decision is aligned with what the user expects right now.",
             "Output JSON only.",
             "",
-            "Return:",
-            '{"deliverable_expected": true}',
+            "Required JSON shape:",
+            '{"deliverable_expected": false, "reconsider": false, "reason": ""}',
             "",
             "Set `deliverable_expected` to true when the user expects implementation, bug fixing, verification, repo changes, or completed execution now.",
             "Set `deliverable_expected` to true when the recent conversation already settled the direction and the latest user turn is approval to proceed.",
-            "Set it to false for discussion-only, brainstorming-only, or planning-only turns.",
+            "Set `reconsider` to true when the planner decision should be escalated for concrete delivery work instead of being accepted as-is.",
+            "Set `reconsider` to false when the planner decision is acceptable for this turn.",
             "Use the whole recent conversation, not just the latest short acknowledgment.",
         ]
     )
@@ -3398,26 +3388,11 @@ def _delivery_reconsideration_instructions(runtime: RuntimeContext, reason: str)
     )
 
 
-def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
-    return "\n".join(
-        [
-            "You are a narrow internal guard for the orchestrator.",
-            f"The planner selected the non-delivery workflow `{workflow_id}`.",
-            "Decide whether it is acceptable to stop at planning, research, or debate for this turn.",
-            "Output JSON only.",
-            "",
-            "Return:",
-            '{"allowed": false}',
-            "",
-            "Set `allowed` to true only when the user explicitly wants discussion-only, planning-only, research-only, or design-only work for this turn.",
-            "Set `allowed` to false when the user expects implementation, repo changes, runnable code, or completed delivery in the same turn.",
-            "If the user asked to discuss or plan first and then implement in the same turn, set `allowed` to false.",
-            "Use the whole recent conversation, not just the latest line.",
-        ]
-    )
-
-
-def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
+def _delivery_audit_prompt(
+    runtime: RuntimeContext,
+    body: str,
+    decision: OrchestratorTurnDecision,
+) -> str:
     recent_messages = runtime.list_main_messages()[-8:]
     transcript_lines = []
     for message in recent_messages:
@@ -3425,6 +3400,9 @@ def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
         if not text:
             continue
         transcript_lines.append(f"{message.sender}: {text}")
+    workflow_note = "(none)"
+    if decision.mode == "workflow" and decision.workflow_id is not None:
+        workflow_note = decision.workflow_id
     return "\n".join(
         [
             "Main thread transcript:",
@@ -3432,6 +3410,13 @@ def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
             "",
             "Latest user request:",
             body,
+            "",
+            "Planner decision:",
+            f"- mode: {decision.mode}",
+            f"- workflow_id: {workflow_note}",
+            f"- agent_id: {decision.agent_id or '(none)'}",
+            f"- reply: {decision.reply or '(none)'}",
+            f"- deliverable_expected: {decision.deliverable_expected}",
         ]
     )
 

@@ -30,6 +30,18 @@ class RuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_parse_selected_workflow_step_groups_validates_groups(self) -> None:
+        from ergon_studio.runtime import _parse_selected_workflow_step_groups
+
+        self.assertEqual(
+            _parse_selected_workflow_step_groups(
+                workflow_id="standard-build",
+                raw='{"step_groups":[["coder"],["reviewer"]]}',
+                known_agents=("architect", "coder", "reviewer"),
+            ),
+            (("coder",), ("reviewer",)),
+        )
+
     def test_load_runtime_combines_paths_registry_and_tools(self) -> None:
         from ergon_studio.runtime import load_runtime
 

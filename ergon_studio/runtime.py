@@ -3651,7 +3651,7 @@ def _parse_selected_workflow_step_groups(
     parsed: list[tuple[str, ...]] = []
     allowed = set(known_agents)
     for raw_group in raw_step_groups:
-        group = _validate_workflow_group(workflow_id, raw_group)
+        group = validate_workflow_group(workflow_id, raw_group)
         cleaned: list[str] = []
         for agent_id in group:
             if agent_id not in allowed or agent_id == "orchestrator":

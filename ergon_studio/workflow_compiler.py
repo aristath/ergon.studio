@@ -20,14 +20,18 @@ def workflow_step_groups_for_definition(definition: DefinitionDocument) -> tuple
 
 def validate_workflow_group(workflow_id: str, group: object) -> tuple[str, ...]:
     if isinstance(group, str):
-        if not group:
+        stripped = group.strip()
+        if not stripped:
             raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
-        return (group,)
+        return (stripped,)
     if not isinstance(group, list) or not group:
         raise ValueError(f"workflow '{workflow_id}' step groups must be non-empty lists")
     validated: list[str] = []
     for item in group:
-        if not isinstance(item, str) or not item:
+        if not isinstance(item, str):
             raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
-        validated.append(item)
+        stripped = item.strip()
+        if not stripped:
+            raise ValueError(f"workflow '{workflow_id}' step entries must be non-empty strings")
+        validated.append(stripped)
     return tuple(validated)

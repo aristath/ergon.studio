@@ -468,7 +468,7 @@ Implementation is reviewed, verified, and accepted.
 id: best-of-n
 name: Best of N
 kind: workflow
-orchestration: concurrent
+orchestration: grouped
 selection_hints:
   - quality_sensitive
 step_groups:

@@ -28,7 +28,7 @@ class ContinuationState:
 @dataclass(frozen=True)
 class PendingContinuation:
     state: ContinuationState
-    assistant_message: ProxyInputMessage
+    assistant_message: ProxyInputMessage | None
     tool_results: tuple[ProxyInputMessage, ...]
 
 
@@ -130,17 +130,15 @@ def latest_pending_continuation(messages: tuple[ProxyInputMessage, ...]) -> Pend
     while index >= 0 and messages[index].role == "tool":
         tool_results_reversed.append(messages[index])
         index -= 1
-    if index < 0:
-        return None
-
-    assistant_message = messages[index]
-    if assistant_message.role != "assistant" or not assistant_message.tool_calls:
-        return None
-
     tool_results = tuple(reversed(tool_results_reversed))
-    assistant_call_ids = {tool_call.id for tool_call in assistant_message.tool_calls}
-    if any((message.tool_call_id or "") not in assistant_call_ids for message in tool_results):
-        return None
+    assistant_message: ProxyInputMessage | None = None
+    if index >= 0:
+        candidate = messages[index]
+        if candidate.role == "assistant" and candidate.tool_calls:
+            assistant_message = candidate
+            assistant_call_ids = {tool_call.id for tool_call in candidate.tool_calls}
+            if any((message.tool_call_id or "") not in assistant_call_ids for message in tool_results):
+                return None
 
     state: ContinuationState | None = None
     for message in tool_results:
@@ -162,6 +160,8 @@ def latest_pending_continuation(messages: tuple[ProxyInputMessage, ...]) -> Pend
 
 
 def continuation_tool_calls(pending: PendingContinuation) -> tuple[ProxyToolCall, ...]:
+    if pending.assistant_message is None:
+        return ()
     result_ids = {message.tool_call_id for message in pending.tool_results}
     return tuple(tool_call for tool_call in pending.assistant_message.tool_calls if tool_call.id in result_ids)
 

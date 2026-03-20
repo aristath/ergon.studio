@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 import time
 from typing import Any
 from uuid import uuid4
@@ -20,6 +21,15 @@ from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, 
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.tool_passthrough import build_declaration_tools, extract_tool_calls
+from ergon_studio.proxy.workflow_metadata import (
+    workflow_finalizers_for_definition,
+    workflow_handoffs_for_definition,
+    workflow_max_rounds_for_definition,
+    workflow_orchestration_for_definition,
+    workflow_participants_for_definition,
+    workflow_selection_sequence_for_definition,
+    workflow_start_agent_for_definition,
+)
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
 
@@ -264,11 +274,133 @@ class ProxyOrchestrationCore:
         yield ProxyReasoningDeltaEvent(intro)
 
         goal = plan.goal or request.latest_user_text() or ""
+        orchestration = workflow_orchestration_for_definition(definition)
+        if orchestration in {"sequential", "grouped", "concurrent"}:
+            async for event in self._execute_grouped_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+            ):
+                yield event
+            return
+        if orchestration == "group_chat":
+            async for event in self._execute_group_chat_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+            ):
+                yield event
+            return
+        if orchestration == "magentic":
+            async for event in self._execute_magentic_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+            ):
+                yield event
+            return
+        if orchestration == "handoff":
+            async for event in self._execute_handoff_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+            ):
+                yield event
+            return
+        raise ValueError(f"unsupported workflow orchestration: {orchestration}")
+
+    async def _execute_workflow_continuation(
+        self,
+        *,
+        request,
+        continuation: ContinuationState,
+        pending: PendingContinuation,
+        created_at: int,
+        state: dict[str, Any],
+    ):
+        definition = self.registry.workflow_definitions.get(continuation.workflow_id or "")
+        if definition is None:
+            state["finish_reason"] = "error"
+            error_text = f"Unknown workflow: {continuation.workflow_id or '(none)'}"
+            state["content"] = error_text
+            yield ProxyContentDeltaEvent(error_text)
+            return
+        intro = f"Orchestrator: continuing workflow {definition.id} with {continuation.agent_id}.\n"
+        state["reasoning"] += intro
+        yield ProxyReasoningDeltaEvent(intro)
+
+        goal = continuation.goal or request.latest_user_text() or ""
+        orchestration = workflow_orchestration_for_definition(definition)
+        if orchestration in {"sequential", "grouped", "concurrent"}:
+            async for event in self._execute_grouped_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+                continuation=continuation,
+                pending=pending,
+            ):
+                yield event
+            return
+        if orchestration == "group_chat":
+            async for event in self._execute_group_chat_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+                continuation=continuation,
+                pending=pending,
+            ):
+                yield event
+            return
+        if orchestration == "magentic":
+            async for event in self._execute_magentic_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+                continuation=continuation,
+                pending=pending,
+            ):
+                yield event
+            return
+        if orchestration == "handoff":
+            async for event in self._execute_handoff_workflow(
+                request=request,
+                definition=definition,
+                goal=goal,
+                state=state,
+                continuation=continuation,
+                pending=pending,
+            ):
+                yield event
+            return
+        raise ValueError(f"unsupported workflow orchestration: {orchestration}")
+
+    async def _execute_grouped_workflow(
+        self,
+        *,
+        request,
+        definition,
+        goal: str,
+        state: dict[str, Any],
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
+    ):
         step_groups = workflow_step_groups_for_definition(definition)
-        current_brief = goal
-        workflow_outputs: list[str] = []
-        for step_index, group in enumerate(step_groups):
-            for agent_index, agent_id in enumerate(group):
+        start_index = continuation.step_index if continuation and continuation.step_index is not None else 0
+        start_agent_index = continuation.agent_index if continuation and continuation.agent_index is not None else 0
+        current_brief = continuation.current_brief if continuation and continuation.current_brief is not None else goal
+        workflow_outputs: list[str] = list(continuation.workflow_outputs) if continuation is not None else []
+        for step_index in range(start_index, len(step_groups)):
+            group = step_groups[step_index]
+            group_start_index = start_agent_index if step_index == start_index else 0
+            for agent_index in range(group_start_index, len(group)):
+                agent_id = group[agent_index]
                 specialist_prompt = _workflow_step_prompt(
                     workflow_id=definition.id,
                     agent_id=agent_id,
@@ -287,6 +419,7 @@ class ProxyOrchestrationCore:
                     host_tools=request.tools,
                     tool_choice=request.tool_choice,
                     parallel_tool_calls=request.parallel_tool_calls,
+                    pending_continuation=pending if step_index == start_index and agent_index == group_start_index else None,
                     final_response_sink=lambda value: _set_response_holder(response_holder, value),
                 ):
                     agent_text += delta
@@ -316,109 +449,272 @@ class ProxyOrchestrationCore:
                         return
                 workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
                 current_brief = agent_text.strip() or current_brief
+        async for event in self._emit_workflow_summary(
+            definition=definition,
+            goal=goal,
+            current_brief=current_brief,
+            workflow_outputs=tuple(workflow_outputs),
+            state=state,
+        ):
+            yield event
 
-        final_text = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=_workflow_summary_prompt(
-                workflow_id=definition.id,
-                goal=goal,
-                outputs=tuple(workflow_outputs),
-            ),
-            preamble=_summary_instructions(),
-            session_id=f"proxy-workflow-summary-{uuid4().hex}",
-        )
-        if not final_text:
-            final_text = current_brief.strip()
-        state["content"] = final_text
-        if final_text:
-            yield ProxyContentDeltaEvent(final_text)
-
-    async def _execute_workflow_continuation(
+    async def _execute_group_chat_workflow(
         self,
         *,
         request,
-        continuation: ContinuationState,
-        pending: PendingContinuation,
-        created_at: int,
+        definition,
+        goal: str,
         state: dict[str, Any],
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
     ):
-        definition = self.registry.workflow_definitions.get(continuation.workflow_id or "")
-        if definition is None:
-            state["finish_reason"] = "error"
-            error_text = f"Unknown workflow: {continuation.workflow_id or '(none)'}"
-            state["content"] = error_text
-            yield ProxyContentDeltaEvent(error_text)
-            return
-        intro = f"Orchestrator: continuing workflow {definition.id} with {continuation.agent_id}.\n"
-        state["reasoning"] += intro
-        yield ProxyReasoningDeltaEvent(intro)
+        participants = workflow_participants_for_definition(definition)
+        sequence = workflow_selection_sequence_for_definition(definition)
+        max_rounds = workflow_max_rounds_for_definition(definition, default=max(len(sequence), len(participants), 1))
+        if not sequence:
+            sequence = tuple(participants[index % len(participants)] for index in range(max_rounds)) if participants else ()
+        else:
+            sequence = sequence[:max_rounds]
+        start_turn = continuation.step_index if continuation and continuation.step_index is not None else 0
+        current_brief = continuation.current_brief if continuation and continuation.current_brief is not None else goal
+        workflow_outputs: list[str] = list(continuation.workflow_outputs) if continuation is not None else []
+        for turn_index in range(start_turn, len(sequence)):
+            agent_id = sequence[turn_index]
+            prompt = _group_chat_turn_prompt(
+                workflow_id=definition.id,
+                agent_id=agent_id,
+                goal=goal,
+                transcript_summary=summarize_conversation(request.messages),
+                current_brief=current_brief,
+                prior_outputs=tuple(workflow_outputs),
+            )
+            agent_text = ""
+            first = True
+            response_holder: dict[str, Any] = {}
+            async for delta in self._stream_text_agent(
+                agent_id=agent_id,
+                prompt=prompt,
+                session_id=f"proxy-group-chat-{definition.id}-{agent_id}-{uuid4().hex}",
+                host_tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                pending_continuation=pending if turn_index == start_turn else None,
+                final_response_sink=lambda value: _set_response_holder(response_holder, value),
+            ):
+                agent_text += delta
+                reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                first = False
+                state["reasoning"] += reasoning_delta
+                yield ProxyReasoningDeltaEvent(reasoning_delta)
+            response = response_holder.get("response")
+            if response is not None:
+                emitted = self._emit_tool_calls(
+                    response=response,
+                    continuation=ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=turn_index,
+                        agent_id=agent_id,
+                        goal=goal,
+                        current_brief=agent_text.strip() or current_brief,
+                        workflow_outputs=tuple(workflow_outputs),
+                    ),
+                    state=state,
+                )
+                if emitted:
+                    for event in emitted:
+                        yield event
+                    return
+            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+            current_brief = agent_text.strip() or current_brief
+        async for event in self._emit_workflow_summary(
+            definition=definition,
+            goal=goal,
+            current_brief=current_brief,
+            workflow_outputs=tuple(workflow_outputs),
+            state=state,
+        ):
+            yield event
 
-        goal = continuation.goal or request.latest_user_text() or ""
-        step_groups = workflow_step_groups_for_definition(definition)
-        start_index = continuation.step_index or 0
-        start_agent_index = continuation.agent_index or 0
-        current_brief = continuation.current_brief or goal
-        workflow_outputs: list[str] = list(continuation.workflow_outputs)
-        for step_index in range(start_index, len(step_groups)):
-            group = step_groups[step_index]
-            group_start_index = start_agent_index if step_index == start_index else 0
-            agents = tuple(group[group_start_index:]) if group_start_index < len(group) else (continuation.agent_id,)
-            for group_offset, agent_id in enumerate(agents, start=group_start_index):
-                specialist_prompt = _workflow_step_prompt(
+    async def _execute_magentic_workflow(
+        self,
+        *,
+        request,
+        definition,
+        goal: str,
+        state: dict[str, Any],
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
+    ):
+        participants = workflow_participants_for_definition(definition)
+        max_rounds = workflow_max_rounds_for_definition(definition, default=max(len(participants), 1))
+        current_brief = continuation.current_brief if continuation and continuation.current_brief is not None else goal
+        workflow_outputs: list[str] = list(continuation.workflow_outputs) if continuation is not None else []
+        round_index = continuation.step_index if continuation and continuation.step_index is not None else 0
+        while round_index < max_rounds:
+            if continuation is not None and round_index == (continuation.step_index or 0):
+                agent_id = continuation.agent_id
+            else:
+                agent_id = await self._select_manager_agent(
                     workflow_id=definition.id,
-                    agent_id=agent_id,
                     goal=goal,
                     current_brief=current_brief,
-                    transcript_summary=summarize_conversation(request.messages),
+                    participants=participants,
                     prior_outputs=tuple(workflow_outputs),
                 )
-                agent_text = ""
-                first = True
-                response_holder: dict[str, Any] = {}
-                async for delta in self._stream_text_agent(
-                    agent_id=agent_id,
-                    prompt=specialist_prompt,
-                    session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
-                    host_tools=request.tools,
-                    tool_choice=request.tool_choice,
-                    parallel_tool_calls=request.parallel_tool_calls,
-                    pending_continuation=pending if step_index == start_index and group_offset == start_agent_index else None,
-                    final_response_sink=lambda value: _set_response_holder(response_holder, value),
-                ):
-                    agent_text += delta
-                    reasoning_delta = f"{agent_id}: {delta}" if first else delta
-                    first = False
-                    state["reasoning"] += reasoning_delta
-                    yield ProxyReasoningDeltaEvent(reasoning_delta)
-                response = response_holder.get("response")
-                if response is not None:
-                    emitted = self._emit_tool_calls(
-                        response=response,
-                        continuation=ContinuationState(
-                            mode="workflow",
-                            workflow_id=definition.id,
-                            step_index=step_index,
-                            agent_index=group_offset,
-                            agent_id=agent_id,
-                            goal=goal,
-                            current_brief=agent_text.strip() or current_brief,
-                            workflow_outputs=tuple(workflow_outputs),
-                        ),
-                        state=state,
-                    )
-                    if emitted:
-                        for event in emitted:
-                            yield event
-                        return
-                workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
-                current_brief = agent_text.strip() or current_brief
+            if agent_id is None:
+                break
+            prompt = _workflow_step_prompt(
+                workflow_id=definition.id,
+                agent_id=agent_id,
+                goal=goal,
+                current_brief=current_brief,
+                transcript_summary=summarize_conversation(request.messages),
+                prior_outputs=tuple(workflow_outputs),
+            )
+            agent_text = ""
+            first = True
+            response_holder: dict[str, Any] = {}
+            async for delta in self._stream_text_agent(
+                agent_id=agent_id,
+                prompt=prompt,
+                session_id=f"proxy-magentic-{definition.id}-{agent_id}-{uuid4().hex}",
+                host_tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                pending_continuation=pending if continuation is not None and round_index == (continuation.step_index or 0) else None,
+                final_response_sink=lambda value: _set_response_holder(response_holder, value),
+            ):
+                agent_text += delta
+                reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                first = False
+                state["reasoning"] += reasoning_delta
+                yield ProxyReasoningDeltaEvent(reasoning_delta)
+            response = response_holder.get("response")
+            if response is not None:
+                emitted = self._emit_tool_calls(
+                    response=response,
+                    continuation=ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=round_index,
+                        agent_id=agent_id,
+                        goal=goal,
+                        current_brief=agent_text.strip() or current_brief,
+                        workflow_outputs=tuple(workflow_outputs),
+                    ),
+                    state=state,
+                )
+                if emitted:
+                    for event in emitted:
+                        yield event
+                    return
+            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+            current_brief = agent_text.strip() or current_brief
+            round_index += 1
+        async for event in self._emit_workflow_summary(
+            definition=definition,
+            goal=goal,
+            current_brief=current_brief,
+            workflow_outputs=tuple(workflow_outputs),
+            state=state,
+        ):
+            yield event
 
+    async def _execute_handoff_workflow(
+        self,
+        *,
+        request,
+        definition,
+        goal: str,
+        state: dict[str, Any],
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
+    ):
+        participants = workflow_participants_for_definition(definition)
+        finalizers = workflow_finalizers_for_definition(definition)
+        handoffs = workflow_handoffs_for_definition(definition)
+        max_rounds = workflow_max_rounds_for_definition(definition, default=max(len(participants), 1))
+        current_brief = continuation.current_brief if continuation and continuation.current_brief is not None else goal
+        workflow_outputs: list[str] = list(continuation.workflow_outputs) if continuation is not None else []
+        round_index = continuation.step_index if continuation and continuation.step_index is not None else 0
+        current_agent = continuation.agent_id if continuation is not None else (workflow_start_agent_for_definition(definition) or (participants[0] if participants else "reviewer"))
+
+        while round_index < max_rounds and current_agent:
+            prompt = _workflow_step_prompt(
+                workflow_id=definition.id,
+                agent_id=current_agent,
+                goal=goal,
+                current_brief=current_brief,
+                transcript_summary=summarize_conversation(request.messages),
+                prior_outputs=tuple(workflow_outputs),
+            )
+            agent_text = ""
+            first = True
+            response_holder: dict[str, Any] = {}
+            async for delta in self._stream_text_agent(
+                agent_id=current_agent,
+                prompt=prompt,
+                session_id=f"proxy-handoff-{definition.id}-{current_agent}-{uuid4().hex}",
+                host_tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                pending_continuation=pending if continuation is not None and round_index == (continuation.step_index or 0) else None,
+                final_response_sink=lambda value: _set_response_holder(response_holder, value),
+            ):
+                agent_text += delta
+                reasoning_delta = f"{current_agent}: {delta}" if first else delta
+                first = False
+                state["reasoning"] += reasoning_delta
+                yield ProxyReasoningDeltaEvent(reasoning_delta)
+            response = response_holder.get("response")
+            if response is not None:
+                emitted = self._emit_tool_calls(
+                    response=response,
+                    continuation=ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=round_index,
+                        agent_id=current_agent,
+                        goal=goal,
+                        current_brief=agent_text.strip() or current_brief,
+                        workflow_outputs=tuple(workflow_outputs),
+                    ),
+                    state=state,
+                )
+                if emitted:
+                    for event in emitted:
+                        yield event
+                    return
+            workflow_outputs.append(f"{current_agent}: {agent_text.strip()}")
+            current_brief = agent_text.strip() or current_brief
+            if current_agent in finalizers:
+                break
+            current_agent = await self._select_handoff_target(
+                workflow_id=definition.id,
+                current_agent=current_agent,
+                goal=goal,
+                current_brief=current_brief,
+                prior_outputs=tuple(workflow_outputs),
+                allowed=handoffs.get(current_agent, tuple(agent for agent in participants if agent != current_agent)),
+            )
+            round_index += 1
+        async for event in self._emit_workflow_summary(
+            definition=definition,
+            goal=goal,
+            current_brief=current_brief,
+            workflow_outputs=tuple(workflow_outputs),
+            state=state,
+        ):
+            yield event
+
+    async def _emit_workflow_summary(self, *, definition, goal: str, current_brief: str, workflow_outputs: tuple[str, ...], state: dict[str, Any]):
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
             prompt=_workflow_summary_prompt(
                 workflow_id=definition.id,
                 goal=goal,
-                outputs=tuple(workflow_outputs),
+                outputs=workflow_outputs,
             ),
             preamble=_summary_instructions(),
             session_id=f"proxy-workflow-summary-{uuid4().hex}",
@@ -428,6 +724,56 @@ class ProxyOrchestrationCore:
         state["content"] = final_text
         if final_text:
             yield ProxyContentDeltaEvent(final_text)
+
+    async def _select_manager_agent(
+        self,
+        *,
+        workflow_id: str,
+        goal: str,
+        current_brief: str,
+        participants: tuple[str, ...],
+        prior_outputs: tuple[str, ...],
+    ) -> str | None:
+        raw = await self._run_text_agent(
+            agent_id="orchestrator",
+            prompt=_workflow_manager_prompt(
+                workflow_id=workflow_id,
+                goal=goal,
+                current_brief=current_brief,
+                participants=participants,
+                prior_outputs=prior_outputs,
+            ),
+            preamble=_workflow_manager_instructions(participants),
+            session_id=f"proxy-workflow-manager-{uuid4().hex}",
+        )
+        return _parse_agent_selection(raw, participants=participants)
+
+    async def _select_handoff_target(
+        self,
+        *,
+        workflow_id: str,
+        current_agent: str,
+        goal: str,
+        current_brief: str,
+        prior_outputs: tuple[str, ...],
+        allowed: tuple[str, ...],
+    ) -> str | None:
+        if not allowed:
+            return None
+        raw = await self._run_text_agent(
+            agent_id=current_agent,
+            prompt=_handoff_selection_prompt(
+                workflow_id=workflow_id,
+                current_agent=current_agent,
+                goal=goal,
+                current_brief=current_brief,
+                prior_outputs=prior_outputs,
+                allowed=allowed,
+            ),
+            preamble=_handoff_selection_instructions(allowed),
+            session_id=f"proxy-handoff-select-{uuid4().hex}",
+        )
+        return _parse_agent_selection(raw, participants=allowed)
 
     async def _run_text_agent(
         self,
@@ -637,6 +983,127 @@ def _workflow_step_prompt(
     return "\n".join(lines).strip()
 
 
+def _group_chat_turn_prompt(
+    *,
+    workflow_id: str,
+    agent_id: str,
+    goal: str,
+    transcript_summary: str,
+    current_brief: str,
+    prior_outputs: tuple[str, ...],
+) -> str:
+    lines = [
+        f"You are {agent_id} speaking in group chat workflow {workflow_id}.",
+        "Respond to the current discussion and move the decision forward.",
+        "",
+        "Conversation summary:",
+        transcript_summary or "(none)",
+        "",
+        "Goal:",
+        goal or "(none)",
+        "",
+        "Current brief:",
+        current_brief or "(none)",
+    ]
+    if prior_outputs:
+        lines.extend(
+            [
+                "",
+                "Discussion so far:",
+                *prior_outputs[-8:],
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
+def _workflow_manager_instructions(participants: tuple[str, ...]) -> str:
+    return "\n".join(
+        [
+            "You are selecting the next specialist for an adaptive workflow.",
+            "Return JSON only.",
+            f"Allowed agents: {', '.join(participants) or '(none)'}",
+            'Return {"agent_id":"<agent>" } to continue or {"agent_id":null} to finish.',
+        ]
+    )
+
+
+def _workflow_manager_prompt(
+    *,
+    workflow_id: str,
+    goal: str,
+    current_brief: str,
+    participants: tuple[str, ...],
+    prior_outputs: tuple[str, ...],
+) -> str:
+    return "\n".join(
+        [
+            f"Workflow: {workflow_id}",
+            f"Goal: {goal or '(none)'}",
+            f"Current brief: {current_brief or '(none)'}",
+            f"Available specialists: {', '.join(participants) or '(none)'}",
+            "",
+            "Progress so far:",
+            *(prior_outputs[-8:] or ["(none)"]),
+        ]
+    ).strip()
+
+
+def _handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
+    return "\n".join(
+        [
+            "You are choosing the next specialist handoff.",
+            "Return JSON only.",
+            f"Allowed next agents: {', '.join(allowed) or '(none)'}",
+            'Return {"agent_id":"<agent>" } to continue or {"agent_id":null} to finish.',
+        ]
+    )
+
+
+def _handoff_selection_prompt(
+    *,
+    workflow_id: str,
+    current_agent: str,
+    goal: str,
+    current_brief: str,
+    prior_outputs: tuple[str, ...],
+    allowed: tuple[str, ...],
+) -> str:
+    return "\n".join(
+        [
+            f"Workflow: {workflow_id}",
+            f"You are {current_agent}.",
+            f"Goal: {goal or '(none)'}",
+            f"Current brief: {current_brief or '(none)'}",
+            f"You may hand off to: {', '.join(allowed) or '(none)'}",
+            "",
+            "Work so far:",
+            *(prior_outputs[-8:] or ["(none)"]),
+        ]
+    ).strip()
+
+
+def _parse_agent_selection(raw: str | None, *, participants: tuple[str, ...]) -> str | None:
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    candidate = payload.get("agent_id")
+    if candidate is None:
+        return None
+    if not isinstance(candidate, str):
+        return None
+    stripped = candidate.strip()
+    if not stripped or stripped.casefold() in {"none", "null", "finish", "done"}:
+        return None
+    if stripped not in participants:
+        return None
+    return stripped
+
+
 def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuation | None) -> list[Message]:
     messages = [
         Message(
@@ -649,8 +1116,9 @@ def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuat
         return messages
 
     assistant_contents: list[Content | str] = []
-    if pending_continuation.assistant_message.content:
-        assistant_contents.append(pending_continuation.assistant_message.content)
+    assistant_message = pending_continuation.assistant_message
+    if assistant_message is not None and assistant_message.content:
+        assistant_contents.append(assistant_message.content)
     for tool_call in continuation_tool_calls(pending_continuation):
         assistant_contents.append(
             Content.from_function_call(

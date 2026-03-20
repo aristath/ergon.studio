@@ -245,6 +245,83 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Reviewed", reasoning)
         self.assertEqual(resumed_result.content, "Workflow final summary")
 
+    async def test_group_chat_workflow_uses_selection_sequence(self) -> None:
+        registry = _advanced_workflow_registry()
+        core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"workflow\",\"workflow_id\":\"debate\",\"goal\":\"Choose an approach\"}",
+                "Debate final summary",
+            ],
+            "architect": ["Option A", "Refined option A"],
+            "brainstormer": ["Option B"],
+            "reviewer": ["Decision-ready recommendation"],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Choose an approach"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(event.delta for event in events if isinstance(event, ProxyReasoningDeltaEvent))
+        self.assertGreaterEqual(reasoning.count("architect:"), 2)
+        self.assertIn("brainstormer: Option", reasoning)
+        self.assertIn("reviewer: Decision-ready", reasoning)
+        self.assertEqual(result.content, "Debate final summary")
+
+    async def test_magentic_workflow_uses_manager_agent_selection(self) -> None:
+        registry = _advanced_workflow_registry()
+        core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"workflow\",\"workflow_id\":\"dynamic-open-ended\",\"goal\":\"Build it\"}",
+                "{\"agent_id\":\"architect\"}",
+                "{\"agent_id\":\"reviewer\"}",
+                "{\"agent_id\":null}",
+                "Dynamic final summary",
+            ],
+            "architect": ["Architecture pass"],
+            "reviewer": ["Review pass"],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(event.delta for event in events if isinstance(event, ProxyReasoningDeltaEvent))
+        self.assertIn("architect: Architecture", reasoning)
+        self.assertIn("reviewer: Review", reasoning)
+        self.assertEqual(result.content, "Dynamic final summary")
+
+    async def test_handoff_workflow_uses_specialist_handoff_selection(self) -> None:
+        registry = _advanced_workflow_registry()
+        core = ProxyOrchestrationCore(registry, agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"workflow\",\"workflow_id\":\"specialist-handoff\",\"goal\":\"Research and decide\"}",
+                "Handoff final summary",
+            ],
+            "architect": ["Initial direction", "{\"agent_id\":\"reviewer\"}"],
+            "reviewer": ["Final recommendation"],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Research and decide"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(event.delta for event in events if isinstance(event, ProxyReasoningDeltaEvent))
+        self.assertIn("architect: Initial", reasoning)
+        self.assertIn("reviewer: Final", reasoning)
+        self.assertEqual(result.content, "Handoff final summary")
+
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
         remaining = {
@@ -329,6 +406,44 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.finish_reason, "error")
         self.assertIn("does not support tool calling", result.content)
         self.assertTrue(any(isinstance(event, ProxyContentDeltaEvent) for event in events))
+
+    async def test_stream_turn_rebuilds_structured_tool_history_for_continuations(self) -> None:
+        captured: dict[str, object] = {}
+        tool_call = _host_continuation_tool_call(
+            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            call_id="call_1",
+            name="read_file",
+        )
+
+        class _CaptureAgent(_FakeAgent):
+            def run(self, messages, *, session, stream: bool = False, tools=None, **kwargs):
+                captured["messages"] = messages
+                return super().run(messages, session=session, stream=stream, tools=tools, **kwargs)
+
+        def _builder(_registry, agent_id: str, **_kwargs):
+            if agent_id != "orchestrator":
+                raise AssertionError(f"unexpected agent: {agent_id}")
+            return _CaptureAgent(["Final answer"])
+
+        core = ProxyOrchestrationCore(_provider_registry(tool_calling=True), agent_builder=_builder)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Inspect main.py"),
+                ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+                ProxyInputMessage(role="tool", content="print('current main')", tool_call_id=tool_call.id),
+            ),
+            tools=(_host_tool("read_file"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        messages = captured["messages"]
+        self.assertEqual([message.role for message in messages], ["user", "assistant", "tool"])
+        self.assertEqual(messages[1].contents[0].type, "function_call")
+        self.assertEqual(messages[2].contents[0].type, "function_result")
 
 
 class _FakeRegistry:
@@ -463,6 +578,84 @@ def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
             ),
         },
         workflow_definitions={},
+    )
+
+
+def _advanced_workflow_registry() -> RuntimeRegistry:
+    return RuntimeRegistry(
+        config={},
+        agent_definitions={
+            "orchestrator": DefinitionDocument(
+                id="orchestrator",
+                path=Path("orchestrator.md"),
+                metadata={"id": "orchestrator", "role": "orchestrator"},
+                body="## Identity\nLead engineer.",
+                sections={"Identity": "Lead engineer."},
+            ),
+            "architect": DefinitionDocument(
+                id="architect",
+                path=Path("architect.md"),
+                metadata={"id": "architect", "role": "architect"},
+                body="## Identity\nArchitect.",
+                sections={"Identity": "Architect."},
+            ),
+            "brainstormer": DefinitionDocument(
+                id="brainstormer",
+                path=Path("brainstormer.md"),
+                metadata={"id": "brainstormer", "role": "brainstormer"},
+                body="## Identity\nBrainstormer.",
+                sections={"Identity": "Brainstormer."},
+            ),
+            "reviewer": DefinitionDocument(
+                id="reviewer",
+                path=Path("reviewer.md"),
+                metadata={"id": "reviewer", "role": "reviewer"},
+                body="## Identity\nReviewer.",
+                sections={"Identity": "Reviewer."},
+            ),
+        },
+        workflow_definitions={
+            "debate": DefinitionDocument(
+                id="debate",
+                path=Path("debate.md"),
+                metadata={
+                    "id": "debate",
+                    "orchestration": "group_chat",
+                    "step_groups": [["architect", "brainstormer", "reviewer"]],
+                    "selection_sequence": ["architect", "brainstormer", "architect", "reviewer"],
+                    "max_rounds": 4,
+                },
+                body="## Purpose\nDebate.",
+                sections={"Purpose": "Debate."},
+            ),
+            "dynamic-open-ended": DefinitionDocument(
+                id="dynamic-open-ended",
+                path=Path("dynamic-open-ended.md"),
+                metadata={
+                    "id": "dynamic-open-ended",
+                    "orchestration": "magentic",
+                    "step_groups": [["architect", "reviewer"]],
+                    "max_rounds": 3,
+                },
+                body="## Purpose\nAdaptive.",
+                sections={"Purpose": "Adaptive."},
+            ),
+            "specialist-handoff": DefinitionDocument(
+                id="specialist-handoff",
+                path=Path("specialist-handoff.md"),
+                metadata={
+                    "id": "specialist-handoff",
+                    "orchestration": "handoff",
+                    "step_groups": [["architect", "reviewer"]],
+                    "start_agent": "architect",
+                    "finalizers": ["reviewer"],
+                    "handoffs": {"architect": ["reviewer"]},
+                    "max_rounds": 3,
+                },
+                body="## Purpose\nHandoff.",
+                sections={"Purpose": "Handoff."},
+            ),
+        },
     )
 
 

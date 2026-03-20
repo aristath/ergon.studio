@@ -110,6 +110,32 @@ class SideThreadBlock(Collapsible):
         height: auto;
         margin: 0;
         padding: 0;
+        background: transparent;
+        border-top: none;
+        padding-left: 0;
+        padding-bottom: 0;
+    }
+
+    SideThreadBlock:focus-within {
+        background-tint: transparent;
+    }
+
+    SideThreadBlock > CollapsibleTitle {
+        background: transparent;
+        padding: 0 1;
+    }
+
+    SideThreadBlock > CollapsibleTitle:hover {
+        background: transparent;
+    }
+
+    SideThreadBlock > CollapsibleTitle:focus {
+        background: transparent;
+    }
+
+    SideThreadBlock > Contents {
+        background: transparent;
+        padding: 1 0 0 2;
     }
     """
 

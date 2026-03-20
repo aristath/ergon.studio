@@ -445,6 +445,43 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[1].contents[0].type, "function_call")
         self.assertEqual(messages[2].contents[0].type, "function_result")
 
+    async def test_stream_turn_rebuilds_tool_result_message_without_assistant_call_history(self) -> None:
+        captured: dict[str, object] = {}
+        tool_call = _host_continuation_tool_call(
+            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            call_id="call_1",
+            name="read_file",
+        )
+
+        class _CaptureAgent(_FakeAgent):
+            def run(self, messages, *, session, stream: bool = False, tools=None, **kwargs):
+                captured["messages"] = messages
+                return super().run(messages, session=session, stream=stream, tools=tools, **kwargs)
+
+        def _builder(_registry, agent_id: str, **_kwargs):
+            if agent_id != "orchestrator":
+                raise AssertionError(f"unexpected agent: {agent_id}")
+            return _CaptureAgent(["Final answer"])
+
+        core = ProxyOrchestrationCore(_provider_registry(tool_calling=True), agent_builder=_builder)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Inspect main.py"),
+                ProxyInputMessage(role="tool", content="print('current main')", tool_call_id=tool_call.id),
+            ),
+            tools=(_host_tool("read_file"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        messages = captured["messages"]
+        self.assertEqual([message.role for message in messages], ["user", "tool"])
+        self.assertEqual(messages[1].contents[0].type, "function_result")
+        self.assertEqual(messages[1].contents[0].call_id, "call_1")
+
 
 class _FakeRegistry:
     def __init__(self) -> None:

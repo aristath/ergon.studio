@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.continuation import ContinuationState, decode_continuation_from_tool_call_id, encode_continuation_tool_call, latest_continuation, latest_pending_continuation
+from ergon_studio.proxy.continuation import ContinuationState, decode_continuation_from_tool_call_id, encode_continuation_tool_call, latest_continuation, latest_pending_continuation, original_tool_call_id
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 
 
@@ -129,6 +129,14 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(pending.state.mode, "delegate")
         self.assertEqual(pending.assistant_message.tool_calls[0].id, tool_call.id)
         self.assertEqual(pending.tool_results[0].content, "file contents")
+
+    def test_original_tool_call_id_extracts_wrapped_id(self) -> None:
+        tool_call = encode_continuation_tool_call(
+            ProxyToolCall(id="call_123", name="read_file", arguments_json="{}"),
+            state=ContinuationState(mode="act", agent_id="orchestrator"),
+        )
+
+        self.assertEqual(original_tool_call_id(tool_call.id), "call_123")
 
 
 if __name__ == "__main__":

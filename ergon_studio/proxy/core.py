@@ -16,6 +16,7 @@ from ergon_studio.proxy.continuation import (
     continuation_tool_calls,
     encode_continuation_tool_call,
     latest_pending_continuation,
+    original_tool_call_id,
 )
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
@@ -1145,6 +1146,16 @@ def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuat
                 author_name=tool_call.name,
             )
         )
+    if pending_continuation.assistant_message is None:
+        for tool_result in pending_continuation.tool_results:
+            original_call_id = original_tool_call_id(tool_result.tool_call_id or "") or tool_result.tool_call_id or ""
+            messages.append(
+                Message(
+                    role="tool",
+                    contents=[Content.from_function_result(call_id=original_call_id, result=tool_result.content)],
+                    author_name="host_tool",
+                )
+            )
     return messages
 
 

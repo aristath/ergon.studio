@@ -114,6 +114,16 @@ def decode_continuation_from_tool_call_id(tool_call_id: str) -> ContinuationStat
     )
 
 
+def original_tool_call_id(tool_call_id: str) -> str | None:
+    if not tool_call_id.startswith(_TOKEN_PREFIX):
+        return None
+    try:
+        _encoded_payload, original = tool_call_id[len(_TOKEN_PREFIX) :].split(":", 1)
+    except ValueError:
+        return None
+    return original or None
+
+
 def latest_continuation(messages: tuple[ProxyInputMessage, ...]) -> ContinuationState | None:
     pending = latest_pending_continuation(messages)
     if pending is None:

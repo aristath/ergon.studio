@@ -5,7 +5,7 @@ import unittest
 from agent_framework import ResponseStream
 from openai import OpenAI
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyToolCall
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.models import ProxyTurnResult
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 
@@ -74,6 +74,31 @@ class ProxyOpenAISDKTests(unittest.TestCase):
 
         self.assertEqual(chunks[0].choices[0].delta.content, "Done.")
         self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
+
+    def test_chat_completions_stream_returns_tool_call_deltas(self) -> None:
+        call = ProxyToolCall(
+            id="call_1",
+            name="read_file",
+            arguments_json="{\"path\":\"main.py\"}",
+        )
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")], tool_calls=(call,)),
+        )
+        self.addCleanup(handle.close)
+        client = _client(handle.port)
+
+        chunks = list(
+            client.chat.completions.create(
+                model="ergon",
+                messages=[{"role": "user", "content": "Inspect main.py"}],
+                stream=True,
+            )
+        )
+
+        self.assertEqual(chunks[0].choices[0].delta.tool_calls[0].function.name, "read_file")
+        self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
     def test_responses_create_returns_parsed_content(self) -> None:
         handle = start_proxy_server_in_thread(
@@ -144,6 +169,33 @@ class ProxyOpenAISDKTests(unittest.TestCase):
                 "response.completed",
             ],
         )
+
+    def test_responses_stream_returns_function_call_added_events(self) -> None:
+        call = ProxyToolCall(
+            id="call_1",
+            name="read_file",
+            arguments_json="{\"path\":\"main.py\"}",
+        )
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")], tool_calls=(call,)),
+        )
+        self.addCleanup(handle.close)
+        client = _client(handle.port)
+
+        events = list(
+            client.responses.create(
+                model="ergon",
+                input="Inspect main.py",
+                stream=True,
+            )
+        )
+
+        self.assertEqual(events[1].type, "response.output_item.added")
+        self.assertEqual(events[1].item.type, "function_call")
+        self.assertEqual(events[1].item.name, "read_file")
+        self.assertEqual(events[-1].type, "response.completed")
 
 
 class _FakeCore:

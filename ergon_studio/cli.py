@@ -4,12 +4,12 @@ import argparse
 from pathlib import Path
 import time
 
-from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.bootstrap import bootstrap_proxy_home, bootstrap_workspace
 from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.server import serve_proxy
-from ergon_studio.registry import load_registry
+from ergon_studio.registry import load_registry_from_global_paths
 from ergon_studio.session_store import SessionStore
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import ErgonStudioApp
@@ -126,11 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
-        paths = bootstrap_workspace(
-            project_root=args.project_root,
-            home_dir=args.home_dir,
-        )
-        registry = load_registry(paths)
+        proxy_paths = bootstrap_proxy_home(args.home_dir)
+        registry = load_registry_from_global_paths(proxy_paths)
         if args.check:
             health = build_proxy_health_snapshot(registry)
             print(f"ok={str(health['ok']).lower()}")

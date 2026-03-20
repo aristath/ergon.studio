@@ -92,6 +92,7 @@ class CliTests(unittest.TestCase):
             _, kwargs = serve_proxy.call_args
             self.assertEqual(kwargs["host"], "0.0.0.0")
             self.assertEqual(kwargs["port"], 4242)
+            self.assertFalse((project_root / ".ergon.studio" / "project.json").exists())
 
     def test_serve_check_fails_fast_when_orchestrator_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

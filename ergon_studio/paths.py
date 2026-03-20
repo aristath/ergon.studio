@@ -9,6 +9,32 @@ STUDIO_DIRNAME = ".ergon.studio"
 
 
 @dataclass(frozen=True)
+class GlobalStudioPaths:
+    home_dir: Path
+
+    @property
+    def studio_home(self) -> Path:
+        return self.home_dir / STUDIO_DIRNAME
+
+    @property
+    def config_path(self) -> Path:
+        return self.studio_home / "config.json"
+
+    @property
+    def agents_dir(self) -> Path:
+        return self.studio_home / "agents"
+
+    @property
+    def workflows_dir(self) -> Path:
+        return self.studio_home / "workflows"
+
+    def ensure_layout(self) -> None:
+        self.studio_home.mkdir(parents=True, exist_ok=True)
+        self.agents_dir.mkdir(parents=True, exist_ok=True)
+        self.workflows_dir.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass(frozen=True)
 class StudioPaths:
     home_dir: Path
     project_root: Path

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.bootstrap import bootstrap_workspace
+from ergon_studio.bootstrap import bootstrap_proxy_home, bootstrap_workspace
 
 
 class BootstrapWorkspaceTests(unittest.TestCase):
@@ -71,3 +71,18 @@ class BootstrapWorkspaceTests(unittest.TestCase):
                 orchestrator_path.read_text(encoding="utf-8"),
                 "custom orchestrator\n",
             )
+
+    def test_bootstrap_proxy_home_creates_global_layout_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            paths = bootstrap_proxy_home(home_dir)
+
+            self.assertTrue(paths.config_path.exists())
+            self.assertTrue(paths.agents_dir.exists())
+            self.assertTrue(paths.workflows_dir.exists())
+            self.assertFalse((project_root / ".ergon.studio" / "project.json").exists())

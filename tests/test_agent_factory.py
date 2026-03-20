@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.paths import DefinitionPaths
 from ergon_studio.registry import load_registry
 from ergon_studio.upstream import UpstreamSettings
 
@@ -70,9 +69,11 @@ class AgentFactoryTests(unittest.TestCase):
 
 
 def _registry_with_agent(home_dir: Path, *, metadata_extra: dict[str, object] | None = None):
-    paths = DefinitionPaths(root_dir=home_dir / "definitions")
-    paths.agents_dir.mkdir(parents=True)
-    paths.workflows_dir.mkdir(parents=True)
+    root_dir = home_dir / "definitions"
+    agents_dir = root_dir / "agents"
+    workflows_dir = root_dir / "workflows"
+    agents_dir.mkdir(parents=True)
+    workflows_dir.mkdir(parents=True)
     metadata = {
         "id": "orchestrator",
         "name": "Orchestrator",
@@ -89,9 +90,9 @@ def _registry_with_agent(home_dir: Path, *, metadata_extra: dict[str, object] | 
         else:
             frontmatter_lines.append(f"{key}: {value}")
     frontmatter_lines.extend(["---", "## Identity", "Lead engineer for the AI firm.", ""])
-    (paths.agents_dir / "orchestrator.md").write_text("\n".join(frontmatter_lines), encoding="utf-8")
+    (agents_dir / "orchestrator.md").write_text("\n".join(frontmatter_lines), encoding="utf-8")
     return load_registry(
-        paths,
+        root_dir,
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
     )
 

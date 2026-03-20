@@ -3450,11 +3450,6 @@ def _render_delegation_review_prompt(
     return "\n".join(lines).strip()
 
 
-def _parse_delegation_review_verdict(raw: str) -> DelegationReviewVerdict:
-    parsed = _parse_turn_decision_json(raw)
-    return _delegation_review_verdict_from_payload(parsed)
-
-
 def _delegation_review_verdict_from_payload(parsed: dict[str, object]) -> DelegationReviewVerdict:
     summary = _optional_text(parsed.get("summary")) or "No delegation review summary provided."
     findings_raw = parsed.get("findings", [])

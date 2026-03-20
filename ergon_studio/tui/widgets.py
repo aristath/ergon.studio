@@ -55,7 +55,7 @@ class AgentStatusBar(Static):
     AgentStatusBar {
         height: 1;
         dock: top;
-        background: $surface;
+        background: transparent;
         padding: 0 1;
     }
     """
@@ -147,7 +147,7 @@ class InfoBar(Static):
     DEFAULT_CSS = """
     InfoBar {
         height: 2;
-        background: $surface;
+        background: transparent;
         padding: 0 1;
         color: $text-muted;
     }

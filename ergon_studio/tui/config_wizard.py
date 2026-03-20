@@ -44,7 +44,7 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
         width: 70;
         max-height: 80%;
         border: round $accent;
-        background: $surface;
+        background: transparent;
         padding: 1 2;
     }
 
@@ -265,7 +265,7 @@ class RoleAssignmentScreen(ModalScreen[dict[str, str] | None]):
         width: 60;
         max-height: 80%;
         border: round $accent;
-        background: $surface;
+        background: transparent;
         padding: 1 2;
     }
 
@@ -356,7 +356,7 @@ class ConfigWizardScreen(ModalScreen[None]):
         width: 70;
         max-height: 80%;
         border: round $accent;
-        background: $surface;
+        background: transparent;
         padding: 1 2;
     }
 

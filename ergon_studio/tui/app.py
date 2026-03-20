@@ -43,7 +43,7 @@ class DefinitionEditorScreen(ModalScreen[None]):
       width: 90%;
       height: 90%;
       border: round $accent;
-      background: $surface;
+      background: transparent;
       padding: 1;
     }
 
@@ -95,7 +95,7 @@ class SessionPickerScreen(ModalScreen[str | None]):
       height: auto;
       max-height: 80%;
       border: round $accent;
-      background: $surface;
+      background: transparent;
       padding: 1;
     }
 
@@ -188,7 +188,7 @@ class ErgonStudioApp(App[None]):
       max-height: 10;
       margin: 0 1;
       display: none;
-      background: $surface;
+      background: transparent;
       border: round $accent;
     }
 

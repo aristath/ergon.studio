@@ -913,7 +913,7 @@ class ProxyOrchestrationCore:
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
         )
-        if allowed_tools and not provider_supports_tool_calling(self.registry, agent_id):
+        if allowed_tools and not provider_supports_tool_calling(self.registry):
             if tool_options.get("tool_choice") not in (None, "auto", "none"):
                 raise ValueError(f"provider for agent '{agent_id}' does not support tool calling")
             allowed_tools = ()

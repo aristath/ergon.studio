@@ -53,8 +53,7 @@ def compose_instructions(definition: DefinitionDocument) -> str:
     return "\n\n".join(parts).strip()
 
 
-def provider_supports_tool_calling(registry: RuntimeRegistry, agent_id: str) -> bool:
-    del agent_id
+def provider_supports_tool_calling(registry: RuntimeRegistry) -> bool:
     return registry.upstream.tool_calling
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode, step_groups_for_metadata
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, acceptance_rule_for_mode, delivery_candidate_for_metadata, is_decision_ready_acceptance_mode, is_non_delivery_acceptance_mode, is_planning_acceptance_mode, step_groups_for_metadata
 
 
 class WorkflowPolicyTests(unittest.TestCase):
@@ -12,6 +12,9 @@ class WorkflowPolicyTests(unittest.TestCase):
     def test_acceptance_mode_helpers_classify_modes(self) -> None:
         self.assertTrue(is_non_delivery_acceptance_mode("design_brief"))
         self.assertFalse(is_non_delivery_acceptance_mode("delivery"))
+        self.assertTrue(delivery_candidate_for_metadata({"delivery_candidate": True}))
+        self.assertTrue(delivery_candidate_for_metadata({"acceptance_mode": "delivery"}))
+        self.assertFalse(delivery_candidate_for_metadata({"acceptance_mode": "design_brief"}))
         self.assertTrue(is_decision_ready_acceptance_mode("decision_ready"))
         self.assertFalse(is_decision_ready_acceptance_mode("delivery"))
         self.assertTrue(is_planning_acceptance_mode("research_brief"))

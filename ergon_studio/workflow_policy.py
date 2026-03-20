@@ -12,6 +12,13 @@ def is_non_delivery_acceptance_mode(acceptance_mode: str) -> bool:
     return acceptance_mode != "delivery"
 
 
+def delivery_candidate_for_metadata(metadata: Mapping[str, object]) -> bool:
+    configured = metadata.get("delivery_candidate")
+    if isinstance(configured, bool):
+        return configured
+    return not is_non_delivery_acceptance_mode(acceptance_mode_for_metadata(metadata))
+
+
 def is_decision_ready_acceptance_mode(acceptance_mode: str) -> bool:
     return acceptance_mode == "decision_ready"
 

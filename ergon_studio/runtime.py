@@ -34,7 +34,7 @@ from ergon_studio.tool_context import ToolExecutionContext, current_tool_executi
 from ergon_studio.tool_registry import build_workspace_tool_registry
 from ergon_studio.whiteboard_store import TaskWhiteboardRecord, WhiteboardStore
 from ergon_studio.workflow_compiler import compile_workflow_definition, validate_workflow_group, workflow_step_groups_for_definition
-from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, is_non_delivery_acceptance_mode, step_groups_for_metadata
+from ergon_studio.workflow_policy import acceptance_criteria_for_mode, acceptance_mode_for_metadata, delivery_candidate_for_metadata, is_non_delivery_acceptance_mode, step_groups_for_metadata
 from ergon_studio.workflow_runtime import execute_defined_workflow
 from ergon_studio.workflow_store import WorkflowStore
 
@@ -504,6 +504,8 @@ class RuntimeContext:
                     "id": workflow_id,
                     "name": str(definition.metadata.get("name", workflow_id)),
                     "orchestration": str(definition.metadata.get("orchestration", "unknown")),
+                    "acceptance_mode": acceptance_mode_for_metadata(definition.metadata),
+                    "delivery_candidate": delivery_candidate_for_metadata(definition.metadata),
                     "step_groups": self.workflow_step_groups(workflow_id),
                     "purpose": purpose,
                 }
@@ -3259,7 +3261,9 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
     workflow_lines = []
     for summary in runtime.list_workflow_summaries():
         workflow_lines.append(
-            f"- {summary['id']}: orchestration={summary['orchestration']} purpose={summary['purpose']}"
+            f"- {summary['id']}: orchestration={summary['orchestration']} "
+            f"delivery_candidate={summary['delivery_candidate']} "
+            f"acceptance={summary['acceptance_mode']} purpose={summary['purpose']}"
         )
     agent_lines = []
     for summary in runtime.list_agent_summaries():
@@ -3285,6 +3289,7 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "- Prefer `standard-build` only when explicit staging and a separate implementation/review cycle are clearly helpful.",
             "- Prefer `dynamic-open-ended` when the work is broad, greenfield, evolving, or likely to need clarification, replanning, or changing specialist assignments mid-flight.",
             "- Prefer `specialist-handoff` when the work is mainly exploratory discussion and specialists should pass control directly among themselves.",
+            "- When the user expects delivery, strongly prefer workflows marked `delivery_candidate=true`.",
             "- Do not choose `architecture-first` for a request that explicitly asks for implementation in the same turn.",
             "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
             "- If the recent conversation already settled the approach and the latest user turn is approval to proceed, choose delivery work instead of another reply.",
@@ -3348,8 +3353,11 @@ def _delivery_audit_instructions() -> str:
 def _delivery_reconsideration_instructions(runtime: RuntimeContext, reason: str) -> str:
     workflow_lines = []
     for summary in runtime.list_workflow_summaries():
+        if not summary["delivery_candidate"]:
+            continue
         workflow_lines.append(
-            f"- {summary['id']}: orchestration={summary['orchestration']} purpose={summary['purpose']}"
+            f"- {summary['id']}: orchestration={summary['orchestration']} "
+            f"acceptance={summary['acceptance_mode']} purpose={summary['purpose']}"
         )
     agent_lines = []
     for summary in runtime.list_agent_summaries():

@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from agent_framework import ResponseStream
 
 from ergon_studio.proxy.core import ProxyTurnResult
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 
 
@@ -78,6 +78,59 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn("\"chat.completion.chunk\"", body)
         self.assertIn("\"content\":\"Done.\"", body)
         self.assertIn("data: [DONE]", body)
+
+    def test_responses_returns_non_stream_response(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["object"], "response")
+        self.assertEqual(payload["output_text"], "Done.")
+
+    def test_responses_streams_response_events(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyReasoningDeltaEvent("Plan."), ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+        self.assertIn("\"type\":\"response.created\"", body)
+        self.assertIn("\"type\":\"response.reasoning_text.delta\"", body)
+        self.assertIn("\"type\":\"response.output_text.delta\"", body)
+        self.assertIn("\"type\":\"response.completed\"", body)
 
 
 class _FakeCore:

@@ -9,7 +9,16 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.proxy import build_chat_completion_response, encode_chat_stream_done, encode_chat_stream_sse, parse_chat_completion_request
+from ergon_studio.proxy import (
+    build_chat_completion_response,
+    build_responses_response,
+    encode_chat_stream_done,
+    encode_chat_stream_sse,
+    encode_responses_stream_events,
+    encode_responses_stream_sse,
+    parse_chat_completion_request,
+    parse_responses_request,
+)
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
@@ -45,6 +54,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/v1/chat/completions":
             self._handle_chat_completions()
+            return
+        if self.path == "/v1/responses":
+            self._handle_responses()
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown route: {self.path}")
 
@@ -111,6 +123,79 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
         self.wfile.write(encode_chat_stream_done())
         self.wfile.flush()
+
+    def _handle_responses(self) -> None:
+        try:
+            payload = self._read_json_body()
+            request = parse_responses_request(payload)
+        except ValueError as exc:
+            self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
+        response_id = f"resp_{uuid4().hex}"
+        created_at = int(time.time())
+        if request.stream:
+            self._send_sse_headers()
+            try:
+                asyncio.run(
+                    self._stream_responses(
+                        request=request,
+                        response_id=response_id,
+                        created_at=created_at,
+                    )
+                )
+            except BrokenPipeError:
+                return
+            return
+
+        try:
+            result = asyncio.run(self._run_chat_completion(request))
+        except Exception as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}")
+            return
+        self._send_json(
+            HTTPStatus.OK,
+            build_responses_response(
+                response_id=response_id,
+                model=request.model,
+                created_at=created_at,
+                content=result.content,
+                reasoning=result.reasoning,
+            ),
+        )
+
+    async def _stream_responses(self, *, request, response_id: str, created_at: int) -> None:
+        reasoning_item_id = f"rs_{uuid4().hex}"
+        message_item_id = f"msg_{uuid4().hex}"
+        created_payload = {
+            "type": "response.created",
+            "event_id": f"event_{uuid4().hex}",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": created_at,
+                "model": request.model,
+                "status": "in_progress",
+            },
+            "sequence_number": 1,
+        }
+        self.wfile.write(encode_responses_stream_sse(created_payload))
+        self.wfile.flush()
+        sequence_number = 2
+        stream = self.server.core.stream_turn(request, created_at=created_at)
+        async for event in stream:
+            for payload in encode_responses_stream_events(
+                event=event,
+                response_id=response_id,
+                model=request.model,
+                created_at=created_at,
+                sequence_number=sequence_number,
+                reasoning_item_id=reasoning_item_id,
+                message_item_id=message_item_id,
+            ):
+                self.wfile.write(encode_responses_stream_sse(payload))
+                self.wfile.flush()
+                sequence_number += 1
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = self.headers.get("Content-Length")

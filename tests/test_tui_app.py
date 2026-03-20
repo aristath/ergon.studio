@@ -1059,6 +1059,18 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             self.assertIn("connection refused", text)
             self.assertIn("Assign a provider to coder", text)
 
+    async def test_team_opens_team_inspector(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = "/team"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, InspectorScreen)
+            title = app.screen.query_one("#inspector-title", Static)
+            self.assertIn("Team", str(title.content))
+
     async def test_sessions_lists_project_sessions(self):
         _, runtime, app = _make_env()
         load_runtime(

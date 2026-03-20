@@ -27,6 +27,7 @@ from ergon_studio.tui.inspectors import (
     build_event_entries,
     build_memory_entries,
     build_task_entries,
+    build_team_entries,
     build_thread_entry,
     build_thread_entries,
     build_workflow_definition_entries,
@@ -1007,14 +1008,7 @@ class ErgonStudioApp(App[None]):
                 thinking.hide()
             self._add_notice(body, title=title, level=level)
         elif command == "/team":
-            from ergon_studio.tui.widgets import AGENT_SPRITES, AGENT_COLORS
-            lines = ["[bold]Team:[/bold]"]
-            for agent_id in self.runtime.list_agent_ids():
-                sprite = AGENT_SPRITES.get(agent_id, "  ")
-                color = AGENT_COLORS.get(agent_id, "white")
-                summary = self.runtime.agent_status_summary(agent_id)
-                lines.append(f"  [{color}]{sprite}[/{color}] {agent_id}: {summary}")
-            self._add_notice("\n".join(lines), title="Team")
+            self._open_team_inspector()
         elif command == "/approvals":
             self._open_approval_inspector()
         elif command == "/events":
@@ -1218,6 +1212,15 @@ class ErgonStudioApp(App[None]):
                 title="Tasks",
                 entries=build_task_entries(self.runtime),
                 empty_message="No tasks in this session yet.",
+            )
+        )
+
+    def _open_team_inspector(self) -> None:
+        self.push_screen(
+            InspectorScreen(
+                title="Team",
+                entries=build_team_entries(self.runtime),
+                empty_message="No agents loaded.",
             )
         )
 

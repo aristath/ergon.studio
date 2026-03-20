@@ -137,6 +137,35 @@ def build_thread_entries(runtime: RuntimeContext) -> list[InspectorEntry]:
     return entries
 
 
+def build_team_entries(runtime: RuntimeContext) -> list[InspectorEntry]:
+    entries: list[InspectorEntry] = []
+    for agent_id in runtime.list_agent_ids():
+        provider_name = runtime.assigned_provider_name(agent_id)
+        provider = runtime.provider_details(provider_name) if provider_name is not None else None
+        model = "-"
+        if isinstance(provider, dict):
+            raw_model = provider.get("model")
+            if isinstance(raw_model, str) and raw_model.strip():
+                model = raw_model.strip()
+        lines = [
+            f"[b]{agent_id}[/b]",
+            f"Status: {runtime.agent_status_summary(agent_id)}",
+            f"Provider: {provider_name or '-'}",
+            f"Model: {model}",
+        ]
+        reason = runtime.agent_unavailable_reason(agent_id)
+        if reason is not None:
+            lines.extend(["", "[b]Issue[/b]", reason])
+        entries.append(
+            InspectorEntry(
+                entry_id=agent_id,
+                label=f"{agent_id} · {runtime.agent_status_summary(agent_id)}",
+                detail="\n".join(lines).strip(),
+            )
+        )
+    return entries
+
+
 def build_thread_entry(runtime: RuntimeContext, thread_id: str) -> InspectorEntry | None:
     thread = runtime.get_thread(thread_id)
     if thread is None or thread.id == runtime.main_thread_id:

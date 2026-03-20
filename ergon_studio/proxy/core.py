@@ -191,6 +191,7 @@ class ProxyOrchestrationCore:
         if response is not None:
             emitted = self._emit_tool_calls(
                 response=response,
+                request=request,
                 continuation=ContinuationState(mode="act", agent_id="orchestrator"),
                 state=state,
             )
@@ -241,6 +242,7 @@ class ProxyOrchestrationCore:
         if response is not None:
             emitted = self._emit_tool_calls(
                 response=response,
+                request=request,
                 continuation=ContinuationState(
                     mode="delegate",
                     agent_id=agent_id,
@@ -443,6 +445,7 @@ class ProxyOrchestrationCore:
                 if response is not None:
                     emitted = self._emit_tool_calls(
                         response=response,
+                        request=request,
                         continuation=ContinuationState(
                             mode="workflow",
                             workflow_id=definition.id,
@@ -523,6 +526,7 @@ class ProxyOrchestrationCore:
             if response is not None:
                 emitted = self._emit_tool_calls(
                     response=response,
+                    request=request,
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
@@ -608,6 +612,7 @@ class ProxyOrchestrationCore:
             if response is not None:
                 emitted = self._emit_tool_calls(
                     response=response,
+                    request=request,
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
@@ -686,6 +691,7 @@ class ProxyOrchestrationCore:
             if response is not None:
                 emitted = self._emit_tool_calls(
                     response=response,
+                    request=request,
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
@@ -908,10 +914,14 @@ class ProxyOrchestrationCore:
         self,
         *,
         response: Any,
+        request,
         continuation: ContinuationState,
         state: dict[str, Any],
     ) -> list[ProxyToolCallEvent]:
-        tool_calls = extract_tool_calls(response)
+        tool_calls = self._validated_tool_calls(
+            extract_tool_calls(response),
+            request=request,
+        )
         if not tool_calls:
             return []
         encoded_calls = tuple(
@@ -923,6 +933,28 @@ class ProxyOrchestrationCore:
         for call in encoded_calls:
             _record_output_item(state, "tool_call", call_id=call.id)
         return [ProxyToolCallEvent(call=call, index=index) for index, call in enumerate(encoded_calls)]
+
+    def _validated_tool_calls(self, tool_calls: tuple[ProxyToolCall, ...], *, request) -> tuple[ProxyToolCall, ...]:
+        if not tool_calls:
+            return ()
+        available_tool_names = {tool.name for tool in request.tools}
+        for tool_call in tool_calls:
+            if tool_call.name not in available_tool_names:
+                raise ValueError(f"model requested unavailable host tool: {tool_call.name}")
+
+        tool_choice = request.tool_choice
+        if tool_choice == "none":
+            raise ValueError("model requested tool calls despite tool_choice='none'")
+        if isinstance(tool_choice, dict):
+            required_name = tool_choice["function"]["name"]
+            unexpected = [tool_call.name for tool_call in tool_calls if tool_call.name != required_name]
+            if unexpected:
+                raise ValueError(
+                    f"model requested tool calls outside required tool '{required_name}': {', '.join(unexpected)}"
+                )
+        if request.parallel_tool_calls is False and len(tool_calls) > 1:
+            raise ValueError("model requested multiple tool calls despite parallel_tool_calls=false")
+        return tool_calls
 
 
 def _merge_preamble(preamble: str, prompt: str) -> str:

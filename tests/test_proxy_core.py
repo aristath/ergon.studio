@@ -407,6 +407,61 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("does not support tool calling", result.content)
         self.assertTrue(any(isinstance(event, ProxyContentDeltaEvent) for event in events))
 
+    async def test_stream_turn_errors_when_model_ignores_required_tool_choice(self) -> None:
+        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"act\"}",
+                {
+                    "text": "",
+                    "tool_calls": [
+                        {"id": "call_1", "name": "write_file", "arguments": "{\"path\":\"main.py\"}"},
+                    ],
+                },
+            ],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
+            tools=(_host_tool("read_file"), _host_tool("write_file")),
+            tool_choice={"type": "function", "function": {"name": "read_file"}},
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertIn("outside required tool 'read_file'", result.content)
+        self.assertTrue(any(isinstance(event, ProxyContentDeltaEvent) for event in events))
+
+    async def test_stream_turn_errors_when_model_ignores_parallel_tool_call_limit(self) -> None:
+        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_fake_agent_builder({
+            "orchestrator": [
+                "{\"mode\":\"act\"}",
+                {
+                    "text": "",
+                    "tool_calls": [
+                        {"id": "call_1", "name": "read_file", "arguments": "{\"path\":\"main.py\"}"},
+                        {"id": "call_2", "name": "read_file", "arguments": "{\"path\":\"other.py\"}"},
+                    ],
+                },
+            ],
+        }))
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect the files"),),
+            tools=(_host_tool("read_file"),),
+            parallel_tool_calls=False,
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertIn("multiple tool calls despite parallel_tool_calls=false", result.content)
+        self.assertTrue(any(isinstance(event, ProxyContentDeltaEvent) for event in events))
+
     async def test_stream_turn_rebuilds_structured_tool_history_for_continuations(self) -> None:
         captured: dict[str, object] = {}
         tool_call = _host_continuation_tool_call(

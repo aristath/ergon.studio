@@ -1707,87 +1707,11 @@ class RuntimeContext:
             return False
         return _as_bool(parsed.get("allowed"))
 
-    async def _select_delivery_workflow(
-        self,
-        *,
-        body: str,
-        goal: str,
-        current_workflow_id: str | None,
-        created_at: int,
-    ) -> str:
-        allowed = set(self._delivery_candidate_workflow_ids())
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
-        selector = Agent(
-            client=client,
-            id="orchestrator-delivery-workflow-selector",
-            name="Orchestrator Delivery Workflow Selector",
-            description="Internal delivery workflow selector",
-            instructions=_delivery_workflow_selector_instructions(tuple(sorted(allowed))),
-        )
-        try:
-            response = await selector.run(
-                [
-                    Message(
-                        role="user",
-                        text=_delivery_workflow_selector_prompt(
-                            runtime=self,
-                            body=body,
-                            goal=goal,
-                            current_workflow_id=current_workflow_id,
-                        ),
-                        author_name="system",
-                    )
-                ],
-                session=selector.create_session(session_id=f"main-delivery-workflow:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="orchestrator_delivery_workflow_selector_failed",
-                summary=f"Delivery workflow selector failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
-        try:
-            parsed = _parse_turn_decision_json(response.text.strip())
-        except ValueError:
-            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
-        selected = _optional_text(parsed.get("workflow_id"))
-        if selected not in allowed:
-            return self._fallback_delivery_workflow(current_workflow_id=current_workflow_id)
-        return selected
-
     def _workflow_is_non_delivery(self, workflow_id: str) -> bool:
         definition = self.registry.workflow_definitions.get(workflow_id)
         if definition is None:
             return False
         return str(definition.metadata.get("acceptance_mode", "delivery")) != "delivery"
-
-    def _delivery_candidate_workflow_ids(self) -> tuple[str, ...]:
-        configured: list[str] = []
-        for workflow_id in self.list_workflow_ids():
-            definition = self.registry.workflow_definitions[workflow_id]
-            if definition.metadata.get("delivery_candidate") is True:
-                configured.append(workflow_id)
-        if configured:
-            return tuple(configured)
-        return ("single-agent-execution", "standard-build", "dynamic-open-ended")
-
-    def _fallback_delivery_workflow(self, *, current_workflow_id: str | None) -> str:
-        candidates = self._delivery_candidate_workflow_ids()
-        if current_workflow_id in candidates:
-            return current_workflow_id
-        if "single-agent-execution" in candidates:
-            return "single-agent-execution"
-        if candidates:
-            return candidates[0]
-        return "single-agent-execution"
 
     async def generate_agent_text_without_tools(
         self,
@@ -3240,44 +3164,6 @@ def _non_delivery_workflow_guard_instructions(workflow_id: str) -> str:
     )
 
 
-def _delivery_workflow_selector_instructions(allowed_workflow_ids: tuple[str, ...]) -> str:
-    rules = [
-        "- Prefer the smallest workflow that still fits the actual task, but do not force a rigid staged workflow onto genuinely adaptive work.",
-        "- Use the whole recent conversation and workspace state, not keyword matching.",
-        "- Preserve the user's full delivery goal. Do not narrow the task to design-only, review-only, or documentation-only work if the user asked for an implemented result.",
-    ]
-    if "single-agent-execution" in allowed_workflow_ids:
-        rules.insert(
-            0,
-            "- Use `single-agent-execution` for tiny, contained deliveries that one specialist can complete and verify cleanly.",
-        )
-    if "standard-build" in allowed_workflow_ids:
-        rules.insert(
-            1 if "single-agent-execution" in allowed_workflow_ids else 0,
-            "- Use `standard-build` only when a predictable staged flow with explicit planning, implementation, verification, and review is clearly worth the overhead.",
-        )
-    if "dynamic-open-ended" in allowed_workflow_ids:
-        rules.append(
-            "- Use `dynamic-open-ended` when the work is genuinely broad, uncertain, evolving, greenfield enough to need judgment calls, or likely to need changing specialists mid-flight."
-        )
-    return "\n".join(
-        [
-            "You are a narrow internal workflow selector for delivery work.",
-            "Choose the best delivery workflow for the current task.",
-            "Output JSON only.",
-            "",
-            "Allowed workflow_id values:",
-            *[f'- "{workflow_id}"' for workflow_id in allowed_workflow_ids],
-            "",
-            "Rules:",
-            *rules,
-            "",
-            "Return:",
-            f'{{"workflow_id": "{allowed_workflow_ids[-1] if allowed_workflow_ids else "single-agent-execution"}"}}',
-        ]
-    )
-
-
 def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
     recent_messages = runtime.list_main_messages()[-8:]
     transcript_lines = []
@@ -3290,40 +3176,6 @@ def _deliverable_classifier_prompt(runtime: RuntimeContext, body: str) -> str:
         [
             "Main thread transcript:",
             *transcript_lines,
-            "",
-            "Latest user request:",
-            body,
-        ]
-    )
-
-
-def _delivery_workflow_selector_prompt(
-    runtime: RuntimeContext,
-    *,
-    body: str,
-    goal: str,
-    current_workflow_id: str | None,
-) -> str:
-    recent_messages = runtime.list_main_messages()[-8:]
-    transcript_lines = []
-    for message in recent_messages:
-        text = runtime.conversation_store.read_message_body(message).rstrip("\n")
-        if not text:
-            continue
-        transcript_lines.append(f"{message.sender}: {text}")
-    workspace_files = runtime._workspace_file_list(limit=12)
-    return "\n".join(
-        [
-            "Main thread transcript:",
-            *transcript_lines,
-            "",
-            f"Current workflow candidate: {current_workflow_id or '(none)'}",
-            "",
-            "Resolved delivery goal:",
-            goal,
-            "",
-            "Current workspace files:",
-            *(workspace_files or ["(no files)"]),
             "",
             "Latest user request:",
             body,

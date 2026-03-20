@@ -4,6 +4,7 @@ from typing import Any
 
 from ergon_studio.proxy.models import ProxyFunctionTool, ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
 from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool, parse_function_tool_call
+from ergon_studio.proxy.tool_policy import validate_tool_choice
 
 
 def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
@@ -24,6 +25,7 @@ def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     tool_choice = payload.get("tool_choice")
     if tool_choice is not None and not isinstance(tool_choice, (str, dict)):
         raise ValueError("tool_choice must be a string, object, or null")
+    tool_choice = validate_tool_choice(tool_choice, tools=tools)
 
     parallel_tool_calls = payload.get("parallel_tool_calls")
     if parallel_tool_calls is not None and type(parallel_tool_calls) is not bool:

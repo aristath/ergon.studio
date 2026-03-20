@@ -106,6 +106,53 @@ class ProxyChatBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[0].content, "")
         self.assertEqual(request.messages[0].tool_calls[0].name, "run_command")
 
+    def test_parses_specific_function_tool_choice(self) -> None:
+        request = parse_chat_completion_request(
+            {
+                "model": "ergon",
+                "messages": [{"role": "user", "content": "Inspect main.py"}],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "description": "Read a file",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "read_file"},
+                },
+            }
+        )
+
+        self.assertEqual(request.tool_choice, {"type": "function", "function": {"name": "read_file"}})
+
+    def test_rejects_unknown_specific_function_tool_choice(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_chat_completion_request(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Inspect main.py"}],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                    "tool_choice": {
+                        "type": "function",
+                        "function": {"name": "write_file"},
+                    },
+                }
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

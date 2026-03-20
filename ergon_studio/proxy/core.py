@@ -11,6 +11,7 @@ from ergon_studio.agent_factory import build_agent
 from ergon_studio.proxy.continuation import ContinuationState, encode_continuation_tool_call, latest_continuation
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
+from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.tool_passthrough import build_declaration_tools, extract_tool_calls
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
@@ -148,6 +149,8 @@ class ProxyOrchestrationCore:
             prompt=prompt,
             session_id=f"proxy-direct-{uuid4().hex}",
             host_tools=request.tools,
+            tool_choice=request.tool_choice,
+            parallel_tool_calls=request.parallel_tool_calls,
             final_response_sink=lambda value: _set_response_holder(response_holder, value),
         ):
             state["content"] += delta
@@ -189,6 +192,8 @@ class ProxyOrchestrationCore:
             prompt=specialist_prompt,
             session_id=f"proxy-delegate-{agent_id}-{uuid4().hex}",
             host_tools=request.tools,
+            tool_choice=request.tool_choice,
+            parallel_tool_calls=request.parallel_tool_calls,
             final_response_sink=lambda value: _set_response_holder(response_holder, value),
         ):
             specialist_text += delta
@@ -262,6 +267,8 @@ class ProxyOrchestrationCore:
                     prompt=specialist_prompt,
                     session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
                     host_tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
                     final_response_sink=lambda value: _set_response_holder(response_holder, value),
                 ):
                     agent_text += delta
@@ -353,6 +360,8 @@ class ProxyOrchestrationCore:
                     prompt=specialist_prompt,
                     session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
                     host_tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
                     final_response_sink=lambda value: _set_response_holder(response_holder, value),
                 ):
                     agent_text += delta
@@ -423,6 +432,8 @@ class ProxyOrchestrationCore:
         session_id: str,
         preamble: str = "",
         host_tools=(),
+        tool_choice=None,
+        parallel_tool_calls=None,
         final_response_sink: Callable[[Any], None] | None = None,
     ):
         full_prompt = _merge_preamble(preamble, prompt)
@@ -432,6 +443,8 @@ class ProxyOrchestrationCore:
             session_id=session_id,
             stream=True,
             host_tools=host_tools,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
         )
         if hasattr(run_result, "__aiter__") and hasattr(run_result, "get_final_response"):
             emitted = False
@@ -463,6 +476,8 @@ class ProxyOrchestrationCore:
         session_id: str,
         stream: bool,
         host_tools=(),
+        tool_choice=None,
+        parallel_tool_calls=None,
     ):
         agent = self._agent_builder(
             self.registry,
@@ -471,13 +486,19 @@ class ProxyOrchestrationCore:
             ignore_missing_tools=True,
             include_mcp_servers=False,
         )
+        allowed_tools, tool_options = resolve_agent_tool_policy(
+            tools=tuple(host_tools),
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+        )
         run_kwargs = {
             "session": agent.create_session(session_id=session_id),
             "stream": stream,
         }
-        declaration_tools = build_declaration_tools(tuple(host_tools))
+        declaration_tools = build_declaration_tools(allowed_tools)
         if declaration_tools:
             run_kwargs["tools"] = declaration_tools
+        run_kwargs.update(tool_options)
         result = agent.run(
             [
                 Message(

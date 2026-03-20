@@ -4,6 +4,7 @@ from typing import Any
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
 from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool
+from ergon_studio.proxy.tool_policy import validate_tool_choice
 
 
 def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
@@ -23,6 +24,7 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
         raise ValueError("parallel_tool_calls must be a bool or null")
 
     tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
+    tool_choice = validate_tool_choice(tool_choice, tools=tools)
     messages = tuple(_parse_input_item(item) for item in _normalize_input(payload.get("input")))
     return ProxyTurnRequest(
         model=model.strip(),

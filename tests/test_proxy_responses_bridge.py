@@ -43,6 +43,30 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[1].role, "tool")
         self.assertEqual(request.messages[1].tool_call_id, "call_1")
 
+    def test_parses_specific_function_tool_choice(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "input": "Inspect main.py",
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "description": "Read a file",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "read_file"},
+                },
+            }
+        )
+
+        self.assertEqual(request.tool_choice, {"type": "function", "function": {"name": "read_file"}})
+
 
 if __name__ == "__main__":
     unittest.main()

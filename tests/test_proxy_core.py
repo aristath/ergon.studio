@@ -167,6 +167,40 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed_result.content, "Workflow final summary")
         self.assertEqual(resumed_result.finish_reason, "stop")
 
+    async def test_stream_turn_respects_host_tool_policy(self) -> None:
+        captured: dict[str, object] = {}
+        remaining = {
+            "orchestrator": ["{\"mode\":\"act\"}", {"text": "", "tool_calls": []}],
+        }
+
+        class _CaptureAgent(_FakeAgent):
+            def run(self, _messages, *, session, stream: bool = False, tools=None, **kwargs):
+                captured["tools"] = tools
+                captured["kwargs"] = kwargs
+                return super().run(_messages, session=session, stream=stream, tools=tools, **kwargs)
+
+        def _builder(_registry, agent_id: str, **_kwargs):
+            return _CaptureAgent([remaining[agent_id].pop(0)])
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
+            tools=(_host_tool("read_file"), _host_tool("write_file")),
+            tool_choice={"type": "function", "function": {"name": "write_file"}},
+            parallel_tool_calls=False,
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        tools = captured["tools"]
+        kwargs = captured["kwargs"]
+        self.assertEqual([tool.name for tool in tools], ["write_file"])
+        self.assertEqual(kwargs["tool_choice"], {"mode": "required", "required_function_name": "write_file"})
+        self.assertFalse(kwargs["allow_multiple_tool_calls"])
+
 
 class _FakeRegistry:
     def __init__(self) -> None:
@@ -221,7 +255,7 @@ class _FakeAgent:
     def create_session(self, *, session_id: str):
         return object()
 
-    def run(self, _messages, *, session, stream: bool = False, tools=None):
+    def run(self, _messages, *, session, stream: bool = False, tools=None, **_kwargs):
         raw = self._responses.pop(0)
         if isinstance(raw, str):
             payload = {"text": raw, "tool_calls": []}

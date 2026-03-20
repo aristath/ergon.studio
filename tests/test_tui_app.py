@@ -57,6 +57,15 @@ class FakeStreamingAgent:
         )
 
 
+class FailingAgent:
+    def create_session(self, *, session_id: str | None = None, **_: object):
+        return AgentSession(session_id=session_id)
+
+    async def run(self, messages=None, *, session=None, **_: object):
+        del messages, session
+        raise RuntimeError("boom")
+
+
 class GateStreamingAgent:
     def __init__(
         self,
@@ -360,8 +369,8 @@ class TestMessages(IsolatedAsyncioTestCase):
                 saw_live = False
                 saw_draft = False
                 saw_workroom = False
-                for _ in range(8):
-                    await asyncio.sleep(0.03)
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
                     await pilot.pause()
                     text = _timeline_text(app)
                     saw_workroom = saw_workroom or "Orchestrator <-> coder" in text
@@ -501,6 +510,47 @@ class TestMessages(IsolatedAsyncioTestCase):
                 release.set()
                 await task
                 await pilot.pause()
+
+    async def test_failed_turn_resolves_completion_without_future_exception(self):
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                return_value=FailingAgent(),
+            ), patch.object(
+                type(runtime),
+                "_decide_orchestrator_turn",
+                autospec=True,
+                return_value=OrchestratorTurnDecision(mode="act", request=""),
+            ), patch.object(
+                type(runtime),
+                "_audit_orchestrator_delivery_turn",
+                autospec=True,
+                return_value=DeliveryAuditDecision(
+                    deliverable_expected=False,
+                    reconsider=False,
+                    reason="",
+                ),
+            ):
+                turn = app._submit_orchestrator_turn("hello")
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if turn.completion.done():
+                        break
+                self.assertTrue(turn.completion.done())
+                self.assertFalse(turn.completion.cancelled())
+                self.assertIsNone(turn.completion.exception())
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if "Send failed" in _timeline_text(app):
+                        break
+                self.assertIn("Send failed", _timeline_text(app))
 
     async def test_send_to_orchestrator_only_waits_for_its_own_turn(self):
         from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision

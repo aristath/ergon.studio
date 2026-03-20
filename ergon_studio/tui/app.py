@@ -440,7 +440,14 @@ class ErgonStudioApp(App[None]):
             self._refresh_timeline()
             async for _event in stream:
                 pass
-            await stream.get_final_response()
+            _user_message, reply_message = await stream.get_final_response()
+            if reply_message is None:
+                self._add_notice(
+                    "The orchestrator could not produce a response for that turn.",
+                    level="error",
+                    title="Send failed",
+                )
+                self._refresh_timeline()
         except asyncio.CancelledError:
             thinking.hide()
             self._refresh_timeline()
@@ -452,7 +459,7 @@ class ErgonStudioApp(App[None]):
             self._add_notice(f"Error: {exc}", level="error", title="Send failed")
             self._refresh_timeline()
             if not turn.completion.done():
-                turn.completion.set_exception(exc)
+                turn.completion.set_result(None)
         else:
             thinking.hide()
             self._refresh_timeline()

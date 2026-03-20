@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_project_args(serve_parser)
     serve_parser.add_argument("--host", type=str, default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=4000)
+    serve_parser.add_argument("--model-id", type=str, default="ergon")
     serve_parser.add_argument("--check", action="store_true")
 
     sessions_parser = subparsers.add_parser("sessions")
@@ -146,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             core=core,
+            model_id=args.model_id,
         )
         return 0
 

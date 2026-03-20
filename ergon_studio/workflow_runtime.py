@@ -326,19 +326,17 @@ class _GroupChatParticipantExecutor(Executor):
         if not messages:
             messages = [Message(role="user", text=self.goal, author_name="workflow")]
 
-        response = await self._run_group_chat_turn(messages)
-        response_text = response.text.strip()
+        response_text = await self._run_group_chat_turn(messages)
         if not response_text:
             response_text = f"{self.agent_id} had no response."
-
-        self.runtime.append_message_to_thread(
-            thread_id=self.thread.id,
-            message_id=f"message-{uuid4().hex}",
-            sender=self.agent_id,
-            kind="chat",
-            body=response_text,
-            created_at=self.cursor.next(),
-        )
+            self.runtime.append_message_to_thread(
+                thread_id=self.thread.id,
+                message_id=f"message-{uuid4().hex}",
+                sender=self.agent_id,
+                kind="chat",
+                body=response_text,
+                created_at=self.cursor.next(),
+            )
         _append_thread_output(
             tracker=self.tracker,
             thread_id=self.thread.id,
@@ -353,7 +351,7 @@ class _GroupChatParticipantExecutor(Executor):
             )
         )
 
-    async def _run_group_chat_turn(self, messages: list[Message]):
+    async def _run_group_chat_turn(self, messages: list[Message]) -> str | None:
         try:
             base_agent = self.runtime.build_agent(self.agent_id)
         except (KeyError, ValueError) as exc:
@@ -388,7 +386,38 @@ class _GroupChatParticipantExecutor(Executor):
         agent = _group_chat_agent(base_agent, self.runtime, self.workflow_id, self.agent_id)
         try:
             with use_tool_execution_context(tool_context):
-                response = await agent.run(messages=messages, session=session)
+                response_stream = self.runtime._stream_visible_agent_reply(
+                    thread_id=self.thread.id,
+                    reply_sender=self.agent_id,
+                    kind="chat",
+                    created_at=self.cursor.next(),
+                    run_callable=lambda: agent.run(messages=messages, session=session, stream=True),
+                    persist_reply=lambda final_text, reply_created_at: self.runtime.append_message_to_thread(
+                        thread_id=self.thread.id,
+                        message_id=f"message-{uuid4().hex}",
+                        sender=self.agent_id,
+                        kind="chat",
+                        body=final_text,
+                        created_at=self.cursor.next(),
+                    ),
+                    on_exception=lambda exc, event_created_at: self.runtime.append_event(
+                        kind="group_chat_participant_failed",
+                        summary=f"{self.agent_id} failed in group chat: {type(exc).__name__}: {exc}",
+                        created_at=event_created_at,
+                        thread_id=self.thread.id,
+                        task_id=self.thread.parent_task_id,
+                    ),
+                    on_empty_response=lambda event_created_at: self.runtime.append_event(
+                        kind="group_chat_participant_failed",
+                        summary=f"{self.agent_id} returned an empty response in group chat",
+                        created_at=event_created_at,
+                        thread_id=self.thread.id,
+                        task_id=self.thread.parent_task_id,
+                    ),
+                )
+                async for _ in response_stream:
+                    pass
+                response_text, _reply_message = await response_stream.get_final_response()
         except Exception as exc:
             self.runtime.append_event(
                 kind="group_chat_participant_failed",
@@ -410,8 +439,7 @@ class _GroupChatParticipantExecutor(Executor):
             agent_id=self.agent_id,
             session=session,
         )
-        self.runtime.track_token_usage(response)
-        return response
+        return response_text
 
 
 class _OrchestratorReviewExecutor(Executor):

@@ -26,8 +26,9 @@ def current_tool_execution_context() -> ToolExecutionContext | None:
 
 @contextmanager
 def use_tool_execution_context(context: ToolExecutionContext) -> Iterator[None]:
-    token = _CURRENT_TOOL_CONTEXT.set(context)
+    previous = _CURRENT_TOOL_CONTEXT.get()
+    _CURRENT_TOOL_CONTEXT.set(context)
     try:
         yield
     finally:
-        _CURRENT_TOOL_CONTEXT.reset(token)
+        _CURRENT_TOOL_CONTEXT.set(previous)

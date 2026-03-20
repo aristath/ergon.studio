@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import asyncio
 import json
@@ -1091,6 +1092,115 @@ class RuntimeContext:
             ),
         )
 
+    def _stream_visible_agent_reply(
+        self,
+        *,
+        thread_id: str,
+        reply_sender: str,
+        kind: str,
+        created_at: int,
+        run_callable: Callable[[], object],
+        persist_reply: Callable[[str, int], MessageRecord],
+        on_exception: Callable[[Exception, int], None],
+        on_empty_response: Callable[[int], None] | None = None,
+    ) -> ResponseStream[LiveRuntimeEvent, tuple[str | None, MessageRecord | None]]:
+        state: dict[str, str | MessageRecord | None] = {
+            "text": None,
+            "reply": None,
+        }
+
+        async def _events():
+            draft_id = f"draft-{uuid4().hex}"
+            started = self.live_state.start_draft(
+                draft_id=draft_id,
+                thread_id=thread_id,
+                sender=reply_sender,
+                kind=kind,
+                created_at=created_at + 1,
+            )
+            yield started
+
+            response_text = ""
+            try:
+                stream_or_response = run_callable()
+                if hasattr(stream_or_response, "__aiter__") and hasattr(stream_or_response, "get_final_response"):
+                    async for update in stream_or_response:
+                        text_delta = getattr(update, "text", "")
+                        if not text_delta:
+                            continue
+                        response_text += text_delta
+                        event = self.live_state.append_delta(
+                            draft_id=draft_id,
+                            delta=text_delta,
+                            created_at=created_at + 1,
+                        )
+                        if event is not None:
+                            yield event
+                    response = await stream_or_response.get_final_response()
+                else:
+                    response = await stream_or_response
+            except asyncio.CancelledError:
+                self.live_state.fail_draft(
+                    draft_id=draft_id,
+                    error="cancelled",
+                    created_at=created_at + 1,
+                )
+                raise
+            except Exception as exc:
+                on_exception(exc, created_at + 1)
+                failed = self.live_state.fail_draft(
+                    draft_id=draft_id,
+                    error=str(exc),
+                    created_at=created_at + 1,
+                )
+                if failed is not None:
+                    yield failed
+                return
+
+            self.track_token_usage(response)
+            final_text = getattr(response, "text", "").strip()
+            if final_text and not response_text:
+                response_text = final_text
+                event = self.live_state.append_delta(
+                    draft_id=draft_id,
+                    delta=final_text,
+                    created_at=created_at + 1,
+                )
+                if event is not None:
+                    yield event
+            if not final_text:
+                final_text = response_text.strip()
+            if not final_text:
+                if on_empty_response is not None:
+                    on_empty_response(created_at + 1)
+                failed = self.live_state.fail_draft(
+                    draft_id=draft_id,
+                    error="empty response",
+                    created_at=created_at + 1,
+                )
+                if failed is not None:
+                    yield failed
+                return
+
+            reply_message = persist_reply(final_text, created_at + 1)
+            state["text"] = final_text
+            state["reply"] = reply_message
+            completed = self.live_state.complete_draft(
+                draft_id=draft_id,
+                message_id=reply_message.id,
+                created_at=created_at + 1,
+            )
+            if completed is not None:
+                yield completed
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: (
+                state["text"] if isinstance(state["text"], str) else None,
+                state["reply"] if isinstance(state["reply"], MessageRecord) else None,
+            ),
+        )
+
     async def _stream_agent_turn_events(
         self,
         *,
@@ -1115,19 +1225,18 @@ class RuntimeContext:
             )
         state["prompt"] = prompt_message
 
-        draft_id = f"draft-{uuid4().hex}"
-        started = self.live_state.start_draft(
-            draft_id=draft_id,
-            thread_id=thread_id,
-            sender=reply_sender,
-            kind="chat",
-            created_at=created_at + 1,
-        )
-        yield started
-
         try:
             agent = self.build_agent(agent_id)
         except (KeyError, ValueError) as exc:
+            draft_id = f"draft-{uuid4().hex}"
+            started = self.live_state.start_draft(
+                draft_id=draft_id,
+                thread_id=thread_id,
+                sender=reply_sender,
+                kind="chat",
+                created_at=created_at + 1,
+            )
+            yield started
             self.append_event(
                 kind="agent_unavailable",
                 summary=f"{agent_id} unavailable: {exc}",
@@ -1164,123 +1273,56 @@ class RuntimeContext:
             task_id=thread.parent_task_id if thread is not None else None,
             agent_id=agent_id,
         )
-
-        response_text = ""
-        try:
-            with use_tool_execution_context(tool_context):
-                stream_or_response = agent.run(
-                    [
-                        Message(
-                            role="user",
-                            text=body,
-                            author_name=prompt_sender,
-                        )
-                    ],
-                    session=session,
-                    stream=True,
-                )
-                if hasattr(stream_or_response, "__aiter__") and hasattr(stream_or_response, "get_final_response"):
-                    async for update in stream_or_response:
-                        text_delta = getattr(update, "text", "")
-                        if not text_delta:
-                            continue
-                        response_text += text_delta
-                        event = self.live_state.append_delta(
-                            draft_id=draft_id,
-                            delta=text_delta,
-                            created_at=created_at + 1,
-                        )
-                        if event is not None:
-                            yield event
-                    response = await stream_or_response.get_final_response()
-                else:
-                    response = await stream_or_response
-        except asyncio.CancelledError:
-            self.agent_session_store.save_session(
-                session_id=runtime_session_id,
-                thread_id=thread_id,
-                agent_id=agent_id,
+        response_stream = self._stream_visible_agent_reply(
+            thread_id=thread_id,
+            reply_sender=reply_sender,
+            kind="chat",
+            created_at=created_at,
+            run_callable=lambda: agent.run(
+                [
+                    Message(
+                        role="user",
+                        text=body,
+                        author_name=prompt_sender,
+                    )
+                ],
                 session=session,
-            )
-            self.live_state.fail_draft(
-                draft_id=draft_id,
-                error="cancelled",
-                created_at=created_at + 1,
-            )
-            raise
-        except Exception as exc:
-            self.append_event(
+                stream=True,
+            ),
+            persist_reply=lambda final_text, reply_created_at: self.append_message_to_thread(
+                thread_id=thread_id,
+                message_id=f"message-{uuid4().hex}",
+                sender=reply_sender,
+                kind="chat",
+                body=final_text,
+                created_at=reply_created_at,
+            ),
+            on_exception=lambda exc, event_created_at: self.append_event(
                 kind="agent_failed",
                 summary=f"{agent_id} run failed: {type(exc).__name__}: {exc}",
-                created_at=created_at + 1,
+                created_at=event_created_at,
                 thread_id=thread_id,
-            )
+            ),
+            on_empty_response=lambda event_created_at: self.append_event(
+                kind="agent_failed",
+                summary=f"{agent_id} returned an empty response",
+                created_at=event_created_at,
+                thread_id=thread_id,
+            ),
+        )
+        try:
+            with use_tool_execution_context(tool_context):
+                async for event in response_stream:
+                    yield event
+                _, reply_message = await response_stream.get_final_response()
+                state["reply"] = reply_message
+        finally:
             self.agent_session_store.save_session(
                 session_id=runtime_session_id,
                 thread_id=thread_id,
                 agent_id=agent_id,
                 session=session,
             )
-            failed = self.live_state.fail_draft(
-                draft_id=draft_id,
-                error=str(exc),
-                created_at=created_at + 1,
-            )
-            if failed is not None:
-                yield failed
-            return
-
-        self.agent_session_store.save_session(
-            session_id=runtime_session_id,
-            thread_id=thread_id,
-            agent_id=agent_id,
-            session=session,
-        )
-        self.track_token_usage(response)
-        final_text = getattr(response, "text", "").strip()
-        if final_text and not response_text:
-            response_text = final_text
-            event = self.live_state.append_delta(
-                draft_id=draft_id,
-                delta=final_text,
-                created_at=created_at + 1,
-            )
-            if event is not None:
-                yield event
-        if not final_text:
-            final_text = response_text.strip()
-        if not final_text:
-            self.append_event(
-                kind="agent_failed",
-                summary=f"{agent_id} returned an empty response",
-                created_at=created_at + 1,
-                thread_id=thread_id,
-            )
-            failed = self.live_state.fail_draft(
-                draft_id=draft_id,
-                error="empty response",
-                created_at=created_at + 1,
-            )
-            if failed is not None:
-                yield failed
-            return
-
-        reply_message = self.append_message_to_thread(
-            thread_id=thread_id,
-            message_id=f"message-{uuid4().hex}",
-            sender=reply_sender,
-            kind="chat",
-            body=final_text,
-            created_at=created_at + 1,
-        )
-        state["reply"] = reply_message
-        completed = self.live_state.complete_draft(
-            draft_id=draft_id,
-            message_id=reply_message.id,
-            created_at=created_at + 1,
-        )
-        if completed is not None:
-            yield completed
 
     def _refresh_session_title_from_user_turn(self, *, body: str, created_at: int) -> None:
         session = self.current_session()

@@ -6,7 +6,7 @@ from typing import Any
 
 from ergon_studio.config import load_or_create_global_config
 from ergon_studio.definitions import DefinitionDocument, load_definitions_from_dir
-from ergon_studio.paths import GlobalStudioPaths, StudioPaths
+from ergon_studio.paths import GlobalStudioPaths
 
 
 @dataclass(frozen=True)
@@ -16,15 +16,7 @@ class RuntimeRegistry:
     workflow_definitions: dict[str, DefinitionDocument]
 
 
-def load_registry(paths: StudioPaths) -> RuntimeRegistry:
-    return load_registry_from_layout(
-        config_path=paths.config_path,
-        agents_dir=paths.agents_dir,
-        workflows_dir=paths.workflows_dir,
-    )
-
-
-def load_registry_from_global_paths(paths: GlobalStudioPaths) -> RuntimeRegistry:
+def load_registry(paths: GlobalStudioPaths) -> RuntimeRegistry:
     return load_registry_from_layout(
         config_path=paths.config_path,
         agents_dir=paths.agents_dir,

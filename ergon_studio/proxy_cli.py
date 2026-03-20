@@ -7,7 +7,7 @@ from ergon_studio.bootstrap import bootstrap_proxy_home
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.server import serve_proxy
-from ergon_studio.registry import load_registry_from_global_paths
+from ergon_studio.registry import load_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_proxy_server(*, home_dir: Path, host: str, port: int, model_id: str, check: bool) -> int:
     proxy_paths = bootstrap_proxy_home(home_dir)
-    registry = load_registry_from_global_paths(proxy_paths)
+    registry = load_registry(proxy_paths)
     if check:
         health = build_proxy_health_snapshot(registry)
         print(f"ok={str(health['ok']).lower()}")

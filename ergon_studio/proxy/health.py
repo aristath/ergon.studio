@@ -32,13 +32,7 @@ def provider_details(registry, provider_name: str) -> dict[str, Any] | None:
 
 def agent_unavailable_reason(registry, agent_id: str) -> str | None:
     try:
-        build_agent(
-            registry,
-            agent_id,
-            tool_registry={},
-            ignore_missing_tools=True,
-            include_mcp_servers=False,
-        )
+        build_agent(registry, agent_id)
     except (KeyError, ValueError) as exc:
         return str(exc)
     return None

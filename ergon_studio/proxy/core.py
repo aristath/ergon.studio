@@ -482,9 +482,6 @@ class ProxyOrchestrationCore:
         agent = self._agent_builder(
             self.registry,
             agent_id,
-            tool_registry={},
-            ignore_missing_tools=True,
-            include_mcp_servers=False,
         )
         allowed_tools, tool_options = resolve_agent_tool_policy(
             tools=tuple(host_tools),

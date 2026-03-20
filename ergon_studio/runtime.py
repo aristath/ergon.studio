@@ -1589,50 +1589,20 @@ class RuntimeContext:
         body: str,
         created_at: int,
     ) -> OrchestratorTurnDecision:
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return OrchestratorTurnDecision(mode="act", reply="")
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return OrchestratorTurnDecision(mode="act", reply="")
-        decision_agent = Agent(
-            client=client,
-            id="orchestrator-turn-planner",
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id="orchestrator-turn-planner",
             name="Orchestrator Turn Planner",
             description="Internal orchestration planner",
             instructions=_orchestrator_turn_planner_instructions(self),
+            prompt=_orchestrator_turn_planner_prompt(self, body),
+            created_at=created_at,
+            session_id=f"main-turn-planner:{created_at}",
+            failure_event_kind="orchestrator_planner_failed",
+            failure_summary_prefix="Planner failed",
+            invalid_event_kind="orchestrator_planner_invalid",
+            invalid_summary_prefix="Planner returned invalid JSON",
         )
-        try:
-            response = await decision_agent.run(
-                [
-                    Message(
-                        role="user",
-                        text=_orchestrator_turn_planner_prompt(self, body),
-                        author_name="system",
-                    )
-                ],
-                session=decision_agent.create_session(session_id=f"main-turn-planner:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="orchestrator_planner_failed",
-                summary=f"Planner failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return OrchestratorTurnDecision(mode="act", reply="")
-        self.track_token_usage(response)
-        raw = response.text.strip()
-        try:
-            parsed = _parse_turn_decision_json(raw)
-        except ValueError as exc:
-            self.append_event(
-                kind="orchestrator_planner_invalid",
-                summary=f"Planner returned invalid JSON: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
+        if parsed is None:
             return OrchestratorTurnDecision(mode="act", reply="")
         mode = str(parsed.get("mode", "act")).strip().lower()
         if mode not in {"reply", "act", "delegate", "workflow"}:
@@ -1654,43 +1624,18 @@ class RuntimeContext:
         body: str,
         created_at: int,
     ) -> bool:
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return False
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return False
-        classifier = Agent(
-            client=client,
-            id="orchestrator-deliverable-classifier",
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id="orchestrator-deliverable-classifier",
             name="Orchestrator Deliverable Classifier",
             description="Internal delivery intent classifier",
             instructions=_deliverable_classifier_instructions(),
+            prompt=_deliverable_classifier_prompt(self, body),
+            created_at=created_at,
+            session_id=f"main-deliverable:{created_at}",
+            failure_event_kind="orchestrator_classifier_failed",
+            failure_summary_prefix="Deliverable classifier failed",
         )
-        try:
-            response = await classifier.run(
-                [
-                    Message(
-                        role="user",
-                        text=_deliverable_classifier_prompt(self, body),
-                        author_name="system",
-                    )
-                ],
-                session=classifier.create_session(session_id=f"main-deliverable:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="orchestrator_classifier_failed",
-                summary=f"Deliverable classifier failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return False
-        self.track_token_usage(response)
-        try:
-            parsed = _parse_turn_decision_json(response.text.strip())
-        except ValueError:
+        if parsed is None:
             return False
         return _as_bool(parsed.get("deliverable_expected"))
 
@@ -1701,43 +1646,18 @@ class RuntimeContext:
         created_at: int,
         reason: str,
     ) -> OrchestratorTurnDecision | None:
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return None
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return None
-        decision_agent = Agent(
-            client=client,
-            id="orchestrator-delivery-reconsideration-planner",
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id="orchestrator-delivery-reconsideration-planner",
             name="Orchestrator Delivery Reconsideration Planner",
             description="Internal delivery replanner",
             instructions=_delivery_reconsideration_instructions(self, reason),
+            prompt=_orchestrator_turn_planner_prompt(self, body),
+            created_at=created_at,
+            session_id=f"main-delivery-reconsideration:{created_at}",
+            failure_event_kind="orchestrator_reconsideration_failed",
+            failure_summary_prefix="Delivery reconsideration failed",
         )
-        try:
-            response = await decision_agent.run(
-                [
-                    Message(
-                        role="user",
-                        text=_orchestrator_turn_planner_prompt(self, body),
-                        author_name="system",
-                    )
-                ],
-                session=decision_agent.create_session(session_id=f"main-delivery-reconsideration:{created_at}"),
-            )
-        except Exception as exc:
-            self.append_event(
-                kind="orchestrator_reconsideration_failed",
-                summary=f"Delivery reconsideration failed: {type(exc).__name__}: {exc}",
-                created_at=created_at,
-                thread_id=self.main_thread_id,
-            )
-            return None
-        self.track_token_usage(response)
-        try:
-            parsed = _parse_turn_decision_json(response.text.strip())
-        except ValueError:
+        if parsed is None:
             return None
         mode = str(parsed.get("mode", "act")).strip().lower()
         if mode not in {"workflow", "delegate", "act"}:
@@ -1767,45 +1687,81 @@ class RuntimeContext:
         workflow_id: str,
         created_at: int,
     ) -> bool:
-        try:
-            orchestrator = self.build_agent("orchestrator")
-        except (KeyError, ValueError):
-            return False
-        client = getattr(orchestrator, "client", None)
-        if client is None:
-            return False
-        classifier = Agent(
-            client=client,
-            id="orchestrator-non-delivery-guard",
+        parsed = await self._run_orchestrator_json_agent(
+            agent_id="orchestrator-non-delivery-guard",
             name="Orchestrator Non-Delivery Guard",
             description="Internal non-delivery workflow guard",
             instructions=_non_delivery_workflow_guard_instructions(workflow_id),
+            prompt=_deliverable_classifier_prompt(self, body),
+            created_at=created_at,
+            session_id=f"main-non-delivery:{created_at}:{workflow_id}",
+            failure_event_kind="orchestrator_non_delivery_guard_failed",
+            failure_summary_prefix="Non-delivery guard failed",
+        )
+        if parsed is None:
+            return False
+        return _as_bool(parsed.get("allowed"))
+
+    async def _run_orchestrator_json_agent(
+        self,
+        *,
+        agent_id: str,
+        name: str,
+        description: str,
+        instructions: str,
+        prompt: str,
+        created_at: int,
+        session_id: str,
+        failure_event_kind: str,
+        failure_summary_prefix: str,
+        invalid_event_kind: str | None = None,
+        invalid_summary_prefix: str | None = None,
+    ) -> dict[str, object] | None:
+        try:
+            orchestrator = self.build_agent("orchestrator")
+        except (KeyError, ValueError):
+            return None
+        client = getattr(orchestrator, "client", None)
+        if client is None:
+            return None
+        internal_agent = Agent(
+            client=client,
+            id=agent_id,
+            name=name,
+            description=description,
+            instructions=instructions,
         )
         try:
-            response = await classifier.run(
+            response = await internal_agent.run(
                 [
                     Message(
                         role="user",
-                        text=_deliverable_classifier_prompt(self, body),
+                        text=prompt,
                         author_name="system",
                     )
                 ],
-                session=classifier.create_session(session_id=f"main-non-delivery:{created_at}:{workflow_id}"),
+                session=internal_agent.create_session(session_id=session_id),
             )
         except Exception as exc:
             self.append_event(
-                kind="orchestrator_non_delivery_guard_failed",
-                summary=f"Non-delivery guard failed: {type(exc).__name__}: {exc}",
+                kind=failure_event_kind,
+                summary=f"{failure_summary_prefix}: {type(exc).__name__}: {exc}",
                 created_at=created_at,
                 thread_id=self.main_thread_id,
             )
-            return False
+            return None
         self.track_token_usage(response)
         try:
-            parsed = _parse_turn_decision_json(response.text.strip())
-        except ValueError:
-            return False
-        return _as_bool(parsed.get("allowed"))
+            return _parse_turn_decision_json(response.text.strip())
+        except ValueError as exc:
+            if invalid_event_kind is not None and invalid_summary_prefix is not None:
+                self.append_event(
+                    kind=invalid_event_kind,
+                    summary=f"{invalid_summary_prefix}: {exc}",
+                    created_at=created_at,
+                    thread_id=self.main_thread_id,
+                )
+            return None
 
     def _workflow_is_non_delivery(self, workflow_id: str) -> bool:
         definition = self.registry.workflow_definitions.get(workflow_id)

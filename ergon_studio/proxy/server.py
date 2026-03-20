@@ -16,7 +16,7 @@ from ergon_studio.proxy.chat_adapter import (
 )
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
 from ergon_studio.proxy.health import build_proxy_health_snapshot
-from ergon_studio.proxy.models import ProxyContentDeltaEvent
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent
 from ergon_studio.proxy.responses_adapter import (
     build_responses_response,
     encode_responses_stream_events,
@@ -180,6 +180,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
         content_emitted = False
+        reasoning_emitted = False
+        tool_calls_emitted = 0
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
@@ -197,6 +199,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         sequence_number = 2
         stream = self.server.core.stream_turn(request, created_at=created_at)
         async for event in stream:
+            if isinstance(event, ProxyReasoningDeltaEvent):
+                reasoning_emitted = True
             if isinstance(event, ProxyContentDeltaEvent) and event.delta:
                 content_emitted = True
             for payload in encode_responses_stream_events(
@@ -207,11 +211,16 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 sequence_number=sequence_number,
                 reasoning_item_id=reasoning_item_id,
                 message_item_id=message_item_id,
+                reasoning_output_index=0,
+                tool_output_offset=1 if reasoning_emitted else 0,
+                message_output_index=(1 if reasoning_emitted else 0) + tool_calls_emitted,
                 include_output_done=content_emitted,
             ):
                 self.wfile.write(encode_responses_stream_sse(payload))
                 self.wfile.flush()
                 sequence_number += 1
+            if isinstance(event, ProxyToolCallEvent):
+                tool_calls_emitted += 1
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = self.headers.get("Content-Length")

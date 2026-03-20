@@ -10,7 +10,7 @@ from agent_framework import ResponseStream
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, encode_continuation_tool_call
 from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 from ergon_studio.registry import RuntimeRegistry
 
@@ -176,6 +176,57 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn("\"type\":\"response.reasoning_text.delta\"", body)
         self.assertIn("\"type\":\"response.output_text.delta\"", body)
         self.assertIn("\"type\":\"response.completed\"", body)
+
+    def test_responses_stream_uses_consistent_output_indexes(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [
+                    ProxyReasoningDeltaEvent("Plan."),
+                    ProxyToolCallEvent(
+                        ProxyToolCall(
+                            id="call_1",
+                            name="read_file",
+                            arguments_json="{\"path\":\"main.py\"}",
+                        )
+                    ),
+                    ProxyFinishEvent("tool_calls"),
+                ],
+                tool_calls=(
+                    ProxyToolCall(
+                        id="call_1",
+                        name="read_file",
+                        arguments_json="{\"path\":\"main.py\"}",
+                    ),
+                ),
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Inspect main.py",
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payloads = [
+                json.loads(line[6:])
+                for line in response.read().decode("utf-8").splitlines()
+                if line.startswith("data: {")
+            ]
+
+        reasoning = next(item for item in payloads if item["type"] == "response.reasoning_text.delta")
+        tool = next(item for item in payloads if item["type"] == "response.output_item.added")
+        self.assertEqual(reasoning["output_index"], 0)
+        self.assertEqual(tool["output_index"], 1)
 
     def test_chat_completions_returns_tool_calls(self) -> None:
         handle = start_proxy_server_in_thread(

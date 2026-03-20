@@ -92,6 +92,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload[0]["type"], "response.output_item.added")
         self.assertEqual(payload[0]["item"]["type"], "function_call")
+        self.assertEqual(payload[0]["output_index"], 0)
 
     def test_finish_event_can_skip_output_done_when_no_content_was_streamed(self) -> None:
         payload = encode_responses_stream_events(
@@ -106,6 +107,50 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
         )
 
         self.assertEqual([item["type"] for item in payload], ["response.completed"])
+
+    def test_response_stream_output_indexes_can_be_offset(self) -> None:
+        reasoning = encode_responses_stream_events(
+            event=ProxyReasoningDeltaEvent("Plan."),
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            sequence_number=1,
+            reasoning_item_id="rs_1",
+            message_item_id="msg_1",
+            reasoning_output_index=0,
+            message_output_index=2,
+        )
+        tool = encode_responses_stream_events(
+            event=ProxyToolCallEvent(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json="{\"path\":\"main.py\"}",
+                ),
+                index=0,
+            ),
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            sequence_number=2,
+            reasoning_item_id="rs_1",
+            message_item_id="msg_1",
+            tool_output_offset=1,
+        )
+        content = encode_responses_stream_events(
+            event=ProxyContentDeltaEvent("Done."),
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            sequence_number=3,
+            reasoning_item_id="rs_1",
+            message_item_id="msg_1",
+            message_output_index=2,
+        )
+
+        self.assertEqual(reasoning[0]["output_index"], 0)
+        self.assertEqual(tool[0]["output_index"], 1)
+        self.assertEqual(content[0]["output_index"], 2)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,47 @@ Lead engineer for the AI firm.
             self.assertIn("## Identity", agent.default_options["instructions"])
             self.assertEqual(len(agent.default_options["tools"]), 1)
 
+    def test_build_agent_honors_request_model_override(self) -> None:
+        from ergon_studio.agent_factory import build_agent
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home_dir = Path(temp_dir) / "home"
+            home_dir.mkdir()
+            paths = GlobalStudioPaths(home_dir=home_dir)
+            paths.ensure_layout()
+            save_global_config(
+                paths.config_path,
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "base_url": "http://localhost:8080/v1",
+                            "api_key": "not-needed",
+                            "model": "qwen2.5-coder",
+                        }
+                    },
+                    "role_assignments": {"orchestrator": "local"},
+                    "approvals": {},
+                    "ui": {},
+                },
+            )
+            (paths.agents_dir / "orchestrator.md").write_text(
+                """---
+id: orchestrator
+name: Orchestrator
+role: orchestrator
+---
+## Identity
+Lead engineer.
+""",
+                encoding="utf-8",
+            )
+            registry = load_registry(paths)
+
+            agent = build_agent(registry, "orchestrator", model_id_override="gpt-oss-20b")
+
+            self.assertEqual(agent.client.model_id, "gpt-oss-20b")
+
     def test_build_agent_ignores_local_tool_metadata_without_registry(self) -> None:
         from ergon_studio.agent_factory import build_agent
 

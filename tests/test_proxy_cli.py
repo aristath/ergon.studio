@@ -25,8 +25,6 @@ class ProxyCliTests(unittest.TestCase):
                         "0.0.0.0",
                         "--port",
                         "4242",
-                        "--model-id",
-                        "ergon-proxy",
                     ]
                 )
 
@@ -35,7 +33,6 @@ class ProxyCliTests(unittest.TestCase):
             _, kwargs = serve_proxy.call_args
             self.assertEqual(kwargs["host"], "0.0.0.0")
             self.assertEqual(kwargs["port"], 4242)
-            self.assertEqual(kwargs["model_id"], "ergon-proxy")
 
     def test_proxy_cli_check_fails_fast_when_orchestrator_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

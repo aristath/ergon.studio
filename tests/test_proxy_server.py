@@ -29,14 +29,13 @@ class ProxyServerTests(unittest.TestCase):
             payload = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(payload["object"], "list")
-        self.assertEqual(payload["data"][0]["id"], "ergon")
+        self.assertEqual(payload["data"][0]["id"], "qwen2.5-coder")
 
-    def test_responses_use_served_model_id_not_requested_model(self) -> None:
+    def test_chat_completions_echo_requested_model(self) -> None:
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
             port=0,
             core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
-            model_id="ergon-proxy",
         )
         self.addCleanup(handle.close)
 
@@ -54,7 +53,31 @@ class ProxyServerTests(unittest.TestCase):
         with urlopen(request) as response:
             payload = json.loads(response.read().decode("utf-8"))
 
-        self.assertEqual(payload["model"], "ergon-proxy")
+        self.assertEqual(payload["model"], "host-selected-name")
+
+    def test_responses_echo_requested_model(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "gpt-oss-20b",
+                    "input": "Hi",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["model"], "gpt-oss-20b")
 
     def test_health_endpoint_reports_proxy_readiness(self) -> None:
         core = ProxyOrchestrationCore(_proxy_registry())
@@ -774,6 +797,22 @@ class _FakeCore:
         self._events = list(events)
         self._tool_calls = tuple(tool_calls)
         self._output_items = tuple(output_items)
+        self.registry = type(
+            "Registry",
+            (),
+            {
+                "config": {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "model": "qwen2.5-coder",
+                        }
+                    }
+                },
+                "agent_definitions": {},
+                "workflow_definitions": {},
+            },
+        )()
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)

@@ -31,6 +31,27 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Hello world")
         self.assertEqual(result.mode, "act")
 
+    async def test_stream_turn_passes_requested_model_to_agent_builder(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _builder(_registry, agent_id: str, **kwargs):
+            captured["agent_id"] = agent_id
+            captured["model_id_override"] = kwargs.get("model_id_override")
+            return _FakeAgent(["{\"mode\":\"act\"}", "Hello world"])
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
+        request = ProxyTurnRequest(
+            model="gpt-oss-20b",
+            messages=(ProxyInputMessage(role="user", content="Hi"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertEqual(captured["agent_id"], "orchestrator")
+        self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
+
     async def test_stream_turn_handles_delegate_mode(self) -> None:
         core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_fake_agent_builder({
             "orchestrator": [

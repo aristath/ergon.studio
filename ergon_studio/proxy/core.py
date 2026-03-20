@@ -109,6 +109,7 @@ class ProxyOrchestrationCore:
             prompt=build_turn_planner_prompt(request),
             preamble=build_turn_planner_instructions(self.registry),
             session_id=f"proxy-planner-{uuid4().hex}",
+            model_id_override=request.model,
         )
         if not planner_text:
             return ProxyTurnPlan(mode="act")
@@ -178,6 +179,7 @@ class ProxyOrchestrationCore:
             agent_id="orchestrator",
             prompt=prompt,
             session_id=f"proxy-direct-{uuid4().hex}",
+            model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
@@ -226,6 +228,7 @@ class ProxyOrchestrationCore:
             agent_id=agent_id,
             prompt=specialist_prompt,
             session_id=f"proxy-delegate-{agent_id}-{uuid4().hex}",
+            model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
@@ -264,6 +267,7 @@ class ProxyOrchestrationCore:
             ),
             preamble=_summary_instructions(),
             session_id=f"proxy-delegation-summary-{uuid4().hex}",
+            model_id_override=request.model,
         )
         if not final_text:
             final_text = specialist_text.strip()
@@ -429,6 +433,7 @@ class ProxyOrchestrationCore:
                     agent_id=agent_id,
                     prompt=specialist_prompt,
                     session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
+                    model_id_override=request.model,
                     host_tools=request.tools,
                     tool_choice=request.tool_choice,
                     parallel_tool_calls=request.parallel_tool_calls,
@@ -465,6 +470,7 @@ class ProxyOrchestrationCore:
                 workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
                 current_brief = agent_text.strip() or current_brief
         async for event in self._emit_workflow_summary(
+            request=request,
             definition=definition,
             goal=goal,
             current_brief=current_brief,
@@ -510,6 +516,7 @@ class ProxyOrchestrationCore:
                 agent_id=agent_id,
                 prompt=prompt,
                 session_id=f"proxy-group-chat-{definition.id}-{agent_id}-{uuid4().hex}",
+                model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
@@ -545,6 +552,7 @@ class ProxyOrchestrationCore:
             workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
         async for event in self._emit_workflow_summary(
+            request=request,
             definition=definition,
             goal=goal,
             current_brief=current_brief,
@@ -578,6 +586,7 @@ class ProxyOrchestrationCore:
                     current_brief=current_brief,
                     participants=participants,
                     prior_outputs=tuple(workflow_outputs),
+                    model_id_override=request.model,
                 )
             if agent_id is None:
                 break
@@ -596,6 +605,7 @@ class ProxyOrchestrationCore:
                 agent_id=agent_id,
                 prompt=prompt,
                 session_id=f"proxy-magentic-{definition.id}-{agent_id}-{uuid4().hex}",
+                model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
@@ -632,6 +642,7 @@ class ProxyOrchestrationCore:
             current_brief = agent_text.strip() or current_brief
             round_index += 1
         async for event in self._emit_workflow_summary(
+            request=request,
             definition=definition,
             goal=goal,
             current_brief=current_brief,
@@ -675,6 +686,7 @@ class ProxyOrchestrationCore:
                 agent_id=current_agent,
                 prompt=prompt,
                 session_id=f"proxy-handoff-{definition.id}-{current_agent}-{uuid4().hex}",
+                model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
@@ -718,9 +730,11 @@ class ProxyOrchestrationCore:
                 current_brief=current_brief,
                 prior_outputs=tuple(workflow_outputs),
                 allowed=handoffs.get(current_agent, tuple(agent for agent in participants if agent != current_agent)),
+                model_id_override=request.model,
             )
             round_index += 1
         async for event in self._emit_workflow_summary(
+            request=request,
             definition=definition,
             goal=goal,
             current_brief=current_brief,
@@ -729,7 +743,7 @@ class ProxyOrchestrationCore:
         ):
             yield event
 
-    async def _emit_workflow_summary(self, *, definition, goal: str, current_brief: str, workflow_outputs: tuple[str, ...], state: dict[str, Any]):
+    async def _emit_workflow_summary(self, *, request, definition, goal: str, current_brief: str, workflow_outputs: tuple[str, ...], state: dict[str, Any]):
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
             prompt=_workflow_summary_prompt(
@@ -739,6 +753,7 @@ class ProxyOrchestrationCore:
             ),
             preamble=_summary_instructions(),
             session_id=f"proxy-workflow-summary-{uuid4().hex}",
+            model_id_override=request.model,
         )
         if not final_text:
             final_text = current_brief.strip()
@@ -755,6 +770,7 @@ class ProxyOrchestrationCore:
         current_brief: str,
         participants: tuple[str, ...],
         prior_outputs: tuple[str, ...],
+        model_id_override: str,
     ) -> str | None:
         raw = await self._run_text_agent(
             agent_id="orchestrator",
@@ -767,6 +783,7 @@ class ProxyOrchestrationCore:
             ),
             preamble=_workflow_manager_instructions(participants),
             session_id=f"proxy-workflow-manager-{uuid4().hex}",
+            model_id_override=model_id_override,
         )
         return _parse_agent_selection(raw, participants=participants)
 
@@ -779,6 +796,7 @@ class ProxyOrchestrationCore:
         current_brief: str,
         prior_outputs: tuple[str, ...],
         allowed: tuple[str, ...],
+        model_id_override: str,
     ) -> str | None:
         if not allowed:
             return None
@@ -794,6 +812,7 @@ class ProxyOrchestrationCore:
             ),
             preamble=_handoff_selection_instructions(allowed),
             session_id=f"proxy-handoff-select-{uuid4().hex}",
+            model_id_override=model_id_override,
         )
         return _parse_agent_selection(raw, participants=allowed)
 
@@ -803,6 +822,7 @@ class ProxyOrchestrationCore:
         agent_id: str,
         prompt: str,
         session_id: str,
+        model_id_override: str,
         preamble: str = "",
         pending_continuation: PendingContinuation | None = None,
     ) -> str | None:
@@ -811,6 +831,7 @@ class ProxyOrchestrationCore:
             agent_id=agent_id,
             prompt=full_prompt,
             session_id=session_id,
+            model_id_override=model_id_override,
             stream=False,
             pending_continuation=pending_continuation,
         )
@@ -827,6 +848,7 @@ class ProxyOrchestrationCore:
         agent_id: str,
         prompt: str,
         session_id: str,
+        model_id_override: str,
         preamble: str = "",
         host_tools=(),
         tool_choice=None,
@@ -839,6 +861,7 @@ class ProxyOrchestrationCore:
             agent_id=agent_id,
             prompt=full_prompt,
             session_id=session_id,
+            model_id_override=model_id_override,
             stream=True,
             host_tools=host_tools,
             tool_choice=tool_choice,
@@ -873,6 +896,7 @@ class ProxyOrchestrationCore:
         agent_id: str,
         prompt: str,
         session_id: str,
+        model_id_override: str,
         stream: bool,
         host_tools=(),
         tool_choice=None,
@@ -882,6 +906,7 @@ class ProxyOrchestrationCore:
         agent = self._agent_builder(
             self.registry,
             agent_id,
+            model_id_override=model_id_override,
         )
         allowed_tools, tool_options = resolve_agent_tool_policy(
             tools=tuple(host_tools),

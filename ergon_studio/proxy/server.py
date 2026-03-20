@@ -26,10 +26,9 @@ from ergon_studio.proxy.responses_bridge import parse_responses_request
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
-    def __init__(self, server_address, RequestHandlerClass, *, core, model_id: str = "ergon"):
+    def __init__(self, server_address, RequestHandlerClass, *, core):
         super().__init__(server_address, RequestHandlerClass)
         self.core = core
-        self.model_id = model_id
 
 
 class ProxyRequestHandler(BaseHTTPRequestHandler):
@@ -48,14 +47,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "object": "list",
-                    "data": [
-                        {
-                            "id": self.server.model_id,
-                            "object": "model",
-                            "created": int(time.time()),
-                            "owned_by": "ergon-studio",
-                        }
-                    ],
+                    "data": _available_models(self.server.core.registry),
                 },
             )
             return
@@ -109,7 +101,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             build_chat_completion_response(
                 completion_id=completion_id,
-                model=self.server.model_id,
+                model=request.model,
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
@@ -130,7 +122,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             chunk = encode_chat_stream_sse(
                 event,
                 completion_id=completion_id,
-                model=self.server.model_id,
+                model=request.model,
                 created_at=created_at,
             )
             self.wfile.write(chunk)
@@ -174,7 +166,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             build_responses_response(
                 response_id=response_id,
-                model=self.server.model_id,
+                model=request.model,
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
@@ -194,13 +186,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
-                "response": {
-                    "id": response_id,
-                    "object": "response",
-                    "created_at": created_at,
-                    "model": self.server.model_id,
-                    "status": "in_progress",
-                },
+                    "response": {
+                        "id": response_id,
+                        "object": "response",
+                        "created_at": created_at,
+                        "model": request.model,
+                        "status": "in_progress",
+                    },
             "sequence_number": 1,
         }
         self.wfile.write(encode_responses_stream_sse(created_payload))
@@ -229,7 +221,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             for payload in encode_responses_stream_events(
                 event=event,
                 response_id=response_id,
-                model=self.server.model_id,
+                model=request.model,
                 created_at=created_at,
                 sequence_number=sequence_number,
                 reasoning_item_id=reasoning_item_id,
@@ -291,8 +283,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         )
 
 
-def serve_proxy(*, host: str, port: int, core, model_id: str = "ergon") -> None:
-    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core, model_id=model_id)
+def serve_proxy(*, host: str, port: int, core) -> None:
+    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     try:
         server.serve_forever()
     finally:
@@ -314,11 +306,34 @@ class ProxyServerHandle:
         self.thread.join(timeout=5)
 
 
-def start_proxy_server_in_thread(*, host: str, port: int, core, model_id: str = "ergon") -> ProxyServerHandle:
-    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core, model_id=model_id)
+def start_proxy_server_in_thread(*, host: str, port: int, core) -> ProxyServerHandle:
+    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return ProxyServerHandle(server, thread)
+
+
+def _available_models(registry) -> list[dict[str, Any]]:
+    providers = registry.config.get("providers", {})
+    if not isinstance(providers, dict):
+        return []
+    model_ids = sorted(
+        {
+            str(provider.get("model", "")).strip()
+            for provider in providers.values()
+            if isinstance(provider, dict) and str(provider.get("model", "")).strip()
+        }
+    )
+    now = int(time.time())
+    return [
+        {
+            "id": model_id,
+            "object": "model",
+            "created": now,
+            "owned_by": "ergon-studio",
+        }
+        for model_id in model_ids
+    ]
 
 
 def _ensure_response_output_item(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int:

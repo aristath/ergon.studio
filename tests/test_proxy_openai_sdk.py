@@ -207,14 +207,13 @@ class ProxyOpenAISDKTests(unittest.TestCase):
             host="127.0.0.1",
             port=0,
             core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
-            model_id="ergon-proxy",
         )
         self.addCleanup(handle.close)
         client = _client(handle.port)
 
         models = client.models.list()
 
-        self.assertEqual(models.data[0].id, "ergon-proxy")
+        self.assertEqual(models.data[0].id, "qwen2.5-coder")
 
 
 class _FakeCore:
@@ -222,7 +221,22 @@ class _FakeCore:
         self._events = list(events)
         self._tool_calls = tuple(tool_calls)
         self._output_items = tuple(output_items)
-        self.registry = type("Registry", (), {"config": {}, "agent_definitions": {}, "workflow_definitions": {}})()
+        self.registry = type(
+            "Registry",
+            (),
+            {
+                "config": {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "model": "qwen2.5-coder",
+                        }
+                    }
+                },
+                "agent_definitions": {},
+                "workflow_definitions": {},
+            },
+        )()
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)

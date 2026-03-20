@@ -16,6 +16,7 @@ def build_agent(
     agent_id: str,
     *,
     tool_registry: Mapping[str, Callable[..., Any]] | None = None,
+    model_id_override: str | None = None,
 ) -> Agent[Any]:
     definition = registry.agent_definitions[agent_id]
     role = str(definition.metadata.get("role", definition.id))
@@ -24,7 +25,7 @@ def build_agent(
     provider_capabilities = provider_config.get("capabilities", {})
     if not isinstance(provider_capabilities, dict):
         provider_capabilities = {}
-    client = _build_client(provider_config)
+    client = _build_client(provider_config, model_id_override=model_id_override)
     tools = _resolve_tools(definition, tool_registry)
     context_providers = _build_context_providers(
         registry=registry,
@@ -103,12 +104,14 @@ def _resolve_provider_name(config: dict[str, Any], role: str, agent_id: str) -> 
 
 def _build_client(
     provider_config: dict[str, Any],
+    *,
+    model_id_override: str | None = None,
 ) -> OpenAIChatClient:
     provider_type = provider_config.get("type", "openai_chat")
     if provider_type != "openai_chat":
         raise ValueError(f"unsupported provider type: {provider_type}")
 
-    model_id = provider_config.get("model")
+    model_id = model_id_override or provider_config.get("model")
     if not model_id:
         raise ValueError("provider config must define a model")
 

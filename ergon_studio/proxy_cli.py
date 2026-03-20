@@ -15,12 +15,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home-dir", type=Path, default=Path.home())
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)
-    parser.add_argument("--model-id", type=str, default="ergon")
     parser.add_argument("--check", action="store_true")
     return parser
 
 
-def run_proxy_server(*, home_dir: Path, host: str, port: int, model_id: str, check: bool) -> int:
+def run_proxy_server(*, home_dir: Path, host: str, port: int, check: bool) -> int:
     proxy_paths = bootstrap_proxy_home(home_dir)
     registry = load_registry(proxy_paths)
     if check:
@@ -41,7 +40,6 @@ def run_proxy_server(*, home_dir: Path, host: str, port: int, model_id: str, che
         host=host,
         port=port,
         core=ProxyOrchestrationCore(registry),
-        model_id=model_id,
     )
     return 0
 
@@ -53,7 +51,6 @@ def main(argv: list[str] | None = None) -> int:
         home_dir=args.home_dir,
         host=args.host,
         port=args.port,
-        model_id=args.model_id,
         check=args.check,
     )
 

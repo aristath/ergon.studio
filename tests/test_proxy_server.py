@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from agent_framework import ResponseStream
 
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.continuation import ContinuationState, encode_continuation_tool_call
 from ergon_studio.proxy.core import ProxyOrchestrationCore, ProxyTurnResult
 from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall
 from ergon_studio.proxy.server import start_proxy_server_in_thread
@@ -449,6 +450,69 @@ class ProxyServerTests(unittest.TestCase):
             second_payload = json.loads(response.read().decode("utf-8"))
 
         self.assertEqual(second_payload["output_text"], "Final answer")
+
+    def test_responses_accepts_function_call_history_on_resume(self) -> None:
+        core = ProxyOrchestrationCore(
+            _proxy_registry(),
+            agent_builder=_proxy_agent_builder(
+                {
+                    "orchestrator": [
+                        "Final answer",
+                    ],
+                    "architect": [],
+                    "coder": [],
+                }
+            ),
+        )
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
+        self.addCleanup(handle.close)
+
+        tool_call_id = encode_continuation_tool_call(
+            ProxyToolCall(
+                id="call_1",
+                name="read_file",
+                arguments_json="{\"path\":\"main.py\"}",
+            ),
+            state=ContinuationState(mode="act", agent_id="orchestrator"),
+        ).id
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": [
+                        {"type": "message", "role": "user", "content": "Inspect main.py"},
+                        {
+                            "type": "function_call",
+                            "call_id": tool_call_id,
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"main.py\"}",
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": tool_call_id,
+                            "output": "print('current main')",
+                        },
+                    ],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["output_text"], "Final answer")
 
     def test_responses_stream_tool_calls_do_not_emit_empty_output_done(self) -> None:
         core = ProxyOrchestrationCore(

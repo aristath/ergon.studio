@@ -43,6 +43,25 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[1].role, "tool")
         self.assertEqual(request.messages[1].tool_call_id, "call_1")
 
+    def test_parses_function_call_items_as_assistant_tool_history(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"main.py\"}",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(request.messages[0].role, "assistant")
+        self.assertEqual(request.messages[0].tool_calls[0].id, "call_1")
+        self.assertEqual(request.messages[0].tool_calls[0].name, "read_file")
+
     def test_parses_specific_function_tool_choice(self) -> None:
         request = parse_responses_request(
             {

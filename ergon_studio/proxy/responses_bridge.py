@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool
+from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool, parse_function_tool_call
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 
 
@@ -48,6 +48,23 @@ def _parse_input_item(payload: Any) -> ProxyInputMessage:
     if not isinstance(payload, dict):
         raise ValueError("responses input items must be objects")
     item_type = payload.get("type", "message")
+    if item_type == "function_call":
+        return ProxyInputMessage(
+            role="assistant",
+            content="",
+            tool_calls=(
+                parse_function_tool_call(
+                    {
+                        "id": payload.get("call_id"),
+                        "type": "function",
+                        "function": {
+                            "name": payload.get("name"),
+                            "arguments": payload.get("arguments", ""),
+                        },
+                    }
+                ),
+            ),
+        )
     if item_type == "function_call_output":
         return ProxyInputMessage(
             role="tool",

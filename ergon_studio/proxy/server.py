@@ -20,6 +20,7 @@ from ergon_studio.proxy import (
     parse_chat_completion_request,
     parse_responses_request,
 )
+from ergon_studio.proxy.health import build_proxy_health_snapshot
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
@@ -34,6 +35,12 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        if self.path == "/health":
+            self._send_json(
+                HTTPStatus.OK,
+                build_proxy_health_snapshot(self.server.core.registry),
+            )
+            return
         if self.path == "/v1/models":
             self._send_json(
                 HTTPStatus.OK,

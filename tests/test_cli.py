@@ -93,6 +93,32 @@ class CliTests(unittest.TestCase):
             self.assertEqual(kwargs["host"], "0.0.0.0")
             self.assertEqual(kwargs["port"], 4242)
 
+    def test_serve_check_fails_fast_when_orchestrator_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+            stdout = io.StringIO()
+
+            with patch("ergon_studio.cli.serve_proxy") as serve_proxy:
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "serve",
+                            "--project-root",
+                            str(project_root),
+                            "--home-dir",
+                            str(home_dir),
+                            "--check",
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("ok=false", stdout.getvalue())
+            serve_proxy.assert_not_called()
+
     def test_sessions_new_and_list_commands_manage_project_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

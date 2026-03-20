@@ -29,6 +29,22 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payload["object"], "list")
         self.assertEqual(payload["data"][0]["id"], "ergon")
 
+    def test_health_endpoint_reports_proxy_readiness(self) -> None:
+        core = ProxyOrchestrationCore(_proxy_registry())
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=core,
+        )
+        self.addCleanup(handle.close)
+
+        with urlopen(f"http://127.0.0.1:{handle.port}/health") as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertFalse(payload["ok"])
+        orchestrator = next(item for item in payload["agents"] if item["name"] == "orchestrator")
+        self.assertFalse(orchestrator["ok"])
+
     def test_chat_completions_returns_non_stream_response(self) -> None:
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",

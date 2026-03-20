@@ -7,6 +7,7 @@ import time
 from ergon_studio.bootstrap import bootstrap_workspace
 from ergon_studio.evals import run_builtin_evals, summarize_results, write_eval_report
 from ergon_studio.proxy.core import ProxyOrchestrationCore
+from ergon_studio.proxy.health import build_proxy_health_snapshot
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
 from ergon_studio.session_store import SessionStore
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_project_args(serve_parser)
     serve_parser.add_argument("--host", type=str, default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=4000)
+    serve_parser.add_argument("--check", action="store_true")
 
     sessions_parser = subparsers.add_parser("sessions")
     session_subparsers = sessions_parser.add_subparsers(dest="sessions_command", required=True)
@@ -129,6 +131,19 @@ def main(argv: list[str] | None = None) -> int:
             home_dir=args.home_dir,
         )
         registry = load_registry(paths)
+        if args.check:
+            health = build_proxy_health_snapshot(registry)
+            print(f"ok={str(health['ok']).lower()}")
+            for provider in health["providers"]:
+                status = "ok" if provider["ok"] else "error"
+                detail = provider["error"] or provider["model"]
+                print(f"provider[{provider['name']}]={status}:{detail}")
+            for agent in health["agents"]:
+                status = "ok" if agent["ok"] else "error"
+                detail = agent["error"] or agent["summary"]
+                print(f"agent[{agent['name']}]={status}:{detail}")
+            if not health["ok"]:
+                return 1
         core = ProxyOrchestrationCore(registry)
         serve_proxy(
             host=args.host,

@@ -357,16 +357,16 @@ class ErgonStudioApp(App[None]):
         thinking = self.query_one("#thinking", ThinkingIndicator)
         created_at = self._next_timestamp()
         thinking.show("Thinking")
-        task = asyncio.create_task(
-            self.runtime.send_user_message_to_orchestrator(
+        self._refresh_timeline()
+        try:
+            stream = self.runtime.stream_user_message_to_orchestrator(
                 body=body,
                 created_at=created_at,
             )
-        )
-        await asyncio.sleep(0)
-        self._refresh_timeline()
-        try:
-            await task
+            async for _event in stream:
+                self._refresh_timeline()
+                await asyncio.sleep(0)
+            await stream.get_final_response()
         except Exception as exc:
             thinking.hide()
             self._add_notice(f"Error: {exc}", level="error", title="Send failed")

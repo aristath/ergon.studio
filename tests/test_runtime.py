@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent_framework import AgentSession, Message
+from agent_framework import AgentSession, Message, ResponseStream
 
 from ergon_studio.config import save_global_config
 
@@ -1719,7 +1719,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="architecture-first",
                     goal=body,
                     deliverable_expected=False,
@@ -1755,10 +1754,41 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 )
                 return None, reply
 
+            def stream_agent_turn(
+                _runtime,
+                *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
+                body: str,
+                created_at: int,
+                record_prompt: bool = True,
+            ):
+                del _runtime, thread_id, agent_id, prompt_sender, reply_sender, body, created_at, record_prompt
+
+                async def _events():
+                    if False:
+                        yield None
+
+                return ResponseStream(
+                    _events(),
+                    finalizer=lambda _updates: run_agent_turn(
+                        runtime,
+                        thread_id=runtime.main_thread_id,
+                        agent_id="orchestrator",
+                        prompt_sender="user",
+                        reply_sender="orchestrator",
+                        body="Build the feature from scratch. First decide the approach, then implement it here.",
+                        created_at=10,
+                        record_prompt=False,
+                    ),
+                )
+
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
                 patch.object(type(runtime), "_audit_orchestrator_delivery_turn", side_effect=audit, autospec=True),
-                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
+                patch.object(type(runtime), "_stream_agent_turn", side_effect=stream_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
                     body="Build the feature from scratch. First decide the approach, then implement it here.",
@@ -1789,7 +1819,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="single-agent-execution",
                     goal=body,
                     deliverable_expected=True,
@@ -1842,7 +1871,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="specialist-handoff",
                     goal=body,
                     deliverable_expected=True,
@@ -1870,9 +1898,40 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 )
                 return None, reply
 
+            def stream_agent_turn(
+                _runtime,
+                *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
+                body: str,
+                created_at: int,
+                record_prompt: bool = True,
+            ):
+                del _runtime, thread_id, agent_id, prompt_sender, reply_sender, created_at, record_prompt
+
+                async def _events():
+                    if False:
+                        yield None
+
+                return ResponseStream(
+                    _events(),
+                    finalizer=lambda _updates: run_agent_turn(
+                        runtime,
+                        thread_id=runtime.main_thread_id,
+                        agent_id="orchestrator",
+                        prompt_sender="user",
+                        reply_sender="orchestrator",
+                        body=body,
+                        created_at=10,
+                        record_prompt=False,
+                    ),
+                )
+
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
+                patch.object(type(runtime), "_stream_agent_turn", side_effect=stream_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
                     body="Build the feature now after the discussion.",
@@ -1903,7 +1962,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="architecture-first",
                     goal="Design only.",
                     deliverable_expected=True,
@@ -1913,7 +1971,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 captured["reason"] = reason
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="standard-build",
                     goal=body,
                     deliverable_expected=True,
@@ -1968,7 +2025,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="standard-build",
                     goal="Design the architecture only before any implementation happens.",
                     deliverable_expected=True,
@@ -2021,7 +2077,6 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
                     mode="workflow",
-                    reply="",
                     workflow_id="architecture-first",
                     goal="Design the architecture only before any implementation happens.",
                     deliverable_expected=False,
@@ -2056,10 +2111,41 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     created_at=11,
                 )
 
+            def stream_agent_turn(
+                _runtime,
+                *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
+                body: str,
+                created_at: int,
+                record_prompt: bool = True,
+            ):
+                del _runtime, thread_id, agent_id, prompt_sender, reply_sender, created_at, record_prompt
+
+                async def _events():
+                    if False:
+                        yield None
+
+                return ResponseStream(
+                    _events(),
+                    finalizer=lambda _updates: run_agent_turn(
+                        runtime,
+                        thread_id=runtime.main_thread_id,
+                        agent_id="orchestrator",
+                        prompt_sender="user",
+                        reply_sender="orchestrator",
+                        body=body,
+                        created_at=10,
+                        record_prompt=False,
+                    ),
+                )
+
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
                 patch.object(type(runtime), "_audit_orchestrator_delivery_turn", side_effect=audit, autospec=True),
-                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
+                patch.object(type(runtime), "_stream_agent_turn", side_effect=stream_agent_turn, autospec=True),
             ):
                 await runtime.send_user_message_to_orchestrator(
                     body="Build a tiny calculator CLI from scratch and implement it in this repo.",
@@ -2070,7 +2156,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("implement it in this repo", captured["run_goal"])
             self.assertNotIn("Design the architecture only", captured["run_goal"])
 
-    async def test_runtime_reconsiders_reply_only_delivery_turns_with_real_orchestrator_run(self) -> None:
+    async def test_runtime_direct_orchestrator_runs_keep_the_latest_user_turn_body(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2085,8 +2171,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             async def decide(_runtime, *, body: str, created_at: int):
                 return OrchestratorTurnDecision(
-                    mode="reply",
-                    reply="I will take a look.",
+                    mode="act",
                     goal="Narrow planner goal that should not win.",
                     deliverable_expected=True,
                 )
@@ -2112,9 +2197,40 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     created_at=11,
                 )
 
+            def stream_agent_turn(
+                _runtime,
+                *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
+                body: str,
+                created_at: int,
+                record_prompt: bool = True,
+            ):
+                del _runtime, thread_id, agent_id, prompt_sender, reply_sender, created_at, record_prompt
+
+                async def _events():
+                    if False:
+                        yield None
+
+                return ResponseStream(
+                    _events(),
+                    finalizer=lambda _updates: run_agent_turn(
+                        runtime,
+                        thread_id=runtime.main_thread_id,
+                        agent_id="orchestrator",
+                        prompt_sender="user",
+                        reply_sender="orchestrator",
+                        body=body,
+                        created_at=10,
+                        record_prompt=False,
+                    ),
+                )
+
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
+                patch.object(type(runtime), "_stream_agent_turn", side_effect=stream_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
                     body="Please build the feature now.",
@@ -2125,7 +2241,50 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             assert reply is not None
             self.assertEqual(runtime.conversation_store.read_message_body(reply), "Starting delivery.\n")
             self.assertEqual(captured["body"], "Please build the feature now.")
-            self.assertIn("orchestrator_delivery_reconsidered", [event.kind for event in runtime.list_events()])
+
+    async def test_stream_user_message_to_orchestrator_emits_live_events_for_one_shot_agent(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        class FakeAgent:
+            def create_session(self, *, session_id: str | None = None, **_: object) -> AgentSession:
+                return AgentSession(session_id=session_id)
+
+            async def run(self, messages=None, *, session=None, **_: object):
+                del messages, session
+                return SimpleNamespace(text="Streaming fallback reply.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent()):
+                stream = runtime.stream_user_message_to_orchestrator(
+                    body="Please take a look.",
+                    created_at=10,
+                )
+                events = []
+                async for event in stream:
+                    events.append(event)
+                user_message, reply_message = await stream.get_final_response()
+
+            self.assertIsNotNone(user_message)
+            self.assertIsNotNone(reply_message)
+            self.assertEqual(
+                [event.kind for event in events],
+                ["message_started", "message_delta", "message_completed"],
+            )
+            self.assertEqual(events[1].body, "Streaming fallback reply.")
+            self.assertEqual(runtime.list_live_message_drafts(), ())
+            assert reply_message is not None
+            self.assertEqual(
+                runtime.conversation_store.read_message_body(reply_message),
+                "Streaming fallback reply.\n",
+            )
 
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
         from ergon_studio.runtime import load_runtime

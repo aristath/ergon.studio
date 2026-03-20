@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from agent_framework import Agent, Message
+from agent_framework import Agent, Message, ResponseStream
 
 from ergon_studio.agent_session_store import AgentSessionStore
 from ergon_studio.approval_store import ApprovalStore
@@ -22,7 +22,7 @@ from ergon_studio.conversation_store import ConversationStore
 from ergon_studio.context_providers import WORKSPACE_STATE_KEY
 from ergon_studio.definitions import DefinitionDocument, parse_definition_text, save_definition_text
 from ergon_studio.event_store import EventStore
-from ergon_studio.live_runtime import LiveMessageDraft, LiveRuntimeState
+from ergon_studio.live_runtime import LiveMessageDraft, LiveRuntimeEvent, LiveRuntimeState
 from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
@@ -59,7 +59,6 @@ class WorkflowRunView:
 @dataclass(frozen=True)
 class OrchestratorTurnDecision:
     mode: str
-    reply: str
     workflow_id: str | None = None
     agent_id: str | None = None
     title: str | None = None
@@ -80,6 +79,14 @@ class DelegationReviewVerdict:
     accepted: bool
     summary: str
     findings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedOrchestratorTurn:
+    user_message: MessageRecord
+    decision: OrchestratorTurnDecision
+    resolved_goal: str
+    resolved_request: str
 
 
 _DEFAULT_CONTEXT_LENGTH = 131072  # 128k — safe default for modern coding models
@@ -850,6 +857,95 @@ class RuntimeContext:
         body: str,
         created_at: int,
     ) -> tuple[MessageRecord, MessageRecord | None]:
+        stream = self.stream_user_message_to_orchestrator(
+            body=body,
+            created_at=created_at,
+        )
+        async for _ in stream:
+            pass
+        return await stream.get_final_response()
+
+    def stream_user_message_to_orchestrator(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> ResponseStream[LiveRuntimeEvent, tuple[MessageRecord, MessageRecord | None]]:
+        state: dict[str, MessageRecord | None] = {"user": None, "reply": None}
+
+        async def _events():
+            prepared = await self._prepare_orchestrator_turn(
+                body=body,
+                created_at=created_at,
+            )
+            state["user"] = prepared.user_message
+            decision = prepared.decision
+            if decision.mode == "workflow" and decision.workflow_id is not None:
+                result = await self.run_workflow(
+                    workflow_id=decision.workflow_id,
+                    goal=prepared.resolved_goal,
+                    created_at=created_at + 2,
+                    parent_thread_id=self.main_thread_id,
+                )
+                summary = self._format_workflow_summary(
+                    workflow_id=decision.workflow_id,
+                    result=result,
+                )
+                state["reply"] = self.append_message_to_main_thread(
+                    message_id=f"message-{uuid4().hex}",
+                    sender="orchestrator",
+                    kind="status_update",
+                    body=summary,
+                    created_at=created_at + 3,
+                )
+                return
+            if decision.mode == "delegate" and decision.agent_id is not None:
+                result = await self.delegate_to_agent(
+                    agent_id=decision.agent_id,
+                    request=prepared.resolved_request,
+                    title=decision.title,
+                    created_at=created_at + 2,
+                    parent_thread_id=self.main_thread_id,
+                )
+                summary = self._format_delegation_summary(
+                    agent_id=decision.agent_id,
+                    result=result,
+                )
+                state["reply"] = self.append_message_to_main_thread(
+                    message_id=f"message-{uuid4().hex}",
+                    sender="orchestrator",
+                    kind="status_update",
+                    body=summary,
+                    created_at=created_at + 3,
+                )
+                return
+            turn_stream = self._stream_agent_turn(
+                thread_id=self.main_thread_id,
+                agent_id="orchestrator",
+                prompt_sender="user",
+                reply_sender="orchestrator",
+                body=prepared.resolved_request if decision.request else body,
+                created_at=created_at + 2,
+                record_prompt=False,
+            )
+            async for event in turn_stream:
+                yield event
+            _, state["reply"] = await turn_stream.get_final_response()
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: (
+                state["user"],
+                state["reply"],
+            ),
+        )
+
+    async def _prepare_orchestrator_turn(
+        self,
+        *,
+        body: str,
+        created_at: int,
+    ) -> PreparedOrchestratorTurn:
         user_message = self.append_message_to_main_thread(
             message_id=f"message-{uuid4().hex}",
             sender="user",
@@ -870,7 +966,6 @@ class RuntimeContext:
         if delivery_audit.deliverable_expected and not decision.deliverable_expected:
             decision = OrchestratorTurnDecision(
                 mode=decision.mode,
-                reply=decision.reply,
                 workflow_id=decision.workflow_id,
                 agent_id=decision.agent_id,
                 title=decision.title,
@@ -920,7 +1015,6 @@ class RuntimeContext:
             else:
                 decision = OrchestratorTurnDecision(
                     mode="act",
-                    reply="",
                     goal=delivery_context,
                     request=delivery_context,
                     deliverable_expected=True,
@@ -931,64 +1025,210 @@ class RuntimeContext:
             created_at=created_at + 1,
             thread_id=self.main_thread_id,
         )
-        if decision.mode == "workflow" and decision.workflow_id is not None:
-            result = await self.run_workflow(
-                workflow_id=decision.workflow_id,
-                goal=resolved_goal,
-                created_at=created_at + 2,
-                parent_thread_id=self.main_thread_id,
-            )
-            summary = self._format_workflow_summary(
-                workflow_id=decision.workflow_id,
-                result=result,
-            )
-            reply = self.append_message_to_main_thread(
-                message_id=f"message-{uuid4().hex}",
-                sender="orchestrator",
-                kind="status_update",
-                body=summary,
-                created_at=created_at + 3,
-            )
-            return user_message, reply
-        if decision.mode == "delegate" and decision.agent_id is not None:
-            result = await self.delegate_to_agent(
-                agent_id=decision.agent_id,
-                request=resolved_request,
-                title=decision.title,
-                created_at=created_at + 2,
-                parent_thread_id=self.main_thread_id,
-            )
-            summary = self._format_delegation_summary(
-                agent_id=decision.agent_id,
-                result=result,
-            )
-            reply = self.append_message_to_main_thread(
-                message_id=f"message-{uuid4().hex}",
-                sender="orchestrator",
-                kind="status_update",
-                body=summary,
-                created_at=created_at + 3,
-            )
-            return user_message, reply
-        if decision.mode == "reply" and decision.reply.strip():
-            reply = self.append_message_to_main_thread(
-                message_id=f"message-{uuid4().hex}",
-                sender="orchestrator",
-                kind="chat",
-                body=decision.reply,
-                created_at=created_at + 2,
-            )
-            return user_message, reply
-        _, reply = await self._run_agent_turn(
-            thread_id=self.main_thread_id,
-            agent_id="orchestrator",
-            prompt_sender="user",
-            reply_sender="orchestrator",
-            body=body,
-            created_at=created_at + 2,
-            record_prompt=False,
+        return PreparedOrchestratorTurn(
+            user_message=user_message,
+            decision=decision,
+            resolved_goal=resolved_goal,
+            resolved_request=resolved_request,
         )
-        return user_message, reply
+
+    def _stream_agent_turn(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        prompt_sender: str,
+        reply_sender: str,
+        body: str,
+        created_at: int,
+        record_prompt: bool = True,
+    ) -> ResponseStream[LiveRuntimeEvent, tuple[MessageRecord | None, MessageRecord | None]]:
+        state: dict[str, MessageRecord | None] = {"prompt": None, "reply": None}
+
+        async def _events():
+            async for event in self._stream_agent_turn_events(
+                thread_id=thread_id,
+                agent_id=agent_id,
+                prompt_sender=prompt_sender,
+                reply_sender=reply_sender,
+                body=body,
+                created_at=created_at,
+                state=state,
+                record_prompt=record_prompt,
+            ):
+                yield event
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: (
+                state["prompt"],
+                state["reply"],
+            ),
+        )
+
+    async def _stream_agent_turn_events(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        prompt_sender: str,
+        reply_sender: str,
+        body: str,
+        created_at: int,
+        state: dict[str, MessageRecord | None],
+        record_prompt: bool = True,
+    ):
+        prompt_message = None
+        if record_prompt:
+            prompt_message = self.append_message_to_thread(
+                thread_id=thread_id,
+                message_id=f"message-{uuid4().hex}",
+                sender=prompt_sender,
+                kind="chat",
+                body=body,
+                created_at=created_at,
+            )
+        state["prompt"] = prompt_message
+
+        try:
+            agent = self.build_agent(agent_id)
+        except (KeyError, ValueError) as exc:
+            self.append_event(
+                kind="agent_unavailable",
+                summary=f"{agent_id} unavailable: {exc}",
+                created_at=created_at + 1,
+                thread_id=thread_id,
+            )
+            return
+
+        thread = self.get_thread(thread_id)
+        runtime_session_id = thread.session_id if thread is not None else self.main_session_id
+        session = self.agent_session_store.load_or_create_session(
+            session_id=runtime_session_id,
+            thread_id=thread_id,
+            agent_id=agent_id,
+            session_factory=lambda session_id: agent.create_session(session_id=session_id),
+        )
+        session.state[WORKSPACE_STATE_KEY] = {
+            "session_id": runtime_session_id,
+            "thread_id": thread_id,
+            "task_id": thread.parent_task_id if thread is not None else None,
+            "agent_id": agent_id,
+            "created_at": created_at,
+        }
+        tool_context = ToolExecutionContext(
+            session_id=runtime_session_id,
+            thread_id=thread_id,
+            task_id=thread.parent_task_id if thread is not None else None,
+            agent_id=agent_id,
+        )
+        draft_id = f"draft-{uuid4().hex}"
+        started = self.live_state.start_draft(
+            draft_id=draft_id,
+            thread_id=thread_id,
+            sender=reply_sender,
+            kind="chat",
+            created_at=created_at + 1,
+        )
+        yield started
+
+        response_text = ""
+        try:
+            with use_tool_execution_context(tool_context):
+                stream_or_response = agent.run(
+                    [
+                        Message(
+                            role="user",
+                            text=body,
+                            author_name=prompt_sender,
+                        )
+                    ],
+                    session=session,
+                    stream=True,
+                )
+                if hasattr(stream_or_response, "__aiter__") and hasattr(stream_or_response, "get_final_response"):
+                    async for update in stream_or_response:
+                        text_delta = getattr(update, "text", "")
+                        if not text_delta:
+                            continue
+                        response_text += text_delta
+                        event = self.live_state.append_delta(
+                            draft_id=draft_id,
+                            delta=text_delta,
+                            created_at=created_at + 1,
+                        )
+                        if event is not None:
+                            yield event
+                    response = await stream_or_response.get_final_response()
+                else:
+                    response = await stream_or_response
+        except Exception as exc:
+            self.append_event(
+                kind="agent_failed",
+                summary=f"{agent_id} run failed: {type(exc).__name__}: {exc}",
+                created_at=created_at + 1,
+                thread_id=thread_id,
+            )
+            self.agent_session_store.save_session(
+                session_id=runtime_session_id,
+                thread_id=thread_id,
+                agent_id=agent_id,
+                session=session,
+            )
+            failed = self.live_state.fail_draft(
+                draft_id=draft_id,
+                error=str(exc),
+                created_at=created_at + 1,
+            )
+            if failed is not None:
+                yield failed
+            return
+
+        self.agent_session_store.save_session(
+            session_id=runtime_session_id,
+            thread_id=thread_id,
+            agent_id=agent_id,
+            session=session,
+        )
+        self.track_token_usage(response)
+        final_text = getattr(response, "text", "").strip()
+        if final_text and not response_text:
+            response_text = final_text
+            event = self.live_state.append_delta(
+                draft_id=draft_id,
+                delta=final_text,
+                created_at=created_at + 1,
+            )
+            if event is not None:
+                yield event
+        if not final_text:
+            final_text = response_text.strip()
+        if not final_text:
+            failed = self.live_state.fail_draft(
+                draft_id=draft_id,
+                error="empty response",
+                created_at=created_at + 1,
+            )
+            if failed is not None:
+                yield failed
+            return
+
+        reply_message = self.append_message_to_thread(
+            thread_id=thread_id,
+            message_id=f"message-{uuid4().hex}",
+            sender=reply_sender,
+            kind="chat",
+            body=final_text,
+            created_at=created_at + 1,
+        )
+        state["reply"] = reply_message
+        completed = self.live_state.complete_draft(
+            draft_id=draft_id,
+            message_id=reply_message.id,
+            created_at=created_at + 1,
+        )
+        if completed is not None:
+            yield completed
 
     def _refresh_session_title_from_user_turn(self, *, body: str, created_at: int) -> None:
         session = self.current_session()
@@ -1467,97 +1707,18 @@ class RuntimeContext:
         created_at: int,
         record_prompt: bool = True,
     ) -> tuple[MessageRecord | None, MessageRecord | None]:
-        prompt_message = None
-        if record_prompt:
-            prompt_message = self.append_message_to_thread(
-                thread_id=thread_id,
-                message_id=f"message-{uuid4().hex}",
-                sender=prompt_sender,
-                kind="chat",
-                body=body,
-                created_at=created_at,
-            )
-
-        try:
-            agent = self.build_agent(agent_id)
-        except (KeyError, ValueError) as exc:
-            self.append_event(
-                kind="agent_unavailable",
-                summary=f"{agent_id} unavailable: {exc}",
-                created_at=created_at + 1,
-                thread_id=thread_id,
-            )
-            return prompt_message, None
-
-        thread = self.get_thread(thread_id)
-        runtime_session_id = thread.session_id if thread is not None else self.main_session_id
-        session = self.agent_session_store.load_or_create_session(
-            session_id=runtime_session_id,
+        stream = self._stream_agent_turn(
             thread_id=thread_id,
             agent_id=agent_id,
-            session_factory=lambda session_id: agent.create_session(session_id=session_id),
+            prompt_sender=prompt_sender,
+            reply_sender=reply_sender,
+            body=body,
+            created_at=created_at,
+            record_prompt=record_prompt,
         )
-        session.state[WORKSPACE_STATE_KEY] = {
-            "session_id": runtime_session_id,
-            "thread_id": thread_id,
-            "task_id": thread.parent_task_id if thread is not None else None,
-            "agent_id": agent_id,
-            "created_at": created_at,
-        }
-        tool_context = ToolExecutionContext(
-            session_id=runtime_session_id,
-            thread_id=thread_id,
-            task_id=thread.parent_task_id if thread is not None else None,
-            agent_id=agent_id,
-        )
-
-        try:
-            with use_tool_execution_context(tool_context):
-                response = await agent.run(
-                    [
-                        Message(
-                            role="user",
-                            text=body,
-                            author_name=prompt_sender,
-                        )
-                    ],
-                    session=session,
-                )
-        except Exception as exc:
-            self.append_event(
-                kind="agent_failed",
-                summary=f"{agent_id} run failed: {type(exc).__name__}: {exc}",
-                created_at=created_at + 1,
-                thread_id=thread_id,
-            )
-            self.agent_session_store.save_session(
-                session_id=runtime_session_id,
-                thread_id=thread_id,
-                agent_id=agent_id,
-                session=session,
-            )
-            return prompt_message, None
-
-        self.agent_session_store.save_session(
-            session_id=runtime_session_id,
-            thread_id=thread_id,
-            agent_id=agent_id,
-            session=session,
-        )
-        self.track_token_usage(response)
-        response_text = response.text.strip()
-        if not response_text:
-            return prompt_message, None
-
-        reply_message = self.append_message_to_thread(
-            thread_id=thread_id,
-            message_id=f"message-{uuid4().hex}",
-            sender=reply_sender,
-            kind="chat",
-            body=response_text,
-            created_at=created_at + 1,
-        )
-        return prompt_message, reply_message
+        async for _ in stream:
+            pass
+        return await stream.get_final_response()
 
     async def _decide_orchestrator_turn(
         self,
@@ -1579,13 +1740,12 @@ class RuntimeContext:
             invalid_summary_prefix="Planner returned invalid JSON",
         )
         if parsed is None:
-            return OrchestratorTurnDecision(mode="act", reply="")
+            return OrchestratorTurnDecision(mode="act")
         mode = str(parsed.get("mode", "act")).strip().lower()
-        if mode not in {"reply", "act", "delegate", "workflow"}:
+        if mode not in {"act", "delegate", "workflow"}:
             mode = "act"
         return OrchestratorTurnDecision(
             mode=mode,
-            reply=str(parsed.get("reply", "")).strip(),
             workflow_id=_optional_text(parsed.get("workflow_id")),
             agent_id=_optional_text(parsed.get("agent_id")),
             title=_optional_text(parsed.get("title")),
@@ -1616,10 +1776,7 @@ class RuntimeContext:
             reconsider = False
             reason = ""
             deliverable_expected = decision.deliverable_expected
-            if decision.deliverable_expected and decision.mode == "reply":
-                reconsider = True
-                reason = "Escalated a reply-only turn back to the orchestrator for delivery work"
-            elif (
+            if (
                 decision.deliverable_expected
                 and decision.mode == "workflow"
                 and decision.workflow_id is not None
@@ -1670,7 +1827,6 @@ class RuntimeContext:
             return None
         return OrchestratorTurnDecision(
             mode=mode,
-            reply="",
             workflow_id=workflow_id,
             agent_id=agent_id,
             title=_optional_text(parsed.get("title")),
@@ -3263,8 +3419,7 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "Output JSON only. No markdown. No explanation outside the JSON object.",
             "",
             "Allowed modes:",
-            '- "reply": discussion, clarification, or a pure conversational answer.',
-            '- "act": let the orchestrator handle the turn directly with its normal tool-enabled agent run.',
+            '- "act": let the orchestrator handle the turn directly with its normal tool-enabled agent run. Use this for discussion, clarification, or direct execution by the orchestrator.',
             '- "delegate": hand the work to one specialist thread.',
             '- "workflow": run a named workflow end to end.',
             "",
@@ -3280,9 +3435,9 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             "- Set `deliverable_expected` to true whenever the user expects repo changes, runnable code, tests, bug fixes, or completed implementation work.",
             "- If the recent conversation already settled the approach and the latest user turn is approval to proceed, choose delivery work instead of another reply.",
             "- Prefer delegate only for narrow specialist work.",
-            "- Use reply only when discussion is the real goal or there is not enough information to start.",
+            "- Use act when discussion is the real goal, when the orchestrator should answer directly, or when the orchestrator should work the turn directly.",
             "- Do not rely on keyword matching. Infer intent from the actual request and context.",
-            "- If the user asked to build or change the repo and enough information exists, do not choose reply.",
+            "- If the user asked to build or change the repo and enough information exists, do not choose a non-delivery workflow.",
             "- For workflow mode, make `goal` a self-contained summary of the work using the recent conversation, not just the latest short acknowledgment.",
             "- For delegate mode, make `request` a self-contained specialist brief using the recent conversation.",
             "",
@@ -3293,7 +3448,7 @@ def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:
             *agent_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|delegate|reply|act","workflow_id":null,"agent_id":null,"title":"","request":"","goal":"","reply":"","deliverable_expected":false}',
+            '{"mode":"workflow|delegate|act","workflow_id":null,"agent_id":null,"title":"","request":"","goal":"","deliverable_expected":false}',
         ]
     )
 
@@ -3409,7 +3564,6 @@ def _delivery_audit_prompt(
             f"- mode: {decision.mode}",
             f"- workflow_id: {workflow_note}",
             f"- agent_id: {decision.agent_id or '(none)'}",
-            f"- reply: {decision.reply or '(none)'}",
             f"- deliverable_expected: {decision.deliverable_expected}",
         ]
     )

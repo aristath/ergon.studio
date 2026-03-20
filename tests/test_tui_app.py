@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
+from agent_framework import AgentSession, ResponseStream
 from textual.widgets import Input, OptionList
 
 from ergon_studio.runtime import load_runtime
@@ -31,6 +33,28 @@ class FakeAgent:
 
     async def run(self, messages=None, *, session=None, **_: object):
         return SimpleNamespace(text=self._reply)
+
+
+class FakeStreamingAgent:
+    def __init__(self, deltas: list[str], *, delay: float = 0.01) -> None:
+        self._deltas = deltas
+        self._delay = delay
+
+    def create_session(self, *, session_id: str | None = None, **_: object):
+        return AgentSession(session_id=session_id)
+
+    def run(self, messages=None, *, session=None, **_: object):
+        del messages, session
+
+        async def _updates():
+            for delta in self._deltas:
+                await asyncio.sleep(self._delay)
+                yield SimpleNamespace(text=delta)
+
+        return ResponseStream(
+            _updates(),
+            finalizer=lambda updates: SimpleNamespace(text="".join(update.text for update in updates)),
+        )
 
 
 def _make_env():
@@ -177,6 +201,26 @@ class TestMessages(IsolatedAsyncioTestCase):
                 await pilot.pause()
             text = _timeline_text(app)
             self.assertIn("orchestrator says hi", text)
+
+    async def test_send_to_orchestrator_renders_live_streaming_reply(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                return_value=FakeStreamingAgent(["stream", "ing reply"], delay=0.05),
+            ):
+                task = asyncio.create_task(app._send_to_orchestrator("hello"))
+                await asyncio.sleep(0.03)
+                await pilot.pause()
+                text = _timeline_text(app)
+                self.assertIn("stream", text)
+                self.assertIn("<live>", text)
+                await task
+                await pilot.pause()
+            text = _timeline_text(app)
+            self.assertIn("streaming reply", text)
+            self.assertNotIn("<live>", text)
 
     async def test_input_always_targets_orchestrator(self):
         _, runtime, app = _make_env()

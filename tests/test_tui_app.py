@@ -1529,13 +1529,14 @@ class TestStatusBar(IsolatedAsyncioTestCase):
             bar.set_agent_state("coder", "active")
             self.assertEqual(bar._agent_states["coder"], "active")
             self.assertIn("active: coder", str(bar.content))
+            self.assertIn("/team", str(bar.content))
 
     async def test_status_bar_shows_setup_hint_for_unconfigured_team(self):
         _, _, app = _make_env()
         async with app.run_test():
             bar = app.query_one("#agent-status-bar", AgentStatusBar)
             bar.refresh_from_runtime()
-            self.assertIn("setup needed: /config", str(bar.content))
+            self.assertIn("Ctrl+G or /config", str(bar.content))
 
 
 class TestEditorModals(IsolatedAsyncioTestCase):

@@ -115,15 +115,15 @@ class AgentStatusBar(Static):
         ]
         if active_agents:
             labels = ", ".join(active_agents)
-            return f"active: {labels}"
+            return f"active: {labels} | /team"
         error_agents = [
             agent_id
             for agent_id, state in self._agent_states.items()
             if state == "error"
         ]
         if error_agents:
-            return "setup needed: /config"
-        return "team: /team"
+            return "setup: Ctrl+G or /config"
+        return "team ready: /team"
 
 
 class InfoBar(Static):

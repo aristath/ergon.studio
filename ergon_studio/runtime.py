@@ -847,7 +847,6 @@ class RuntimeContext:
         if decision.deliverable_expected and decision.mode in {"workflow", "delegate"}:
             resolved_goal = delivery_context
             resolved_request = delivery_context
-        requires_delivery_workflow = False
         delivery_reason = ""
         if (
             decision.mode == "workflow"
@@ -859,7 +858,6 @@ class RuntimeContext:
                 created_at=created_at + 1,
             )
         ):
-            requires_delivery_workflow = True
             delivery_reason = "Rejected a non-delivery workflow for an implementation turn"
             self.append_event(
                 kind="orchestrator_non_delivery_rejected",
@@ -867,39 +865,40 @@ class RuntimeContext:
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )
+            decision = OrchestratorTurnDecision(
+                mode="act",
+                reply="",
+                goal=delivery_context,
+                request=delivery_context,
+                deliverable_expected=True,
+            )
         elif (
             decision.deliverable_expected
             and decision.mode == "workflow"
             and decision.workflow_id is not None
             and self._workflow_is_non_delivery(decision.workflow_id)
         ):
-            requires_delivery_workflow = True
-            delivery_reason = "Replaced a non-delivery workflow with a delivery workflow"
-        if decision.deliverable_expected and decision.mode == "reply":
-            requires_delivery_workflow = True
-            delivery_reason = "Promoted a reply-only turn into delivery work"
-        if requires_delivery_workflow:
-            selected_workflow_id = await self._select_delivery_workflow(
-                body=body,
-                goal=delivery_context,
-                current_workflow_id=decision.workflow_id,
-                created_at=created_at + 1,
-            )
+            delivery_reason = "Escalated a non-delivery workflow back to the orchestrator for delivery work"
             decision = OrchestratorTurnDecision(
-                mode="workflow",
-                reply=decision.reply,
-                workflow_id=selected_workflow_id,
-                agent_id=decision.agent_id,
-                title=decision.title,
-                request=delivery_context,
+                mode="act",
+                reply="",
                 goal=delivery_context,
+                request=delivery_context,
                 deliverable_expected=True,
             )
-            resolved_goal = delivery_context
-            resolved_request = delivery_context
+        if decision.deliverable_expected and decision.mode == "reply":
+            delivery_reason = "Escalated a reply-only turn back to the orchestrator for delivery work"
+            decision = OrchestratorTurnDecision(
+                mode="act",
+                reply="",
+                goal=delivery_context,
+                request=delivery_context,
+                deliverable_expected=True,
+            )
+        if delivery_reason:
             self.append_event(
-                kind="orchestrator_delivery_workflow_selected",
-                summary=f"{delivery_reason or 'Selected a delivery workflow'}: {selected_workflow_id}",
+                kind="orchestrator_delivery_reconsidered",
+                summary=delivery_reason,
                 created_at=created_at + 1,
                 thread_id=self.main_thread_id,
             )

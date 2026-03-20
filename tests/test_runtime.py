@@ -1652,37 +1652,33 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
                 return False
 
-            async def choose_workflow(
+            async def run_agent_turn(
                 _runtime,
                 *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
                 body: str,
-                goal: str,
-                current_workflow_id: str | None,
                 created_at: int,
+                record_prompt: bool = True,
             ) -> str:
-                return "dynamic-open-ended"
-
-            async def run_workflow(
-                _runtime,
-                *,
-                workflow_id: str,
-                goal: str,
-                created_at: int | None = None,
-                parent_thread_id: str | None = None,
-            ):
-                return {
-                    "status": "completed",
-                    "workflow_run_id": "workflow-run-1",
-                    "review_summary": "ACCEPTED: implemented",
-                    "last_thread_id": "thread-1",
-                }
+                del agent_id, prompt_sender, reply_sender, record_prompt
+                reply = runtime.append_message_to_thread(
+                    thread_id=thread_id,
+                    message_id="message-reconsidered",
+                    sender="orchestrator",
+                    kind="chat",
+                    body=f"Reconsidered: {body}",
+                    created_at=created_at + 1,
+                )
+                return None, reply
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
                 patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
                 patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
-                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
-                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
                     body="Build the feature from scratch. First decide the approach, then implement it here.",
@@ -1691,9 +1687,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("dynamic-open-ended", runtime.conversation_store.read_message_body(reply))
+            self.assertIn("Reconsidered: Build the feature from scratch", runtime.conversation_store.read_message_body(reply))
             self.assertIn(
-                "orchestrator_delivery_workflow_selected",
+                "orchestrator_delivery_reconsidered",
                 [event.kind for event in runtime.list_events()],
             )
 
@@ -1751,7 +1747,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(captured["workflow_id"], "single-agent-execution")
             self.assertNotIn("orchestrator_delivery_workflow_selected", [event.kind for event in runtime.list_events()])
 
-    async def test_runtime_reselects_non_delivery_workflow_by_metadata(self) -> None:
+    async def test_runtime_reconsiders_non_delivery_workflow_by_metadata(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1772,36 +1768,31 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                     deliverable_expected=True,
                 )
 
-            async def choose_workflow(
+            async def run_agent_turn(
                 _runtime,
                 *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
                 body: str,
-                goal: str,
-                current_workflow_id: str | None,
                 created_at: int,
-            ) -> str:
-                self.assertEqual(current_workflow_id, "specialist-handoff")
-                return "standard-build"
-
-            async def run_workflow(
-                _runtime,
-                *,
-                workflow_id: str,
-                goal: str,
-                created_at: int | None = None,
-                parent_thread_id: str | None = None,
+                record_prompt: bool = True,
             ):
-                return {
-                    "status": "completed",
-                    "workflow_run_id": "workflow-run-1",
-                    "review_summary": "ACCEPTED: implemented",
-                    "last_thread_id": "thread-1",
-                }
+                del agent_id, prompt_sender, reply_sender, record_prompt
+                reply = runtime.append_message_to_thread(
+                    thread_id=thread_id,
+                    message_id="message-reconsidered",
+                    sender="orchestrator",
+                    kind="chat",
+                    body=f"Reconsidered delivery: {body}",
+                    created_at=created_at + 1,
+                )
+                return None, reply
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
-                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
-                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
             ):
                 _, reply = await runtime.send_user_message_to_orchestrator(
                     body="Build the feature now after the discussion.",
@@ -1810,9 +1801,9 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(reply)
             assert reply is not None
-            self.assertIn("standard-build", runtime.conversation_store.read_message_body(reply))
+            self.assertIn("Reconsidered delivery: Build the feature now after the discussion.", runtime.conversation_store.read_message_body(reply))
             self.assertIn(
-                "orchestrator_delivery_workflow_selected",
+                "orchestrator_delivery_reconsidered",
                 [event.kind for event in runtime.list_events()],
             )
 
@@ -1869,7 +1860,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("implement it in this repo", captured["goal"])
             self.assertNotIn("Design the architecture only", captured["goal"])
 
-    async def test_runtime_keeps_full_delivery_goal_when_reselecting_delivery_workflow(self) -> None:
+    async def test_runtime_keeps_full_delivery_goal_when_reconsidering_delivery_workflow(self) -> None:
         from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1897,49 +1888,98 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             async def guard(_runtime, *, body: str, workflow_id: str, created_at: int) -> bool:
                 return False
 
-            async def choose_workflow(
+            async def run_agent_turn(
                 _runtime,
                 *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
                 body: str,
-                goal: str,
-                current_workflow_id: str | None,
                 created_at: int,
-            ) -> str:
-                captured["selected_goal"] = goal
-                return "dynamic-open-ended"
-
-            async def run_workflow(
-                _runtime,
-                *,
-                workflow_id: str,
-                goal: str,
-                created_at: int | None = None,
-                parent_thread_id: str | None = None,
+                record_prompt: bool = True,
             ):
-                captured["run_goal"] = goal
-                return {
-                    "status": "completed",
-                    "workflow_run_id": "workflow-run-1",
-                    "review_summary": "ACCEPTED: implemented",
-                    "last_thread_id": "thread-1",
-                }
+                del thread_id, agent_id, prompt_sender, reply_sender, created_at, record_prompt
+                captured["run_goal"] = body
+                return None, runtime.append_message_to_main_thread(
+                    message_id="message-reconsidered",
+                    sender="orchestrator",
+                    kind="chat",
+                    body="Continuing with delivery.",
+                    created_at=11,
+                )
 
             with (
                 patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
                 patch.object(type(runtime), "_classify_deliverable_intent", side_effect=classify, autospec=True),
                 patch.object(type(runtime), "_allow_non_delivery_workflow", side_effect=guard, autospec=True),
-                patch.object(type(runtime), "_select_delivery_workflow", side_effect=choose_workflow, autospec=True),
-                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
             ):
                 await runtime.send_user_message_to_orchestrator(
                     body="Build a tiny calculator CLI from scratch and implement it in this repo.",
                     created_at=10,
                 )
 
-            self.assertIn("Build a tiny calculator CLI from scratch", captured["selected_goal"])
-            self.assertIn("implement it in this repo", captured["selected_goal"])
-            self.assertNotIn("Design the architecture only", captured["selected_goal"])
-            self.assertEqual(captured["run_goal"], captured["selected_goal"])
+            self.assertIn("Build a tiny calculator CLI from scratch", captured["run_goal"])
+            self.assertIn("implement it in this repo", captured["run_goal"])
+            self.assertNotIn("Design the architecture only", captured["run_goal"])
+
+    async def test_runtime_reconsiders_reply_only_delivery_turns_with_real_orchestrator_run(self) -> None:
+        from ergon_studio.runtime import OrchestratorTurnDecision, load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            captured: dict[str, str] = {}
+
+            async def decide(_runtime, *, body: str, created_at: int):
+                return OrchestratorTurnDecision(
+                    mode="reply",
+                    reply="I will take a look.",
+                    goal="Narrow planner goal that should not win.",
+                    deliverable_expected=True,
+                )
+
+            async def run_agent_turn(
+                _runtime,
+                *,
+                thread_id: str,
+                agent_id: str,
+                prompt_sender: str,
+                reply_sender: str,
+                body: str,
+                created_at: int,
+                record_prompt: bool = True,
+            ):
+                del thread_id, agent_id, prompt_sender, reply_sender, created_at, record_prompt
+                captured["body"] = body
+                return None, runtime.append_message_to_main_thread(
+                    message_id="message-reconsidered",
+                    sender="orchestrator",
+                    kind="chat",
+                    body="Starting delivery.",
+                    created_at=11,
+                )
+
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "_run_agent_turn", side_effect=run_agent_turn, autospec=True),
+            ):
+                _, reply = await runtime.send_user_message_to_orchestrator(
+                    body="Please build the feature now.",
+                    created_at=10,
+                )
+
+            self.assertIsNotNone(reply)
+            assert reply is not None
+            self.assertEqual(runtime.conversation_store.read_message_body(reply), "Starting delivery.\n")
+            self.assertEqual(captured["body"], "Please build the feature now.")
+            self.assertIn("orchestrator_delivery_reconsidered", [event.kind for event in runtime.list_events()])
 
     async def test_runtime_can_send_message_to_agent_thread(self) -> None:
         from ergon_studio.runtime import load_runtime

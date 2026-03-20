@@ -12,7 +12,6 @@ from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.live_runtime import LiveRuntimeSubscription
 from ergon_studio.runtime import RuntimeContext, load_runtime
-from ergon_studio.runtime_events import RuntimeEventSubscription
 from ergon_studio.tui.inspectors import (
     InspectorScreen,
     build_approval_entries,
@@ -227,8 +226,6 @@ class ErgonStudioApp(App[None]):
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
-        self._runtime_event_subscription: RuntimeEventSubscription | None = None
-        self._runtime_event_task: asyncio.Task[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
@@ -238,58 +235,16 @@ class ErgonStudioApp(App[None]):
         yield ComposerTextArea(placeholder="❯ Message the orchestrator...", id="composer-input")
         yield InfoBar(self.runtime, id="info-bar")
 
-    _EVENT_LABELS: dict[str, str] = {
-        "orchestrator_turn_planned": "Planning",
-        "orchestrator_planner_failed": "Planner failed, falling back",
-        "orchestrator_deliverable_detected": "Delivery intent detected",
-        "orchestrator_non_delivery_rejected": "Reconsidering approach",
-        "orchestrator_delivery_reconsidered": "Reconsidering workflow",
-        "workflow_started": "Starting workflow",
-        "workflow_advanced": "Advancing workflow",
-        "workflow_completed": "Workflow completed",
-        "workflow_failed": "Workflow failed",
-        "workflow_blocked": "Workflow blocked",
-        "workflow_info_requested": "Waiting for information",
-        "workflow_step_retry": "Retrying step",
-        "delegation_review_requested": "Reviewing work",
-        "delegation_completed": "Delegation completed",
-        "delegation_rejected": "Delegation rejected, retrying",
-        "agent_unavailable": "Agent unavailable",
-        "agent_failed": "Agent failed",
-        "compaction_started": "Compacting context",
-        "compaction_completed": "Compaction done",
-        "file_written": "Writing file",
-        "file_patched": "Patching file",
-        "command_run": "Running command",
-        "approval_requested": "Waiting for approval",
-        "thread_created": "Creating thread",
-        "task_created": "Creating task",
-    }
-
     def on_mount(self) -> None:
         self.set_focus(self.query_one("#composer-input", ComposerTextArea))
         self._start_live_subscription()
-        self._start_runtime_event_subscription()
         self._refresh_timeline()
         self._refresh_info()
         if self.open_session_picker_on_mount:
             self._open_session_picker()
 
-    def _on_runtime_event(self, kind: str) -> None:
-        """Update the thinking indicator when the runtime emits events."""
-        label = self._EVENT_LABELS.get(kind)
-        if label is None:
-            return
-        try:
-            thinking = self.query_one("#thinking", ThinkingIndicator)
-        except Exception:
-            return
-        if thinking.has_class("visible"):
-            thinking.show(label)
-
     def on_unmount(self) -> None:
         self._stop_live_subscription()
-        self._stop_runtime_event_subscription()
         if self._active_turn_task is not None:
             self._active_turn_task.cancel()
             self._active_turn_task = None
@@ -1001,10 +956,8 @@ class ErgonStudioApp(App[None]):
 
     def _replace_runtime(self, runtime: RuntimeContext, *, notice: str | None = None) -> None:
         self._stop_live_subscription()
-        self._stop_runtime_event_subscription()
         self.runtime = runtime
         self._start_live_subscription()
-        self._start_runtime_event_subscription()
         self.selected_workflow_run_id = None
         self._timeline_notices = []
         self._hidden_main_message_ids = set()
@@ -1140,30 +1093,6 @@ class ErgonStudioApp(App[None]):
         try:
             async for _event in subscription:
                 self._refresh_timeline()
-                await asyncio.sleep(0)
-        except asyncio.CancelledError:
-            return
-
-    def _start_runtime_event_subscription(self) -> None:
-        self._stop_runtime_event_subscription()
-        self._runtime_event_subscription = self.runtime.event_stream.subscribe()
-        self._runtime_event_task = asyncio.create_task(self._watch_runtime_events())
-
-    def _stop_runtime_event_subscription(self) -> None:
-        if self._runtime_event_subscription is not None:
-            self._runtime_event_subscription.close()
-            self._runtime_event_subscription = None
-        if self._runtime_event_task is not None:
-            self._runtime_event_task.cancel()
-            self._runtime_event_task = None
-
-    async def _watch_runtime_events(self) -> None:
-        subscription = self._runtime_event_subscription
-        if subscription is None:
-            return
-        try:
-            async for event in subscription:
-                self._on_runtime_event(event.kind)
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             return

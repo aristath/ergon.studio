@@ -27,7 +27,6 @@ from ergon_studio.memory_store import MemoryStore
 from ergon_studio.paths import StudioPaths
 from ergon_studio.retrieval import RetrievalIndex
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.runtime_events import RuntimeEventStream
 from ergon_studio.session_store import SessionStore, default_session_title
 from ergon_studio.storage.models import ApprovalRecord, ArtifactRecord, CommandRunRecord, EventRecord, MemoryFactRecord, MessageRecord, SessionRecord, TaskRecord, ThreadRecord, ToolCallRecord, WorkflowRunRecord
 from ergon_studio.task_store import TaskStore
@@ -134,7 +133,6 @@ class RuntimeContext:
     tool_call_store: ToolCallStore
     retrieval_index: RetrievalIndex
     live_state: LiveRuntimeState
-    event_stream: RuntimeEventStream
     main_session_id: str
     main_thread_id: str
     _accumulated_tokens: int
@@ -2918,7 +2916,6 @@ class RuntimeContext:
             thread_id=thread_id,
             task_id=task_id,
         )
-        self.event_stream.publish(record)
         return record
 
     def request_approval(
@@ -3316,7 +3313,6 @@ def load_runtime(
         tool_call_store=tool_call_store,
         retrieval_index=retrieval_index,
         live_state=LiveRuntimeState(),
-        event_stream=RuntimeEventStream(),
         main_session_id=resolved_session.id,
         main_thread_id=_main_thread_id_for_session(resolved_session.id),
         _accumulated_tokens=0,

@@ -35,6 +35,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/clear", "Clear conversation, keep config"),
     ("/compact", "Summarize conversation to save context"),
     ("/context", "Show token/context usage"),
+    ("/main", "Return the composer to the orchestrator"),
     ("/session", "Show the current session"),
     ("/sessions", "List project sessions"),
     ("/new-session", "Create and switch to a new session"),
@@ -61,10 +62,19 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 
 
 @dataclass
+class ComposeTarget:
+    kind: str
+    label: str
+    thread_id: str | None = None
+    agent_id: str | None = None
+
+
+@dataclass
 class PendingTurn:
     user_message: MessageRecord
     body: str
     created_at: int
+    target: ComposeTarget
     completion: asyncio.Future[None]
 
 
@@ -238,6 +248,7 @@ class ErgonStudioApp(App[None]):
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
         self._live_refresh_task: asyncio.Task[None] | None = None
+        self._compose_target = self._orchestrator_target()
 
     def _default_workflow_id(self) -> str | None:
         summaries = self.runtime.list_workflow_summaries()
@@ -253,6 +264,78 @@ class ErgonStudioApp(App[None]):
             return workflow_ids[0]
         return None
 
+    def _orchestrator_target(self) -> ComposeTarget:
+        return ComposeTarget(
+            kind="orchestrator",
+            label="orchestrator",
+            agent_id="orchestrator",
+        )
+
+    def _set_compose_target(self, target: ComposeTarget) -> None:
+        self._compose_target = target
+        self._update_composer_placeholder()
+        self._refresh_info()
+
+    def _set_compose_target_to_orchestrator(self) -> None:
+        self._set_compose_target(self._orchestrator_target())
+
+    def _set_compose_target_to_thread(self, thread_id: str) -> None:
+        thread = self.runtime.get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"unknown thread: {thread_id}")
+        label = thread.assigned_agent_id or thread.summary or thread.id
+        self._set_compose_target(
+            ComposeTarget(
+                kind="thread",
+                label=label,
+                thread_id=thread.id,
+                agent_id=thread.assigned_agent_id,
+            )
+        )
+
+    def _composer_placeholder(self) -> str:
+        if self._compose_target.thread_id is None:
+            return "❯ Message the orchestrator..."
+        return f"❯ Message {self._compose_target.label} in this workroom..."
+
+    def _update_composer_placeholder(self) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            composer = self.query_one("#composer-input", ComposerTextArea)
+        except (NoMatches, ScreenStackError):
+            return
+        composer.placeholder = self._composer_placeholder()
+
+    def _target_notice_label(self, target: ComposeTarget) -> str:
+        if target.thread_id is None:
+            return "the orchestrator"
+        return target.label
+
+    def _thinking_label(self, turn: PendingTurn) -> str:
+        if turn.target.thread_id is None:
+            return "Thinking"
+        return f"Working with {turn.target.label}"
+
+    def _maybe_surface_unavailable_target(self, target: ComposeTarget) -> None:
+        if target.agent_id is None:
+            return
+        reason = self.runtime.agent_unavailable_reason(target.agent_id)
+        if reason is None:
+            return
+        if target.thread_id is None:
+            self._add_notice(
+                f"{reason}\nUse /config to add a provider and role assignment for the orchestrator.",
+                level="error",
+                title="Setup needed",
+            )
+            return
+        self._add_notice(
+            f"{target.label} is unavailable: {reason}\nUse /config to finish the team setup, or /main to return to the orchestrator.",
+            level="error",
+            title="Workroom unavailable",
+        )
+
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
         yield TimelineView(id="main-timeline")
@@ -262,6 +345,7 @@ class ErgonStudioApp(App[None]):
         yield InfoBar(self.runtime, id="info-bar")
 
     def on_mount(self) -> None:
+        self._update_composer_placeholder()
         self.set_focus(self.query_one("#composer-input", ComposerTextArea))
         self._start_live_subscription()
         self._refresh_timeline()
@@ -378,54 +462,88 @@ class ErgonStudioApp(App[None]):
                 event.text_area.value = ""
             finally:
                 event.text_area.disabled = False
+                self.set_focus(event.text_area)
             return
 
-        self._submit_orchestrator_turn(text)
+        self._submit_turn(text)
         event.text_area.value = ""
+        self.set_focus(event.text_area)
 
     async def _send_to_orchestrator(self, body: str) -> None:
         turn = self._submit_orchestrator_turn(body)
         await turn.completion
 
-    def _submit_orchestrator_turn(self, body: str) -> PendingTurn:
-        created_at = self._next_timestamp()
-        user_message = self.runtime.record_user_message_to_main_thread(
-            body=body,
-            created_at=created_at,
+    async def _send_to_agent_thread(self, *, thread_id: str, body: str) -> None:
+        thread = self.runtime.get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"unknown thread: {thread_id}")
+        turn = self._submit_turn_for_target(
+            body,
+            ComposeTarget(
+                kind="thread",
+                label=thread.assigned_agent_id or thread_id,
+                thread_id=thread_id,
+                agent_id=thread.assigned_agent_id,
+            ),
         )
+        await turn.completion
+
+    def _submit_turn(self, body: str) -> PendingTurn:
+        return self._submit_turn_for_target(body, self._compose_target)
+
+    def _submit_orchestrator_turn(self, body: str) -> PendingTurn:
+        return self._submit_turn_for_target(body, self._orchestrator_target())
+
+    def _submit_turn_for_target(self, body: str, target: ComposeTarget) -> PendingTurn:
+        created_at = self._next_timestamp()
+        if target.thread_id is None:
+            user_message = self.runtime.record_user_message_to_main_thread(
+                body=body,
+                created_at=created_at,
+            )
+        else:
+            user_message = self.runtime.record_user_message_to_thread(
+                thread_id=target.thread_id,
+                body=body,
+                created_at=created_at,
+            )
         turn = PendingTurn(
             user_message=user_message,
             body=body,
             created_at=created_at,
+            target=target,
             completion=asyncio.get_running_loop().create_future(),
         )
         self._refresh_timeline()
         if self._active_turn_task is not None and not self._active_turn_task.done():
             self._queued_turns.append(turn)
             self._add_notice(
-                f"Queued message for the orchestrator. {len(self._queued_turns)} waiting.",
+                f"Queued message for {self._target_notice_label(target)}. {len(self._queued_turns)} waiting.",
                 level="info",
             )
             self._refresh_timeline()
             self._refresh_info()
             return turn
-        self._start_orchestrator_turn(turn)
+        self._start_turn(turn)
         return turn
 
     def _start_orchestrator_turn(self, turn: PendingTurn) -> None:
+        self._start_turn(turn)
+
+    def _start_turn(self, turn: PendingTurn) -> None:
         thinking = self.query_one("#thinking", ThinkingIndicator)
         self._turn_backgrounded = False
-        thinking.show("Thinking")
+        thinking.show(self._thinking_label(turn))
         self._active_turn = turn
         self._active_turn_task = asyncio.create_task(
-            self._run_orchestrator_turn(
+            self._run_turn(
                 turn=turn,
             )
         )
         self._refresh_timeline()
         self._refresh_info()
 
-    async def _run_orchestrator_turn(
+    async def _run_turn(
         self,
         *,
         turn: PendingTurn,
@@ -433,15 +551,23 @@ class ErgonStudioApp(App[None]):
         thinking = self.query_one("#thinking", ThinkingIndicator)
         current_task = asyncio.current_task()
         try:
-            stream = self.runtime.stream_user_message_to_orchestrator(
-                body=turn.body,
-                created_at=turn.created_at,
-                user_message=turn.user_message,
-            )
+            if turn.target.thread_id is None:
+                stream = self.runtime.stream_user_message_to_orchestrator(
+                    body=turn.body,
+                    created_at=turn.created_at,
+                    user_message=turn.user_message,
+                )
+            else:
+                stream = self.runtime.stream_user_message_to_agent_thread(
+                    thread_id=turn.target.thread_id,
+                    body=turn.body,
+                    created_at=turn.created_at,
+                    user_message=turn.user_message,
+                )
             self._refresh_timeline()
             async for _event in stream:
                 pass
-            await stream.get_final_response()
+            _, reply_message = await stream.get_final_response()
         except asyncio.CancelledError:
             thinking.hide()
             self._refresh_timeline()
@@ -456,6 +582,8 @@ class ErgonStudioApp(App[None]):
                 turn.completion.set_result(None)
         else:
             thinking.hide()
+            if reply_message is None and turn.target.thread_id is not None:
+                self._maybe_surface_unavailable_target(turn.target)
             self._refresh_timeline()
             await self._check_auto_compaction()
             if not turn.completion.done():
@@ -527,6 +655,13 @@ class ErgonStudioApp(App[None]):
                 f"  Usage: {pct}%\n"
                 f"  Auto-compact at: 95%",
                 title="Context",
+            )
+        elif command == "/main":
+            self._set_compose_target_to_orchestrator()
+            self._add_notice(
+                "Composer now targets the orchestrator.",
+                level="info",
+                title="Main chat",
             )
         elif command == "/session":
             session = self.runtime.current_session()
@@ -723,30 +858,47 @@ class ErgonStudioApp(App[None]):
         self._refresh_timeline()
 
     def _open_agent_thread(self, agent_id: str) -> None:
-        created_at = self._next_timestamp()
-        task = self.runtime.create_task(
-            task_id=f"task-{uuid4().hex[:8]}",
-            title=f"Agent thread: {agent_id}",
-            state="in_progress",
-            created_at=created_at,
-        )
-        thread = self.runtime.create_agent_thread(
-            agent_id=agent_id,
-            created_at=created_at + 1,
-            parent_task_id=task.id,
-        )
+        existing_threads = [
+            thread
+            for thread in self.runtime.list_threads()
+            if thread.kind == "agent_direct" and thread.assigned_agent_id == agent_id
+        ]
+        if existing_threads:
+            thread = max(existing_threads, key=lambda item: (item.created_at, item.id))
+        else:
+            created_at = self._next_timestamp()
+            task = self.runtime.create_task(
+                task_id=f"task-{uuid4().hex[:8]}",
+                title=f"Agent thread: {agent_id}",
+                state="in_progress",
+                created_at=created_at,
+            )
+            thread = self.runtime.create_agent_thread(
+                agent_id=agent_id,
+                created_at=created_at + 1,
+                parent_task_id=task.id,
+            )
+        self._set_compose_target_to_thread(thread.id)
+        reason = self.runtime.agent_unavailable_reason(agent_id)
         self._add_notice(
-            f"Opened an internal workroom with {agent_id}. It will now appear inline when the team uses it.",
-            level="info",
-            title="Workroom opened",
+            (
+                f"Composer now targets {agent_id}. Your next message will go to this direct thread.\n"
+                "Use /main to return to the orchestrator."
+            )
+            if reason is None
+            else (
+                f"Composer now targets {agent_id}, but that agent is not ready yet.\n"
+                f"{reason}\nUse /config to finish setup, or /main to return."
+            ),
+            level="info" if reason is None else "warning",
+            title="Direct thread",
         )
         self._refresh_timeline()
 
     def action_approve_pending(self) -> None:
-        pending = self.runtime.list_pending_approvals()
-        if not pending:
+        approval = self._selected_pending_approval()
+        if approval is None:
             return
-        approval = pending[0]
         self.runtime.resolve_approval(
             approval_id=approval.id,
             status="approved",
@@ -757,10 +909,9 @@ class ErgonStudioApp(App[None]):
         self._refresh_info()
 
     def action_reject_pending(self) -> None:
-        pending = self.runtime.list_pending_approvals()
-        if not pending:
+        approval = self._selected_pending_approval()
+        if approval is None:
             return
-        approval = pending[0]
         self.runtime.resolve_approval(
             approval_id=approval.id,
             status="rejected",
@@ -769,6 +920,26 @@ class ErgonStudioApp(App[None]):
         self._add_notice(f"Rejected {approval.action} by {approval.requester}", level="error")
         self._refresh_timeline()
         self._refresh_info()
+
+    def _selected_pending_approval(self):
+        pending = self.runtime.list_pending_approvals()
+        if not pending:
+            return None
+        focused = self.focused
+        approval_id = getattr(focused, "approval_id", None)
+        if isinstance(approval_id, str):
+            for approval in pending:
+                if approval.id == approval_id:
+                    return approval
+        if len(pending) == 1:
+            return pending[0]
+        self._add_notice(
+            "Select an approval in the timeline before approving or rejecting when more than one is pending.",
+            level="warning",
+            title="Select approval",
+        )
+        self._refresh_timeline()
+        return None
 
     def action_background_current(self) -> None:
         """Move the current thinking operation to background."""
@@ -1006,10 +1177,15 @@ class ErgonStudioApp(App[None]):
                 selected_workflow_id=self.selected_workflow_id,
                 permission_mode=self._permission_mode,
                 turn_status=self._turn_status_text(),
+                compose_target_label=self._compose_target.label,
             )
             status_bar = self.query_one("#agent-status-bar", AgentStatusBar)
             status_bar.refresh_from_runtime()
-            status_bar.set_agent_state("orchestrator", self._orchestrator_status_bar_state())
+            active_agent_id = self._active_turn.target.agent_id if self._active_turn is not None else None
+            if active_agent_id is None:
+                status_bar.set_agent_state("orchestrator", self._orchestrator_status_bar_state())
+            else:
+                status_bar.set_agent_state(active_agent_id, self._active_status_bar_state())
         except (NoMatches, ScreenStackError):
             return
 
@@ -1017,6 +1193,7 @@ class ErgonStudioApp(App[None]):
         self._stop_live_subscription()
         self.runtime = runtime
         self._start_live_subscription()
+        self._compose_target = self._orchestrator_target()
         self.selected_workflow_run_id = None
         self._timeline_notices = []
         self._hidden_main_message_ids = set()
@@ -1030,6 +1207,7 @@ class ErgonStudioApp(App[None]):
         info_bar = self.query_one("#info-bar", InfoBar)
         info_bar.runtime = self.runtime
 
+        self._update_composer_placeholder()
         self._refresh_timeline()
         self._refresh_info()
 
@@ -1115,15 +1293,23 @@ class ErgonStudioApp(App[None]):
         session_line = ""
         if session is not None:
             session_line = f"Session: {session.title} ({session.id})\n"
+        setup_reason = self.runtime.agent_unavailable_reason("orchestrator")
+        body = (
+            f"Project: {self.runtime.paths.project_uuid}\n"
+            f"{session_line}"
+            f"Workspace: {self.runtime.paths.project_root}\n"
+        )
+        if setup_reason is None:
+            body += "Type a message to start."
+        else:
+            body += (
+                f"Orchestrator unavailable: {setup_reason}\n"
+                "Use /config to add a provider and role assignment before you start."
+            )
         return NoticeItem(
             item_id="startup-notice",
             title="Workspace",
-            body=(
-                f"Project: {self.runtime.paths.project_uuid}\n"
-                f"{session_line}"
-                f"Workspace: {self.runtime.paths.project_root}\n"
-                "Type a message to start."
-            ),
+            body=body,
             level="info",
             created_at=0,
         )
@@ -1136,23 +1322,35 @@ class ErgonStudioApp(App[None]):
         active = self._active_turn_task is not None and not self._active_turn_task.done()
         if not active and not self._queued_turns:
             return None
-        if self._turn_backgrounded:
-            label = "orchestrator: backgrounded"
-        elif active:
-            label = "orchestrator: working"
+        if self._active_turn is not None:
+            label_name = self._active_turn.target.label
+        elif self._queued_turns:
+            label_name = self._queued_turns[0].target.label
         else:
-            label = "orchestrator: queued"
+            label_name = "orchestrator"
+        if self._turn_backgrounded:
+            label = f"{label_name}: backgrounded"
+        elif active:
+            label = f"{label_name}: working"
+        else:
+            label = f"{label_name}: queued"
         if self._queued_turns:
             label = f"{label} (+{len(self._queued_turns)} queued)"
         return label
 
-    def _orchestrator_status_bar_state(self) -> str:
-        summary = self.runtime.agent_status_summary("orchestrator")
+    def _active_status_bar_state(self) -> str:
         active = self._active_turn_task is not None and not self._active_turn_task.done()
         if self._turn_backgrounded and active:
             return "waiting"
         if active:
             return "working"
+        return "ready"
+
+    def _orchestrator_status_bar_state(self) -> str:
+        summary = self.runtime.agent_status_summary("orchestrator")
+        active = self._active_turn_task is not None and not self._active_turn_task.done()
+        if active and self._active_turn is not None and self._active_turn.target.agent_id == "orchestrator":
+            return self._active_status_bar_state()
         if "not configured" in summary or "error" in summary:
             return "error"
         if "ready" in summary:
@@ -1204,6 +1402,14 @@ class ErgonStudioApp(App[None]):
         if event.kind != "message_failed":
             return
         if event.thread_id == self.runtime.main_thread_id:
+            reason = self.runtime.agent_unavailable_reason("orchestrator")
+            if reason is not None:
+                self._add_notice(
+                    f"{reason}\nUse /config to add a provider and role assignment for the orchestrator.",
+                    level="error",
+                    title="Setup needed",
+                )
+                return
             self._add_notice(
                 f"Error: {event.error}" if event.error else "The orchestrator could not produce a response for that turn.",
                 level="error",

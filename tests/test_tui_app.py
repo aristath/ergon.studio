@@ -14,7 +14,7 @@ from textual.widgets import Input, OptionList
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
 from ergon_studio.tui.inspectors import InspectorScreen
-from ergon_studio.tui.timeline_widgets import TimelineView
+from ergon_studio.tui.timeline_widgets import TimelineApprovalWidget, TimelineView
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, ThinkingIndicator
 
 
@@ -164,6 +164,7 @@ class TestAppRendering(IsolatedAsyncioTestCase):
             self.assertIn("orchestrator", str(inp.placeholder))
             info = app.query_one("#info-bar", InfoBar)
             self.assertIsNotNone(info)
+            self.assertIn("target: orchestrator", str(info.content))
 
     async def test_info_bar_shows_current_session_title(self):
         _, runtime, app = _make_env()
@@ -774,6 +775,14 @@ class TestMessages(IsolatedAsyncioTestCase):
             inp = app.query_one("#composer-input", ComposerTextArea)
             self.assertIn("orchestrator", str(inp.placeholder))
 
+    async def test_startup_notice_guides_setup_when_orchestrator_is_unavailable(self):
+        _, runtime, app = _make_env()
+        with patch.object(type(runtime), "agent_unavailable_reason", return_value="No provider is assigned to orchestrator"):
+            async with app.run_test():
+                text = _timeline_text(app)
+                self.assertIn("Orchestrator unavailable", text)
+                self.assertIn("/config", text)
+
     async def test_text_change_handler_ignores_unmounted_composer_events(self):
         _, _, app = _make_env()
         app.on_text_area_changed(
@@ -851,6 +860,60 @@ class TestApprovals(IsolatedAsyncioTestCase):
             self.assertEqual(approvals[0].status, "rejected")
             text = _timeline_text(app)
             self.assertIn("Rejected", text)
+
+    async def test_multiple_pending_approvals_require_selection(self):
+        _, runtime, app = _make_env()
+        runtime.request_approval(
+            approval_id="appr-1",
+            requester="coder",
+            action="write_file",
+            risk_class="moderate",
+            reason="update readme",
+            created_at=1000,
+        )
+        runtime.request_approval(
+            approval_id="appr-2",
+            requester="tester",
+            action="run_command",
+            risk_class="moderate",
+            reason="run test suite",
+            created_at=1001,
+        )
+        async with app.run_test() as pilot:
+            app.action_approve_pending()
+            await pilot.pause()
+            approvals = runtime.list_approvals()
+            self.assertEqual([approval.status for approval in approvals], ["pending", "pending"])
+            self.assertIn("Select an approval", _timeline_text(app))
+
+    async def test_selected_approval_is_resolved(self):
+        _, runtime, app = _make_env()
+        runtime.request_approval(
+            approval_id="appr-1",
+            requester="coder",
+            action="write_file",
+            risk_class="moderate",
+            reason="update readme",
+            created_at=1000,
+        )
+        runtime.request_approval(
+            approval_id="appr-2",
+            requester="tester",
+            action="run_command",
+            risk_class="moderate",
+            reason="run test suite",
+            created_at=1001,
+        )
+        async with app.run_test() as pilot:
+            widgets = list(app.query(TimelineApprovalWidget))
+            self.assertEqual(len(widgets), 2)
+            app.set_focus(widgets[1])
+            await pilot.pause()
+            app.action_approve_pending()
+            await pilot.pause()
+            statuses = {approval.id: approval.status for approval in runtime.list_approvals()}
+            self.assertEqual(statuses["appr-1"], "pending")
+            self.assertEqual(statuses["appr-2"], "approved")
 
 
 class TestSlashCommands(IsolatedAsyncioTestCase):
@@ -1096,7 +1159,7 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(app.selected_workflow_id, workflow_ids[0])
 
-    async def test_agent_opens_internal_workroom_and_keeps_composer_on_orchestrator(self):
+    async def test_agent_command_switches_composer_to_direct_thread(self):
         _, runtime, app = _make_env()
         async with app.run_test() as pilot:
             agent_ids = runtime.list_agent_ids()
@@ -1109,8 +1172,51 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
                 threads = [thread for thread in runtime.list_threads() if thread.id != runtime.main_thread_id]
                 self.assertTrue(threads)
                 text = _timeline_text(app)
-                self.assertIn("Workroom opened", text)
-                self.assertIn("orchestrator", str(inp.placeholder))
+                self.assertIn("Direct thread", text)
+                self.assertIn(agent_ids[0], str(inp.placeholder))
+                self.assertIn(f"target: {agent_ids[0]}", str(app.query_one("#info-bar", InfoBar).content))
+
+    async def test_main_command_returns_composer_to_orchestrator(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            agent_id = runtime.list_agent_ids()[0]
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = f"/agent {agent_id}"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIn(agent_id, str(inp.placeholder))
+            inp.value = "/main"
+            await pilot.press("enter")
+            for _ in range(5):
+                await pilot.pause()
+                if "orchestrator" in str(inp.placeholder):
+                    break
+            self.assertIn("orchestrator", str(inp.placeholder))
+            self.assertIn("target: orchestrator", str(app.query_one("#info-bar", InfoBar).content))
+
+    async def test_direct_agent_thread_can_receive_user_messages(self):
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            agent_id = "coder"
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            inp.value = f"/agent {agent_id}"
+            await pilot.press("enter")
+            await pilot.pause()
+            target_thread_id = app._compose_target.thread_id
+            self.assertIsNotNone(target_thread_id)
+            with patch.object(type(runtime), "build_agent", return_value=FakeAgent("I can take it from here.")):
+                inp.value = "Please handle this directly."
+                await pilot.press("enter")
+                for _ in range(10):
+                    await pilot.pause()
+                    thread_messages = runtime.list_thread_messages(target_thread_id)
+                    if len(thread_messages) >= 2:
+                        break
+            thread_messages = runtime.list_thread_messages(target_thread_id)
+            self.assertEqual([message.sender for message in thread_messages], ["user", agent_id])
+            self.assertIn("I can take it from here.", _timeline_text(app))
 
     async def test_memory_opens_inspector(self):
         _, runtime, app = _make_env()

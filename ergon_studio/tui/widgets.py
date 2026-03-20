@@ -129,14 +129,16 @@ class InfoBar(Static):
         selected_workflow_id: str | None = None,
         permission_mode: str = "default",
         turn_status: str | None = None,
+        compose_target_label: str | None = None,
     ) -> None:
         line1 = self._build_status_line(
             selected_workflow_run_id,
             selected_workflow_id,
             permission_mode,
             turn_status,
+            compose_target_label,
         )
-        line2 = "/help /config /workflows /runs /tasks /artifacts /memory /threads"
+        line2 = "/help /config /agent /main /workflows /runs /tasks /artifacts /memory /threads"
         self.update(f"{line1}\n{line2}")
 
     def _build_status_line(
@@ -145,12 +147,16 @@ class InfoBar(Static):
         workflow_id: str | None,
         permission_mode: str = "default",
         turn_status: str | None = None,
+        compose_target_label: str | None = None,
     ) -> str:
         parts: list[str] = []
         session = self.runtime.current_session()
 
         if session is not None:
             parts.append(f"session: {session.title}")
+
+        if compose_target_label:
+            parts.append(f"target: {compose_target_label}")
 
         if turn_status:
             parts.append(turn_status)

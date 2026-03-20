@@ -137,11 +137,16 @@ class TimelineNoticeWidget(Static, _TimelineItemWidget):
 
 
 class TimelineApprovalWidget(Static, _TimelineItemWidget):
+    can_focus = True
     DEFAULT_CSS = """
     TimelineApprovalWidget {
         height: auto;
         margin: 0 1 1 1;
         background: transparent;
+    }
+
+    TimelineApprovalWidget:focus {
+        border: round $accent;
     }
     """
 
@@ -149,16 +154,21 @@ class TimelineApprovalWidget(Static, _TimelineItemWidget):
         super().__init__(**kwargs)
         self.item_id = item.item_id
         self.item = item
+        self.approval_id = item.approval_id
         self.update(_approval_renderable(item))
 
     def update_item(self, item: TimelineItem) -> None:
         assert isinstance(item, ApprovalItem)
         self.item_id = item.item_id
         self.item = item
+        self.approval_id = item.approval_id
         self.update(_approval_renderable(item))
 
     def plain_text(self) -> str:
         return f"Approval Required {self.item.action} by {self.item.requester} Reason: {self.item.reason}"
+
+    def on_click(self) -> None:
+        self.focus()
 
 
 class TimelineWorkroomSegmentWidget(Collapsible, _TimelineItemWidget):

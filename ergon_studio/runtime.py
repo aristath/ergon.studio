@@ -1250,6 +1250,12 @@ class RuntimeContext:
         if not final_text:
             final_text = response_text.strip()
         if not final_text:
+            self.append_event(
+                kind="agent_failed",
+                summary=f"{agent_id} returned an empty response",
+                created_at=created_at + 1,
+                thread_id=thread_id,
+            )
             failed = self.live_state.fail_draft(
                 draft_id=draft_id,
                 error="empty response",

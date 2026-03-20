@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from rich.markup import escape
 from rich.markdown import Markdown
 from rich.panel import Panel as RichPanel
 from textual.containers import VerticalScroll
@@ -185,6 +186,7 @@ def _message_renderable(sender: str, body: str, *, is_live: bool = False):
 
 
 def _message_markup(sender: str, body: str, *, is_live: bool = False) -> str:
-    label = "you" if sender == "user" else sender
+    label = escape("you" if sender == "user" else sender)
+    safe_body = escape(body)
     suffix = " [dim]▌[/dim]" if is_live else ""
-    return f"[bold]{label}[/bold] {body}{suffix}"
+    return f"[bold]{label}[/bold] {safe_body}{suffix}"

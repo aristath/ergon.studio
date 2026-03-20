@@ -48,7 +48,7 @@ class ProxyChatAdapterTests(unittest.TestCase):
         tool_call = payload["choices"][0]["delta"]["tool_calls"][0]
         self.assertEqual(tool_call["id"], "call_1")
         self.assertEqual(tool_call["function"]["name"], "read_file")
-        self.assertEqual(payload["choices"][0]["finish_reason"], "tool_calls")
+        self.assertIsNone(payload["choices"][0]["finish_reason"])
 
     def test_finish_event_encodes_to_chat_chunk(self) -> None:
         payload = encode_chat_stream_event(

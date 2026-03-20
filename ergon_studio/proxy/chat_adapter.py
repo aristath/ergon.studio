@@ -48,7 +48,6 @@ def encode_chat_stream_event(
                 },
             }
         ]
-        choice["finish_reason"] = "tool_calls"
         return base
     if isinstance(event, ProxyFinishEvent):
         choice["delta"] = {}

@@ -300,6 +300,54 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(second_payload["choices"][0]["finish_reason"], "stop")
         self.assertEqual(second_payload["choices"][0]["message"]["content"], "Workflow final summary")
 
+    def test_chat_completions_streams_tool_calls_with_separate_finish_chunk(self) -> None:
+        core = ProxyOrchestrationCore(
+            _proxy_registry(),
+            agent_builder=_proxy_agent_builder(
+                {
+                    "orchestrator": ["{\"mode\":\"act\"}", {"text": "", "tool_calls": [{"id": "call_1", "name": "read_file", "arguments": "{\"path\":\"main.py\"}"}]}],
+                    "architect": [],
+                    "coder": [],
+                }
+            ),
+        )
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Inspect main.py"}],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "description": "Read a file",
+                                "parameters": {"type": "object"},
+                            },
+                        }
+                    ],
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            chunks = [
+                json.loads(line[6:])
+                for line in response.read().decode("utf-8").splitlines()
+                if line.startswith("data: {")
+            ]
+
+        tool_chunk = next(chunk for chunk in chunks if chunk["choices"][0]["delta"].get("tool_calls"))
+        finish_chunk = chunks[-1]
+        self.assertIsNone(tool_chunk["choices"][0]["finish_reason"])
+        self.assertEqual(finish_chunk["choices"][0]["finish_reason"], "tool_calls")
+
     def test_responses_resume_full_tool_loop(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),

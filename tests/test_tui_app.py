@@ -208,18 +208,115 @@ class TestMessages(IsolatedAsyncioTestCase):
             with patch.object(
                 type(runtime),
                 "build_agent",
-                return_value=FakeStreamingAgent(["stream", "ing reply"], delay=0.05),
+                return_value=FakeStreamingAgent(["stream", "ing reply"], delay=0.15),
             ):
                 task = asyncio.create_task(app._send_to_orchestrator("hello"))
-                await asyncio.sleep(0.03)
-                await pilot.pause()
-                text = _timeline_text(app)
-                self.assertIn("stream", text)
-                self.assertIn("<live>", text)
+                text = ""
+                saw_live = False
+                saw_stream = False
+                for _ in range(8):
+                    await asyncio.sleep(0.03)
+                    await pilot.pause()
+                    text = _timeline_text(app)
+                    saw_live = saw_live or "<live>" in text
+                    saw_stream = saw_stream or "stream" in text
+                    if saw_live and saw_stream:
+                        break
+                self.assertTrue(saw_stream)
+                self.assertTrue(saw_live)
                 await task
                 await pilot.pause()
             text = _timeline_text(app)
             self.assertIn("streaming reply", text)
+            self.assertNotIn("<live>", text)
+
+    async def test_workflow_turn_renders_live_internal_workroom_activity(self):
+        from ergon_studio.runtime import OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+
+        async def decide(_runtime, *, body: str, created_at: int):
+            del _runtime, created_at
+            return OrchestratorTurnDecision(
+                mode="workflow",
+                workflow_id="standard-build",
+                goal=body,
+                deliverable_expected=True,
+            )
+
+        async def run_workflow(
+            _runtime,
+            *,
+            workflow_id: str,
+            goal: str,
+            created_at: int | None = None,
+            parent_thread_id: str | None = None,
+        ):
+            del workflow_id, goal, parent_thread_id
+            thread = runtime.create_agent_thread(
+                agent_id="coder",
+                created_at=(created_at or 10) + 1,
+            )
+            runtime.live_state.start_draft(
+                draft_id="draft-workflow-1",
+                thread_id=thread.id,
+                sender="coder",
+                kind="chat",
+                created_at=(created_at or 10) + 2,
+            )
+            await asyncio.sleep(0.02)
+            runtime.live_state.append_delta(
+                draft_id="draft-workflow-1",
+                delta="Drafting implementation",
+                created_at=(created_at or 10) + 3,
+            )
+            await asyncio.sleep(0.15)
+            reply = runtime.append_message_to_thread(
+                thread_id=thread.id,
+                message_id="message-workflow-coder",
+                sender="coder",
+                kind="chat",
+                body="Drafting implementation",
+                created_at=(created_at or 10) + 4,
+            )
+            runtime.live_state.complete_draft(
+                draft_id="draft-workflow-1",
+                message_id=reply.id,
+                created_at=(created_at or 10) + 4,
+            )
+            return {
+                "status": "completed",
+                "workflow_run_id": "workflow-run-1",
+                "review_summary": "ACCEPTED: implemented",
+                "last_thread_id": thread.id,
+            }
+
+        async with app.run_test() as pilot:
+            with (
+                patch.object(type(runtime), "_decide_orchestrator_turn", side_effect=decide, autospec=True),
+                patch.object(type(runtime), "run_workflow", side_effect=run_workflow, autospec=True),
+            ):
+                task = asyncio.create_task(app._send_to_orchestrator("build it"))
+                text = ""
+                saw_live = False
+                saw_draft = False
+                saw_workroom = False
+                for _ in range(8):
+                    await asyncio.sleep(0.03)
+                    await pilot.pause()
+                    text = _timeline_text(app)
+                    saw_workroom = saw_workroom or "Orchestrator <-> coder" in text
+                    saw_draft = saw_draft or "Drafting implementation" in text
+                    saw_live = saw_live or "<live>" in text
+                    if saw_workroom and saw_draft and saw_live:
+                        break
+                self.assertTrue(saw_workroom)
+                self.assertTrue(saw_draft)
+                self.assertTrue(saw_live)
+                await task
+                await pilot.pause()
+            text = _timeline_text(app)
+            self.assertIn("standard-build", text)
             self.assertNotIn("<live>", text)
 
     async def test_input_always_targets_orchestrator(self):

@@ -10,6 +10,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, TextArea
 
+from ergon_studio.live_runtime import LiveRuntimeSubscription
 from ergon_studio.runtime import RuntimeContext, load_runtime
 from ergon_studio.tui.inspectors import (
     InspectorScreen,
@@ -220,6 +221,11 @@ class ErgonStudioApp(App[None]):
         self._last_escape_time: float = 0.0
         self._permission_mode: str = "default"  # default, auto-approve, plan
         self._compacting: bool = False
+        self._active_turn_task: asyncio.Task[None] | None = None
+        self._queued_turns: list[tuple[str, int]] = []
+        self._turn_backgrounded: bool = False
+        self._live_subscription: LiveRuntimeSubscription | None = None
+        self._live_subscription_task: asyncio.Task[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
@@ -229,12 +235,61 @@ class ErgonStudioApp(App[None]):
         yield ComposerTextArea(placeholder="❯ Message the orchestrator...", id="composer-input")
         yield InfoBar(self.runtime, id="info-bar")
 
+    _EVENT_LABELS: dict[str, str] = {
+        "orchestrator_turn_planned": "Planning",
+        "orchestrator_planner_failed": "Planner failed, falling back",
+        "orchestrator_deliverable_detected": "Delivery intent detected",
+        "orchestrator_non_delivery_rejected": "Reconsidering approach",
+        "orchestrator_delivery_reconsidered": "Reconsidering workflow",
+        "workflow_started": "Starting workflow",
+        "workflow_advanced": "Advancing workflow",
+        "workflow_completed": "Workflow completed",
+        "workflow_failed": "Workflow failed",
+        "workflow_blocked": "Workflow blocked",
+        "workflow_info_requested": "Waiting for information",
+        "workflow_step_retry": "Retrying step",
+        "delegation_review_requested": "Reviewing work",
+        "delegation_completed": "Delegation completed",
+        "delegation_rejected": "Delegation rejected, retrying",
+        "agent_unavailable": "Agent unavailable",
+        "agent_failed": "Agent failed",
+        "compaction_started": "Compacting context",
+        "compaction_completed": "Compaction done",
+        "file_written": "Writing file",
+        "file_patched": "Patching file",
+        "command_run": "Running command",
+        "approval_requested": "Waiting for approval",
+        "thread_created": "Creating thread",
+        "task_created": "Creating task",
+    }
+
     def on_mount(self) -> None:
         self.set_focus(self.query_one("#composer-input", ComposerTextArea))
+        self.runtime.set_event_callback(self._on_runtime_event)
+        self._start_live_subscription()
         self._refresh_timeline()
         self._refresh_info()
         if self.open_session_picker_on_mount:
             self._open_session_picker()
+
+    def _on_runtime_event(self, kind: str, summary: str) -> None:
+        """Update the thinking indicator when the runtime emits events."""
+        label = self._EVENT_LABELS.get(kind)
+        if label is None:
+            return
+        try:
+            thinking = self.query_one("#thinking", ThinkingIndicator)
+        except Exception:
+            return
+        if thinking.has_class("visible"):
+            thinking.show(label)
+
+    def on_unmount(self) -> None:
+        self._stop_live_subscription()
+        self.runtime.set_event_callback(None)
+        if self._active_turn_task is not None:
+            self._active_turn_task.cancel()
+            self._active_turn_task = None
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "composer-input":
@@ -325,38 +380,89 @@ class ErgonStudioApp(App[None]):
             event.text_area.value = ""
             return
 
-        event.text_area.disabled = True
-        try:
-            if text.startswith("/"):
+        if text.startswith("/"):
+            event.text_area.disabled = True
+            try:
                 await self._handle_slash_command(text)
-            else:
-                await self._send_to_orchestrator(text)
-            event.text_area.value = ""
-        finally:
-            event.text_area.disabled = False
+                event.text_area.value = ""
+            finally:
+                event.text_area.disabled = False
+            return
+
+        self._submit_orchestrator_turn(text)
+        event.text_area.value = ""
 
     async def _send_to_orchestrator(self, body: str) -> None:
-        thinking = self.query_one("#thinking", ThinkingIndicator)
+        self._submit_orchestrator_turn(body)
+        while self._active_turn_task is not None:
+            task = self._active_turn_task
+            await task
+            if self._active_turn_task is task:
+                break
+
+    def _submit_orchestrator_turn(self, body: str) -> None:
         created_at = self._next_timestamp()
+        if self._active_turn_task is not None and not self._active_turn_task.done():
+            self._queued_turns.append((body, created_at))
+            self._add_notice(
+                f"Queued message for the orchestrator. {len(self._queued_turns)} waiting.",
+                level="info",
+            )
+            self._refresh_timeline()
+            self._refresh_info()
+            return
+        self._start_orchestrator_turn(body=body, created_at=created_at)
+
+    def _start_orchestrator_turn(self, *, body: str, created_at: int) -> None:
+        thinking = self.query_one("#thinking", ThinkingIndicator)
+        self._turn_backgrounded = False
         thinking.show("Thinking")
-        task = asyncio.create_task(
-            self.runtime.send_user_message_to_orchestrator(
+        self._active_turn_task = asyncio.create_task(
+            self._run_orchestrator_turn(body=body, created_at=created_at)
+        )
+        self._refresh_timeline()
+        self._refresh_info()
+
+    async def _run_orchestrator_turn(self, *, body: str, created_at: int) -> None:
+        thinking = self.query_one("#thinking", ThinkingIndicator)
+        current_task = asyncio.current_task()
+        try:
+            stream = self.runtime.stream_user_message_to_orchestrator(
                 body=body,
                 created_at=created_at,
             )
-        )
-        await asyncio.sleep(0)
-        self._refresh_timeline()
-        try:
-            await task
+            self._refresh_timeline()
+            async for _event in stream:
+                self._refresh_timeline()
+                await asyncio.sleep(0)
+            await stream.get_final_response()
+        except asyncio.CancelledError:
+            thinking.hide()
+            self._refresh_timeline()
+            raise
         except Exception as exc:
             thinking.hide()
             self._add_notice(f"Error: {exc}", level="error", title="Send failed")
             self._refresh_timeline()
+        else:
+            thinking.hide()
+            self._refresh_timeline()
+            await self._check_auto_compaction()
+        finally:
+            if self._active_turn_task is current_task:
+                self._active_turn_task = None
+            self._turn_backgrounded = False
+            self._refresh_info()
+        self._start_next_queued_turn()
+
+    def _start_next_queued_turn(self) -> None:
+        if self._active_turn_task is not None and not self._active_turn_task.done():
             return
-        thinking.hide()
-        self._refresh_timeline()
-        await self._check_auto_compaction()
+        if not self._queued_turns:
+            return
+        body, created_at = self._queued_turns.pop(0)
+        self._add_notice("Continuing with the next queued message.", level="info")
+        self._start_orchestrator_turn(body=body, created_at=created_at)
 
     async def _handle_slash_command(self, text: str) -> None:
         parts = text.split(None, 1)
@@ -432,6 +538,10 @@ class ErgonStudioApp(App[None]):
                     )
                 self._add_notice("\n".join(lines), title="Sessions")
         elif command == "/new-session":
+            if self._has_inflight_turns():
+                self._add_notice("Finish or wait for running orchestrator work before switching sessions.", level="warning")
+                self._refresh_timeline()
+                return
             title = args.strip() or None
             new_runtime = load_runtime(
                 project_root=self.runtime.paths.project_root,
@@ -456,6 +566,10 @@ class ErgonStudioApp(App[None]):
                 self._add_notice(f"Renamed current session to {renamed.title}", level="success")
                 self._refresh_info()
         elif command == "/archive-session":
+            if self._has_inflight_turns():
+                self._add_notice("Finish or wait for running orchestrator work before switching sessions.", level="warning")
+                self._refresh_timeline()
+                return
             target = args.strip() or self.runtime.main_session_id
             try:
                 self.runtime.archive_session(
@@ -480,6 +594,10 @@ class ErgonStudioApp(App[None]):
                 else:
                     self._add_notice(f"Archived session {target}", level="warning")
         elif command == "/switch-session":
+            if self._has_inflight_turns():
+                self._add_notice("Finish or wait for running orchestrator work before switching sessions.", level="warning")
+                self._refresh_timeline()
+                return
             target = args.strip()
             if not target:
                 self._open_session_picker()
@@ -641,13 +759,15 @@ class ErgonStudioApp(App[None]):
     def action_background_current(self) -> None:
         """Move the current thinking operation to background."""
         thinking = self.query_one("#thinking", ThinkingIndicator)
-        if not thinking.has_class("visible"):
+        if self._active_turn_task is None or self._active_turn_task.done():
             self._add_notice("Nothing is running to background.", level="info")
             self._refresh_timeline()
             return
-        # The operation is already running async — just notify the user
+        self._turn_backgrounded = True
+        thinking.hide()
         self._add_notice("Operation continues in background. You can keep typing.", level="info")
         self._refresh_timeline()
+        self._refresh_info()
         self.set_focus(self.query_one("#composer-input", ComposerTextArea))
 
     def action_cycle_permission_mode(self) -> None:
@@ -674,6 +794,10 @@ class ErgonStudioApp(App[None]):
         self._open_config_wizard()
 
     def action_open_session_picker(self) -> None:
+        if self._has_inflight_turns():
+            self._add_notice("Finish or wait for running orchestrator work before switching sessions.", level="warning")
+            self._refresh_timeline()
+            return
         self._open_session_picker()
 
     def _open_config_wizard(self) -> None:
@@ -836,7 +960,12 @@ class ErgonStudioApp(App[None]):
         self._refresh_info()
 
     def _refresh_timeline(self) -> None:
-        view = self.query_one("#main-timeline", TimelineView)
+        if not self.is_mounted:
+            return
+        try:
+            view = self.query_one("#main-timeline", TimelineView)
+        except (NoMatches, ScreenStackError):
+            return
         items = list(
             build_session_timeline(
                 self.runtime,
@@ -855,15 +984,23 @@ class ErgonStudioApp(App[None]):
         view.set_items(items)
 
     def _refresh_info(self) -> None:
-        self.query_one("#info-bar", InfoBar).refresh_from_runtime(
-            selected_workflow_run_id=self.selected_workflow_run_id,
-            selected_workflow_id=self.selected_workflow_id,
-            permission_mode=self._permission_mode,
-        )
-        self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
+        if not self.is_mounted:
+            return
+        try:
+            self.query_one("#info-bar", InfoBar).refresh_from_runtime(
+                selected_workflow_run_id=self.selected_workflow_run_id,
+                selected_workflow_id=self.selected_workflow_id,
+                permission_mode=self._permission_mode,
+            )
+            self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
+        except (NoMatches, ScreenStackError):
+            return
 
     def _replace_runtime(self, runtime: RuntimeContext, *, notice: str | None = None) -> None:
+        self._stop_live_subscription()
         self.runtime = runtime
+        self.runtime.set_event_callback(self._on_runtime_event)
+        self._start_live_subscription()
         self.selected_workflow_run_id = None
         self._timeline_notices = []
         self._hidden_main_message_ids = set()
@@ -974,6 +1111,34 @@ class ErgonStudioApp(App[None]):
             level="info",
             created_at=0,
         )
+
+    def _has_inflight_turns(self) -> bool:
+        active = self._active_turn_task is not None and not self._active_turn_task.done()
+        return active or bool(self._queued_turns)
+
+    def _start_live_subscription(self) -> None:
+        self._stop_live_subscription()
+        self._live_subscription = self.runtime.live_state.subscribe()
+        self._live_subscription_task = asyncio.create_task(self._watch_live_runtime())
+
+    def _stop_live_subscription(self) -> None:
+        if self._live_subscription is not None:
+            self._live_subscription.close()
+            self._live_subscription = None
+        if self._live_subscription_task is not None:
+            self._live_subscription_task.cancel()
+            self._live_subscription_task = None
+
+    async def _watch_live_runtime(self) -> None:
+        subscription = self._live_subscription
+        if subscription is None:
+            return
+        try:
+            async for _event in subscription:
+                self._refresh_timeline()
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            return
 
     def _next_timestamp(self) -> int:
         self._time_cursor += 1

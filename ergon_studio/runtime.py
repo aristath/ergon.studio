@@ -137,6 +137,7 @@ class RuntimeContext:
     main_thread_id: str
     _accumulated_tokens: int
     _compaction_failure_count: int
+    _event_callback: object  # Optional: (kind: str, summary: str) -> None
 
     def build_agent(self, agent_id: str):
         return build_agent(
@@ -2898,6 +2899,13 @@ class RuntimeContext:
         )
         return [workroom]
 
+    def set_event_callback(self, callback) -> None:
+        """Register a callback for real-time event notifications.
+
+        The callback is called as callback(kind, summary) for each event.
+        """
+        object.__setattr__(self, "_event_callback", callback)
+
     def append_event(
         self,
         *,
@@ -2907,7 +2915,7 @@ class RuntimeContext:
         thread_id: str | None = None,
         task_id: str | None = None,
     ) -> EventRecord:
-        return self.event_store.append_event(
+        record = self.event_store.append_event(
             session_id=self.main_session_id,
             event_id=f"event-{uuid4().hex}",
             kind=kind,
@@ -2916,6 +2924,12 @@ class RuntimeContext:
             thread_id=thread_id,
             task_id=task_id,
         )
+        if self._event_callback is not None:
+            try:
+                self._event_callback(kind, summary)
+            except Exception:
+                pass
+        return record
 
     def request_approval(
         self,
@@ -3316,6 +3330,7 @@ def load_runtime(
         main_thread_id=_main_thread_id_for_session(resolved_session.id),
         _accumulated_tokens=0,
         _compaction_failure_count=0,
+        _event_callback=None,
     )
     object.__setattr__(
         runtime,

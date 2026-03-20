@@ -15,7 +15,7 @@ from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
 from ergon_studio.tui.inspectors import InspectorScreen
 from ergon_studio.tui.timeline_widgets import TimelineView
-from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar
+from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, ThinkingIndicator
 
 
 def _timeline_text(app: ErgonStudioApp) -> str:
@@ -49,6 +49,35 @@ class FakeStreamingAgent:
         async def _updates():
             for delta in self._deltas:
                 await asyncio.sleep(self._delay)
+                yield SimpleNamespace(text=delta)
+
+        return ResponseStream(
+            _updates(),
+            finalizer=lambda updates: SimpleNamespace(text="".join(update.text for update in updates)),
+        )
+
+
+class GateStreamingAgent:
+    def __init__(
+        self,
+        deltas: list[str],
+        *,
+        release_event: asyncio.Event | None = None,
+    ) -> None:
+        self._deltas = deltas
+        self.started = asyncio.Event()
+        self._release_event = release_event or asyncio.Event()
+
+    def create_session(self, *, session_id: str | None = None, **_: object):
+        return AgentSession(session_id=session_id)
+
+    def run(self, messages=None, *, session=None, **_: object):
+        del messages, session
+
+        async def _updates():
+            self.started.set()
+            await self._release_event.wait()
+            for delta in self._deltas:
                 yield SimpleNamespace(text=delta)
 
         return ResponseStream(
@@ -318,6 +347,172 @@ class TestMessages(IsolatedAsyncioTestCase):
             text = _timeline_text(app)
             self.assertIn("standard-build", text)
             self.assertNotIn("<live>", text)
+
+    async def test_submitting_while_turn_is_running_queues_the_next_message(self):
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+        orchestrator_agents = [
+            GateStreamingAgent(["first reply"], release_event=first_release),
+            GateStreamingAgent(["second reply"], release_event=second_release),
+        ]
+
+        def build_agent(_runtime, agent_id: str):
+            if agent_id == "orchestrator" and orchestrator_agents:
+                return orchestrator_agents.pop(0)
+            return FakeAgent(f"{agent_id} ready")
+
+        async with app.run_test() as pilot:
+            inp = app.query_one("#composer-input", ComposerTextArea)
+            app.set_focus(inp)
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=build_agent,
+            ), patch.object(
+                type(runtime),
+                "_decide_orchestrator_turn",
+                autospec=True,
+                return_value=OrchestratorTurnDecision(mode="act", request=""),
+            ), patch.object(
+                type(runtime),
+                "_audit_orchestrator_delivery_turn",
+                autospec=True,
+                return_value=DeliveryAuditDecision(
+                    deliverable_expected=False,
+                    reconsider=False,
+                    reason="",
+                ),
+            ):
+                inp.value = "first"
+                await pilot.press("enter")
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if app._active_turn_task is not None and runtime.list_live_message_drafts():
+                        break
+                inp.value = "second"
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertEqual(len(app._queued_turns), 1)
+                self.assertIn("Queued message for the orchestrator", _timeline_text(app))
+                first_release.set()
+                second_release.set()
+                for _ in range(20):
+                    await asyncio.sleep(0.03)
+                    await pilot.pause()
+                    if len(runtime.list_main_messages()) >= 4 and not app._queued_turns and app._active_turn_task is None:
+                        break
+
+            bodies = [
+                runtime.conversation_store.read_message_body(message).strip()
+                for message in runtime.list_main_messages()
+            ]
+            self.assertEqual(bodies, ["first", "second", "first reply", "second reply"])
+
+    async def test_background_current_hides_spinner_while_turn_keeps_running(self):
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+        release = asyncio.Event()
+        orchestrator_agent = GateStreamingAgent(["backgrounded reply"], release_event=release)
+
+        def build_agent(_runtime, agent_id: str):
+            if agent_id == "orchestrator":
+                return orchestrator_agent
+            return FakeAgent(f"{agent_id} ready")
+
+        async with app.run_test() as pilot:
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=build_agent,
+            ), patch.object(
+                type(runtime),
+                "_decide_orchestrator_turn",
+                autospec=True,
+                return_value=OrchestratorTurnDecision(mode="act", request=""),
+            ), patch.object(
+                type(runtime),
+                "_audit_orchestrator_delivery_turn",
+                autospec=True,
+                return_value=DeliveryAuditDecision(
+                    deliverable_expected=False,
+                    reconsider=False,
+                    reason="",
+                ),
+            ):
+                task = asyncio.create_task(app._send_to_orchestrator("hello"))
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if app._active_turn_task is not None and orchestrator_agent.started.is_set():
+                        break
+                thinking = app.query_one("#thinking", ThinkingIndicator)
+                self.assertTrue(thinking.has_class("visible"))
+                app.action_background_current()
+                await pilot.pause()
+                self.assertFalse(thinking.has_class("visible"))
+                self.assertIsNotNone(app._active_turn_task)
+                self.assertIn("Operation continues in background", _timeline_text(app))
+                release.set()
+                await task
+                await pilot.pause()
+
+    async def test_session_switch_is_blocked_while_turn_is_running(self):
+        from ergon_studio.runtime import DeliveryAuditDecision, OrchestratorTurnDecision
+
+        _, runtime, app = _make_env()
+        release = asyncio.Event()
+        orchestrator_agent = GateStreamingAgent(["still working"], release_event=release)
+
+        def build_agent(_runtime, agent_id: str):
+            if agent_id == "orchestrator":
+                return orchestrator_agent
+            return FakeAgent(f"{agent_id} ready")
+
+        async with app.run_test() as pilot:
+            with patch.object(
+                type(runtime),
+                "build_agent",
+                autospec=True,
+                side_effect=build_agent,
+            ), patch.object(
+                type(runtime),
+                "_decide_orchestrator_turn",
+                autospec=True,
+                return_value=OrchestratorTurnDecision(mode="act", request=""),
+            ), patch.object(
+                type(runtime),
+                "_audit_orchestrator_delivery_turn",
+                autospec=True,
+                return_value=DeliveryAuditDecision(
+                    deliverable_expected=False,
+                    reconsider=False,
+                    reason="",
+                ),
+            ):
+                task = asyncio.create_task(app._send_to_orchestrator("hello"))
+                for _ in range(20):
+                    await asyncio.sleep(0.02)
+                    await pilot.pause()
+                    if app._active_turn_task is not None and orchestrator_agent.started.is_set():
+                        break
+                original_session_id = runtime.main_session_id
+                inp = app.query_one("#composer-input", ComposerTextArea)
+                app.set_focus(inp)
+                inp.value = "/new-session Parallel lane"
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertEqual(app.runtime.main_session_id, original_session_id)
+                self.assertIn("Finish or wait for running orchestrator work", _timeline_text(app))
+                release.set()
+                await task
+                await pilot.pause()
 
     async def test_input_always_targets_orchestrator(self):
         _, runtime, app = _make_env()

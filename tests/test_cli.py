@@ -220,9 +220,10 @@ class CliTests(unittest.TestCase):
             captured: dict[str, object] = {}
 
             class FakeApp:
-                def __init__(self, runtime, *, open_session_picker_on_mount=False):
+                def __init__(self, runtime, *, open_session_picker_on_mount=False, open_config_wizard_on_mount=False):
                     captured["runtime"] = runtime
                     captured["open_session_picker_on_mount"] = open_session_picker_on_mount
+                    captured["open_config_wizard_on_mount"] = open_config_wizard_on_mount
 
                 def run(self) -> None:
                     captured["ran"] = True
@@ -242,3 +243,39 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(captured["ran"])
             self.assertTrue(captured["open_session_picker_on_mount"])
+            self.assertFalse(captured["open_config_wizard_on_mount"])
+
+    def test_tui_opens_config_wizard_on_fresh_unconfigured_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            captured: dict[str, object] = {}
+
+            class FakeApp:
+                def __init__(self, runtime, *, open_session_picker_on_mount=False, open_config_wizard_on_mount=False):
+                    captured["runtime"] = runtime
+                    captured["open_session_picker_on_mount"] = open_session_picker_on_mount
+                    captured["open_config_wizard_on_mount"] = open_config_wizard_on_mount
+
+                def run(self) -> None:
+                    captured["ran"] = True
+
+            with patch("ergon_studio.cli.ErgonStudioApp", FakeApp):
+                exit_code = main(
+                    [
+                        "tui",
+                        "--project-root",
+                        str(project_root),
+                        "--home-dir",
+                        str(home_dir),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(captured["ran"])
+            self.assertFalse(captured["open_session_picker_on_mount"])
+            self.assertTrue(captured["open_config_wizard_on_mount"])

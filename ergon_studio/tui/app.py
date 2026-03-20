@@ -12,7 +12,12 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, TextArea
 
 from ergon_studio.live_runtime import LiveRuntimeEvent, LiveRuntimeSubscription
-from ergon_studio.provider_health import ProviderHealthResult, probe_all_providers
+from ergon_studio.provider_health import (
+    AgentReadinessResult,
+    ProviderHealthResult,
+    assess_agent_readiness,
+    probe_all_providers,
+)
 from ergon_studio.runtime import RuntimeContext, load_runtime
 from ergon_studio.storage.models import MessageRecord
 from ergon_studio.tui.inspectors import (
@@ -239,10 +244,17 @@ class ErgonStudioApp(App[None]):
     }
     """
 
-    def __init__(self, runtime: RuntimeContext, *, open_session_picker_on_mount: bool = False) -> None:
+    def __init__(
+        self,
+        runtime: RuntimeContext,
+        *,
+        open_session_picker_on_mount: bool = False,
+        open_config_wizard_on_mount: bool = False,
+    ) -> None:
         super().__init__()
         self.runtime = runtime
         self.open_session_picker_on_mount = open_session_picker_on_mount
+        self.open_config_wizard_on_mount = open_config_wizard_on_mount
         self.selected_workflow_id = self._default_workflow_id()
         self.selected_workflow_run_id: str | None = None
         self._timeline_notices: list[NoticeItem] = []
@@ -401,29 +413,63 @@ class ErgonStudioApp(App[None]):
             timeout=5,
         )
 
+    def _agent_readiness(
+        self,
+        provider_health: list[ProviderHealthResult],
+    ) -> list[AgentReadinessResult]:
+        return assess_agent_readiness(
+            self.runtime.list_agent_ids(),
+            assigned_provider_name=self.runtime.assigned_provider_name,
+            agent_unavailable_reason=self.runtime.agent_unavailable_reason,
+            agent_status_summary=self.runtime.agent_status_summary,
+            provider_health=provider_health,
+            provider_details=self.runtime.provider_details,
+        )
+
     async def _status_notice_body(self) -> str:
         providers = self.runtime.list_provider_ids()
+        provider_lines: list[str]
         if not providers:
-            return "[bold]Provider status:[/bold]\n  [red]No providers configured.[/red] Use /config"
-
-        health_results = await self._provider_health()
-        if not health_results:
-            return "[bold]Provider status:[/bold]\n  [red]No valid provider definitions found.[/red]"
-
-        lines = ["[bold]Provider status:[/bold]"]
+            health_results: list[ProviderHealthResult] = []
+            provider_lines = ["[bold]Provider status:[/bold]", "  [red]No providers configured.[/red] Use /config"]
+        else:
+            health_results = await self._provider_health()
+            if not health_results:
+                provider_lines = ["[bold]Provider status:[/bold]", "  [red]No valid provider definitions found.[/red]"]
+            else:
+                provider_lines = ["[bold]Provider status:[/bold]"]
         for result in health_results:
             if result.ok:
                 suffix = f"{result.model} @ {result.base_url}"
                 if result.model_count:
                     suffix += f" [dim]({result.model_count} models)[/dim]"
-                lines.append(f"  [green]●[/green] {result.name}: {suffix}")
+                provider_lines.append(f"  [green]●[/green] {result.name}: {suffix}")
             else:
-                lines.append(
+                provider_lines.append(
                     f"  [red]●[/red] {result.name}: {result.model or 'unknown-model'} @ {result.base_url or '(missing url)'}"
                 )
                 if result.error:
-                    lines.append(f"    [dim]{result.error}[/dim]")
-        return "\n".join(lines)
+                    provider_lines.append(f"    [dim]{result.error}[/dim]")
+
+        readiness = self._agent_readiness(health_results)
+        readiness_lines = ["", "[bold]Agent readiness:[/bold]"]
+        if not readiness:
+            readiness_lines.append("  [yellow]No agents defined.[/yellow]")
+        for result in readiness:
+            if result.ok:
+                suffix = result.summary
+                readiness_lines.append(f"  [green]●[/green] {result.name}: {suffix}")
+                continue
+            if result.provider_name is None:
+                readiness_lines.append(f"  [red]●[/red] {result.name}: not configured")
+            else:
+                readiness_lines.append(
+                    f"  [red]●[/red] {result.name}: {result.summary}"
+                )
+            if result.error:
+                readiness_lines.append(f"    [dim]{result.error}[/dim]")
+
+        return "\n".join(provider_lines + readiness_lines)
 
     async def _doctor_notice(self) -> tuple[str, str, str]:
         issues: list[str] = []
@@ -498,6 +544,8 @@ class ErgonStudioApp(App[None]):
         self._refresh_info()
         if self.open_session_picker_on_mount:
             self._open_session_picker()
+        elif self.open_config_wizard_on_mount:
+            self._open_config_wizard()
 
     def on_unmount(self) -> None:
         self._stop_live_subscription()

@@ -14,6 +14,7 @@ from textual.widgets import Input, OptionList, Static
 
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
+from ergon_studio.tui.config_wizard import ConfigWizardScreen
 from ergon_studio.tui.inspectors import InspectorScreen
 from ergon_studio.tui.timeline_widgets import TimelineApprovalWidget, TimelineView, TimelineWorkroomSegmentWidget
 from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, ThinkingIndicator
@@ -195,6 +196,13 @@ class TestAppRendering(IsolatedAsyncioTestCase):
             options = app.screen.query_one("#session-picker-options", OptionList)
             option_text = "\n".join(str(options.get_option_at_index(i).prompt) for i in range(options.option_count))
             self.assertIn("Parallel lane", option_text)
+
+    async def test_app_can_open_config_wizard_on_mount(self):
+        _, runtime, _ = _make_env()
+        app = ErgonStudioApp(runtime, open_config_wizard_on_mount=True)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ConfigWizardScreen)
 
     async def test_existing_messages_render_in_timeline(self):
         _, runtime, app = _make_env()
@@ -989,6 +997,11 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             with (
                 patch.object(type(runtime), "list_provider_ids", autospec=True, return_value=["local"]),
+                patch.object(type(runtime), "list_agent_ids", autospec=True, return_value=["orchestrator", "coder"]),
+                patch.object(type(runtime), "assigned_provider_name", autospec=True, side_effect=lambda _runtime, agent_id: "local"),
+                patch.object(type(runtime), "agent_unavailable_reason", autospec=True, side_effect=lambda _runtime, agent_id: None if agent_id == "orchestrator" else "tooling not ready"),
+                patch.object(type(runtime), "agent_status_summary", autospec=True, side_effect=lambda _runtime, agent_id: "ready via local (qwen3-coder)" if agent_id == "orchestrator" else "ready via local (qwen3-coder)"),
+                patch.object(type(runtime), "provider_details", autospec=True, return_value={"model": "qwen3-coder"}),
                 patch("ergon_studio.tui.app.probe_all_providers", return_value=[
                     SimpleNamespace(
                         name="local",
@@ -1007,8 +1020,12 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
                 await pilot.pause()
             text = _timeline_text(app)
             self.assertIn("Provider status", text)
+            self.assertIn("Agent readiness", text)
             self.assertIn("local", text)
             self.assertIn("4 models", text)
+            self.assertIn("orchestrator", text)
+            self.assertIn("coder", text)
+            self.assertIn("tooling not ready", text)
 
     async def test_doctor_reports_reachability_and_assignment_issues(self):
         _, runtime, app = _make_env()

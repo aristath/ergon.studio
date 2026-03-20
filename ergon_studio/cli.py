@@ -86,9 +86,14 @@ def main(argv: list[str] | None = None) -> int:
             create_session=args.new_session,
             session_title=args.title,
         )
+        open_config_wizard_on_mount = _should_open_config_wizard_on_mount(
+            runtime,
+            open_session_picker_on_mount=open_session_picker_on_mount,
+        )
         app = ErgonStudioApp(
             runtime,
             open_session_picker_on_mount=open_session_picker_on_mount,
+            open_config_wizard_on_mount=open_config_wizard_on_mount,
         )
         app.run()
         return 0
@@ -190,3 +195,15 @@ def _add_pick_session_arg(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Open the TUI with the session picker when multiple sessions exist",
     )
+
+
+def _should_open_config_wizard_on_mount(
+    runtime,
+    *,
+    open_session_picker_on_mount: bool,
+) -> bool:
+    if open_session_picker_on_mount:
+        return False
+    if runtime.list_main_messages():
+        return False
+    return runtime.agent_unavailable_reason("orchestrator") is not None

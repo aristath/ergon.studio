@@ -17,6 +17,16 @@ class ProviderHealthResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class AgentReadinessResult:
+    name: str
+    ok: bool
+    provider_name: str | None
+    model: str | None
+    summary: str
+    error: str | None = None
+
+
 def probe_endpoint_models(base_url: str, api_key: str | None, *, timeout: int = 10) -> list[dict[str, Any]]:
     """Probe an OpenAI-compatible endpoint for available models."""
     url = base_url.rstrip("/") + "/models"
@@ -124,3 +134,61 @@ def probe_all_providers(config: dict[str, Any], *, timeout: int = 10) -> list[Pr
         for name, provider_config in sorted(providers.items())
         if isinstance(provider_config, dict)
     ]
+
+
+def assess_agent_readiness(
+    agent_ids: list[str],
+    *,
+    assigned_provider_name,
+    agent_unavailable_reason,
+    agent_status_summary,
+    provider_health: list[ProviderHealthResult],
+    provider_details,
+) -> list[AgentReadinessResult]:
+    health_by_provider = {result.name: result for result in provider_health}
+    readiness: list[AgentReadinessResult] = []
+    for agent_id in agent_ids:
+        provider_name = assigned_provider_name(agent_id)
+        details = provider_details(provider_name) if provider_name is not None else None
+        model = None
+        if isinstance(details, dict):
+            raw_model = details.get("model")
+            if isinstance(raw_model, str) and raw_model.strip():
+                model = raw_model.strip()
+        reason = agent_unavailable_reason(agent_id)
+        provider_result = health_by_provider.get(provider_name) if provider_name is not None else None
+        if provider_name is None:
+            readiness.append(
+                AgentReadinessResult(
+                    name=agent_id,
+                    ok=False,
+                    provider_name=None,
+                    model=model,
+                    summary="not configured",
+                    error=reason or "No provider assigned",
+                )
+            )
+            continue
+        if provider_result is not None and not provider_result.ok:
+            readiness.append(
+                AgentReadinessResult(
+                    name=agent_id,
+                    ok=False,
+                    provider_name=provider_name,
+                    model=model,
+                    summary=f"blocked via {provider_name}",
+                    error=provider_result.error or "Assigned provider is unavailable",
+                )
+            )
+            continue
+        readiness.append(
+            AgentReadinessResult(
+                name=agent_id,
+                ok=reason is None,
+                provider_name=provider_name,
+                model=model,
+                summary=agent_status_summary(agent_id),
+                error=reason,
+            )
+        )
+    return readiness

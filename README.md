@@ -17,3 +17,8 @@ The proxy uses:
 - one upstream OpenAI-compatible endpoint for all internal orchestration turns
 - markdown-defined agents
 - markdown-defined workflows
+
+It does not create local project state on startup.
+Point it at a definitions directory containing:
+- `agents/orchestrator.md`
+- `workflows/*.md`

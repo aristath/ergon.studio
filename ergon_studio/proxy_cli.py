@@ -4,7 +4,6 @@ import argparse
 import os
 from pathlib import Path
 
-from ergon_studio.bootstrap import bootstrap_definition_home
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
@@ -13,7 +12,11 @@ from ergon_studio.upstream import UpstreamSettings
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ergon-studio")
-    parser.add_argument("--home-dir", type=Path, default=Path.home())
+    parser.add_argument(
+        "--definitions-dir",
+        type=Path,
+        default=Path(os.environ.get("ERGON_DEFINITIONS_DIR", Path.home() / ".ergon.studio")),
+    )
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)
     parser.add_argument("--upstream-base-url", type=str, default=os.environ.get("ERGON_UPSTREAM_BASE_URL"))
@@ -25,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_proxy_server(
     *,
-    home_dir: Path,
+    definitions_dir: Path,
     host: str,
     port: int,
     upstream_base_url: str | None,
@@ -35,9 +38,8 @@ def run_proxy_server(
 ) -> int:
     if not upstream_base_url or not upstream_base_url.strip():
         raise ValueError("missing upstream base URL; pass --upstream-base-url or set ERGON_UPSTREAM_BASE_URL")
-    proxy_paths = bootstrap_definition_home(home_dir)
     registry = load_registry(
-        proxy_paths,
+        definitions_dir,
         upstream=UpstreamSettings(
             base_url=upstream_base_url.strip(),
             api_key=upstream_api_key.strip() if upstream_api_key else None,
@@ -57,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return run_proxy_server(
-        home_dir=args.home_dir,
+        definitions_dir=args.definitions_dir,
         host=args.host,
         port=args.port,
         upstream_base_url=args.upstream_base_url,

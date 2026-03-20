@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ergon_studio.paths import GlobalStudioPaths
+from ergon_studio.paths import DefinitionPaths
 from ergon_studio.registry import load_registry
 from ergon_studio.upstream import UpstreamSettings
 
@@ -70,8 +70,9 @@ class AgentFactoryTests(unittest.TestCase):
 
 
 def _registry_with_agent(home_dir: Path, *, metadata_extra: dict[str, object] | None = None):
-    paths = GlobalStudioPaths(home_dir=home_dir)
-    paths.ensure_layout()
+    paths = DefinitionPaths(root_dir=home_dir / "definitions")
+    paths.agents_dir.mkdir(parents=True)
+    paths.workflows_dir.mkdir(parents=True)
     metadata = {
         "id": "orchestrator",
         "name": "Orchestrator",

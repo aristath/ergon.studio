@@ -11,14 +11,19 @@ from ergon_studio.proxy_cli import main
 class ProxyCliTests(unittest.TestCase):
     def test_proxy_cli_starts_proxy_server(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            home_dir = Path(temp_dir) / "home"
-            home_dir.mkdir()
+            definitions_dir = Path(temp_dir) / "definitions"
+            (definitions_dir / "agents").mkdir(parents=True)
+            (definitions_dir / "workflows").mkdir(parents=True)
+            (definitions_dir / "agents" / "orchestrator.md").write_text(
+                "---\nid: orchestrator\nrole: orchestrator\n---\n## Identity\nLead engineer.\n",
+                encoding="utf-8",
+            )
 
             with patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy:
                 exit_code = main(
                     [
-                        "--home-dir",
-                        str(home_dir),
+                        "--definitions-dir",
+                        str(definitions_dir),
                         "--host",
                         "0.0.0.0",
                         "--port",
@@ -36,11 +41,11 @@ class ProxyCliTests(unittest.TestCase):
 
     def test_proxy_cli_requires_upstream_base_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            home_dir = Path(temp_dir) / "home"
-            home_dir.mkdir()
+            definitions_dir = Path(temp_dir) / "definitions"
+            definitions_dir.mkdir()
 
             with self.assertRaisesRegex(ValueError, "missing upstream base URL"):
-                main(["--home-dir", str(home_dir)])
+                main(["--definitions-dir", str(definitions_dir)])
 
 
 if __name__ == "__main__":

@@ -511,6 +511,31 @@ class RuntimeContext:
     def list_workflow_ids(self) -> list[str]:
         return sorted(self.registry.workflow_definitions.keys())
 
+    def resolve_workflow_reference(self, workflow_ref: str | None) -> str | None:
+        if workflow_ref is None:
+            return None
+        candidate = workflow_ref.strip()
+        if not candidate:
+            return None
+        if candidate in self.registry.workflow_definitions:
+            return candidate
+
+        normalized = candidate.casefold()
+        name_matches: list[str] = []
+        hint_matches: list[str] = []
+        for summary in self.list_workflow_summaries():
+            workflow_id = str(summary["id"])
+            if str(summary["name"]).strip().casefold() == normalized:
+                name_matches.append(workflow_id)
+            hints = tuple(summary.get("selection_hints", ()))
+            if normalized in {str(hint).strip().casefold() for hint in hints}:
+                hint_matches.append(workflow_id)
+        if len(name_matches) == 1:
+            return name_matches[0]
+        if len(hint_matches) == 1:
+            return hint_matches[0]
+        return None
+
     def list_workflow_summaries(self) -> list[dict[str, object]]:
         summaries: list[dict[str, object]] = []
         for workflow_id in self.list_workflow_ids():
@@ -2029,9 +2054,10 @@ class RuntimeContext:
         mode = str(parsed.get("mode", "act")).strip().lower()
         if mode not in {"act", "delegate", "workflow"}:
             mode = "act"
+        workflow_id = self.resolve_workflow_reference(_optional_text(parsed.get("workflow_id")))
         return OrchestratorTurnDecision(
             mode=mode,
-            workflow_id=_optional_text(parsed.get("workflow_id")),
+            workflow_id=workflow_id,
             agent_id=_optional_text(parsed.get("agent_id")),
             title=_optional_text(parsed.get("title")),
             request=_optional_text(parsed.get("request")),
@@ -2103,7 +2129,7 @@ class RuntimeContext:
         mode = str(parsed.get("mode", "act")).strip().lower()
         if mode not in {"workflow", "delegate", "act"}:
             return None
-        workflow_id = _optional_text(parsed.get("workflow_id"))
+        workflow_id = self.resolve_workflow_reference(_optional_text(parsed.get("workflow_id")))
         if mode == "workflow":
             if workflow_id is None or self._workflow_is_non_delivery(workflow_id):
                 return None

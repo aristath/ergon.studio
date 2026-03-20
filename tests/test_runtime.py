@@ -120,6 +120,40 @@ Ship a design deliverable.
             self.assertEqual(summaries["standard-build"]["selection_hints"], ("staged_delivery",))
             self.assertEqual(summaries["dynamic-open-ended"]["selection_hints"], ("adaptive_delivery",))
 
+    def test_resolve_workflow_reference_accepts_selection_hint(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            self.assertEqual(
+                runtime.resolve_workflow_reference("tiny_delivery"),
+                "single-agent-execution",
+            )
+
+    def test_resolve_workflow_reference_accepts_workflow_name(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+
+            self.assertEqual(
+                runtime.resolve_workflow_reference("Standard Build"),
+                "standard-build",
+            )
+
     def test_recent_main_user_context_can_be_bounded_by_timestamp(self) -> None:
         from ergon_studio.runtime import load_runtime
 
@@ -1666,6 +1700,36 @@ Return reviewed and repaired work.
 
 
 class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_decide_orchestrator_turn_resolves_workflow_hint_to_workflow_id(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            with patch.object(
+                type(runtime),
+                "_run_orchestrator_json_agent",
+                autospec=True,
+                return_value={
+                    "mode": "workflow",
+                    "workflow_id": "tiny_delivery",
+                    "goal": "Deliver the tiny change.",
+                    "deliverable_expected": True,
+                },
+            ):
+                decision = await runtime._decide_orchestrator_turn(
+                    body="Please implement the tiny change.",
+                    created_at=1_710_755_200,
+                )
+
+            self.assertEqual(decision.mode, "workflow")
+            self.assertEqual(decision.workflow_id, "single-agent-execution")
+
     async def test_runtime_can_send_user_message_and_persist_orchestrator_session(self) -> None:
         from ergon_studio.runtime import load_runtime
 

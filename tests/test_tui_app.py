@@ -500,8 +500,8 @@ class TestSlashCommands(IsolatedAsyncioTestCase):
             await pilot.pause()
             cmd_list = app.query_one("#slash-commands", OptionList)
             self.assertTrue(cmd_list.has_class("visible"))
-            # Should only show /config
-            self.assertEqual(cmd_list.option_count, 1)
+            # Should show /config and /context
+            self.assertEqual(cmd_list.option_count, 2)
 
     async def test_slash_list_hides_on_space(self):
         from textual.widgets import OptionList

@@ -5,10 +5,13 @@ from __future__ import annotations
 from rich.text import Text
 
 from textual.message import Message
+from textual.timer import Timer
 from textual.widgets import Collapsible, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext
 from ergon_studio.storage.models import ThreadRecord
+
+THINKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 AGENT_SPRITES: dict[str, str] = {
     "orchestrator": "⢺⡗",
@@ -226,8 +229,47 @@ class InfoBar(Static):
         return " │ ".join(parts) if parts else "No active workflow"
 
 
+class ThinkingIndicator(Static):
+    """Animated spinner shown while the LLM is processing."""
+
+    DEFAULT_CSS = """
+    ThinkingIndicator {
+        height: 1;
+        padding: 0 1;
+        display: none;
+    }
+
+    ThinkingIndicator.visible {
+        display: block;
+    }
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        self._frame = 0
+        self._timer: Timer | None = None
+
+    def show(self, label: str = "Thinking") -> None:
+        self._label = label
+        self._frame = 0
+        self.add_class("visible")
+        self._timer = self.set_interval(0.1, self._tick)
+
+    def hide(self) -> None:
+        self.remove_class("visible")
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.update("")
+
+    def _tick(self) -> None:
+        spinner = THINKING_FRAMES[self._frame % len(THINKING_FRAMES)]
+        self.update(Text.from_markup(f"[bright_cyan]{spinner}[/bright_cyan] [dim]{self._label}...[/dim]"))
+        self._frame += 1
+
+
 class ComposerTextArea(TextArea):
-    """Multi-line text input. Enter submits, Shift+Enter inserts newline."""
+    """Multi-line text input. Enter submits, Alt+Enter for newline, up/down for history."""
 
     class Submitted(Message):
         """Posted when the user presses Enter to submit."""
@@ -248,6 +290,9 @@ class ComposerTextArea(TextArea):
 
     def __init__(self, placeholder: str = "", **kwargs) -> None:
         super().__init__("", show_line_numbers=False, placeholder=placeholder, **kwargs)
+        self._history: list[str] = []
+        self._history_index: int = -1
+        self._draft: str = ""
 
     @property
     def value(self) -> str:
@@ -259,11 +304,18 @@ class ComposerTextArea(TextArea):
         if new_value:
             self.insert(new_value)
 
+    def _push_history(self, text: str) -> None:
+        if text and (not self._history or self._history[-1] != text):
+            self._history.append(text)
+        self._history_index = -1
+        self._draft = ""
+
     async def _on_key(self, event) -> None:
         if event.key == "enter":
             event.prevent_default()
             text = self.text.strip()
             if text:
+                self._push_history(text)
                 self.post_message(self.Submitted(self, text))
             return
         if event.key == "alt+enter":
@@ -274,5 +326,24 @@ class ComposerTextArea(TextArea):
             event.prevent_default()
             if self.text:
                 self.clear()
+                self._history_index = -1
+            return
+        if event.key == "up" and "\n" not in self.text and self._history:
+            event.prevent_default()
+            if self._history_index == -1:
+                self._draft = self.text
+                self._history_index = len(self._history) - 1
+            elif self._history_index > 0:
+                self._history_index -= 1
+            self.value = self._history[self._history_index]
+            return
+        if event.key == "down" and "\n" not in self.text and self._history_index >= 0:
+            event.prevent_default()
+            if self._history_index < len(self._history) - 1:
+                self._history_index += 1
+                self.value = self._history[self._history_index]
+            else:
+                self._history_index = -1
+                self.value = self._draft
             return
         await super()._on_key(event)

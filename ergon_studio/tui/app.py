@@ -14,10 +14,13 @@ from textual.screen import ModalScreen
 from textual.widgets import Collapsible, OptionList, RichLog, Static, TextArea
 
 from ergon_studio.runtime import RuntimeContext, load_runtime
-from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, SideThreadBlock
+from ergon_studio.tui.widgets import AgentStatusBar, ComposerTextArea, InfoBar, SideThreadBlock, ThinkingIndicator
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/help", "Show available commands"),
+    ("/clear", "Clear conversation, keep config"),
+    ("/compact", "Summarize conversation to save context"),
+    ("/context", "Show token/context usage"),
     ("/session", "Show the current session"),
     ("/sessions", "List project sessions"),
     ("/new-session", "Create and switch to a new session"),
@@ -25,11 +28,18 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/archive-session", "Archive a session"),
     ("/switch-session", "Switch to an existing session"),
     ("/config", "Open configuration wizard"),
+    ("/model", "Switch model for a role"),
+    ("/status", "Check provider health and agent readiness"),
+    ("/doctor", "Diagnose configuration issues"),
+    ("/team", "Show agent roster with status"),
     ("/workflows", "List workflow definitions"),
     ("/workflow", "Select a workflow by name"),
     ("/agent", "Open a direct thread with an agent"),
     ("/memory", "Show memory facts"),
     ("/threads", "List all threads"),
+    ("/approvals", "Show approval history"),
+    ("/events", "Show recent activity"),
+    ("/init", "Initialize project configuration"),
 ]
 
 
@@ -208,12 +218,14 @@ class ErgonStudioApp(App[None]):
         self._known_thread_ids: set[str] = set()
         self._known_approval_ids: set[str] = set()
         self._time_cursor = int(time.time())
+        self._last_escape_time: float = 0.0
 
     def compose(self) -> ComposeResult:
         yield AgentStatusBar(self.runtime, id="agent-status-bar")
         with VerticalScroll(id="chat-area"):
             yield Vertical(id="side-threads")
             yield RichLog(id="main-chat", markup=True, auto_scroll=True, wrap=True)
+        yield ThinkingIndicator(id="thinking")
         yield OptionList(id="slash-commands")
         yield ComposerTextArea(placeholder="❯ Message the orchestrator...", id="composer-input")
         yield InfoBar(self.runtime, id="info-bar")
@@ -334,7 +346,22 @@ class ErgonStudioApp(App[None]):
             inp.post_message(ComposerTextArea.Submitted(inp, cmd))
 
     def on_key(self, event) -> None:
-        """Route arrow keys to the command list when it's visible."""
+        """Route arrow keys to command list; double-escape to rewind."""
+        # Handle double-escape
+        if event.key == "escape":
+            now = time.monotonic()
+            composer = self.query_one("#composer-input", ComposerTextArea)
+            if composer.text:
+                # Composer handles its own escape (clear text)
+                pass
+            elif now - self._last_escape_time < 0.5:
+                self._last_escape_time = 0.0
+                self._rewind_last_exchange()
+                event.prevent_default()
+                return
+            else:
+                self._last_escape_time = now
+
         cmd_list = self.query_one("#slash-commands", OptionList)
         if not cmd_list.has_class("visible"):
             return
@@ -359,7 +386,7 @@ class ErgonStudioApp(App[None]):
         event.text_area.disabled = True
         try:
             if text.startswith("/"):
-                self._handle_slash_command(text)
+                await self._handle_slash_command(text)
             elif self._target_thread_id is not None:
                 await self._send_to_thread(self._target_thread_id, text)
             else:
@@ -370,12 +397,20 @@ class ErgonStudioApp(App[None]):
 
     async def _send_to_orchestrator(self, body: str) -> None:
         chat = self.query_one("#main-chat", RichLog)
+        thinking = self.query_one("#thinking", ThinkingIndicator)
         created_at = self._next_timestamp()
         chat.write(self._format_message("you", body))
-        user_msg, reply_msg = await self.runtime.send_user_message_to_orchestrator(
-            body=body, created_at=created_at,
-        )
         self._chat_message_count += 1
+        thinking.show("Thinking")
+        try:
+            user_msg, reply_msg = await self.runtime.send_user_message_to_orchestrator(
+                body=body, created_at=created_at,
+            )
+        except Exception as exc:
+            thinking.hide()
+            chat.write(f"[bold red]Error:[/bold red] {exc}")
+            return
+        thinking.hide()
         if reply_msg is not None:
             reply_body = self.runtime.conversation_store.read_message_body(reply_msg).rstrip("\n")
             chat.write(self._format_message(reply_msg.sender, reply_body))
@@ -383,38 +418,63 @@ class ErgonStudioApp(App[None]):
         self._refresh_chat()
 
     async def _send_to_thread(self, thread_id: str, body: str) -> None:
+        thinking = self.query_one("#thinking", ThinkingIndicator)
         created_at = self._next_timestamp()
-        user_msg, reply_msg = await self.runtime.send_message_to_agent_thread(
-            thread_id=thread_id, body=body, created_at=created_at,
-        )
+        thinking.show("Working")
+        try:
+            user_msg, reply_msg = await self.runtime.send_message_to_agent_thread(
+                thread_id=thread_id, body=body, created_at=created_at,
+            )
+        except Exception as exc:
+            thinking.hide()
+            self.query_one("#main-chat", RichLog).write(f"[bold red]Error:[/bold red] {exc}")
+            return
+        thinking.hide()
         # Refresh the side thread block
         for widget in self.query(SideThreadBlock):
             if widget._thread.id == thread_id:
                 widget.refresh_messages()
                 break
 
-    def _handle_slash_command(self, text: str) -> None:
+    async def _handle_slash_command(self, text: str) -> None:
         chat = self.query_one("#main-chat", RichLog)
         parts = text.split(None, 1)
         command = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
 
         if command == "/help":
+            lines = ["[bold]Available commands:[/bold]"]
+            for cmd, desc in SLASH_COMMANDS:
+                lines.append(f"  {cmd:20s} {desc}")
+            chat.write("\n".join(lines))
+        elif command == "/clear":
+            self.query_one("#main-chat", RichLog).clear()
+            self._chat_message_count = len(self.runtime.list_main_messages())
+            chat = self.query_one("#main-chat", RichLog)
+            chat.write("[dim]Conversation cleared.[/dim]")
+        elif command == "/compact":
+            focus = args.strip() or None
+            chat.write("[dim]Compacting conversation...[/dim]")
+            thinking = self.query_one("#thinking", ThinkingIndicator)
+            thinking.show("Compacting")
+            try:
+                summary = await self._compact_conversation(focus)
+                thinking.hide()
+                chat.write(f"[green]Compacted.[/green] Summary:\n{summary}")
+            except Exception as exc:
+                thinking.hide()
+                chat.write(f"[red]Compaction failed:[/red] {exc}")
+        elif command == "/context":
+            messages = self.runtime.list_main_messages()
+            total_chars = 0
+            for msg in messages:
+                total_chars += len(self.runtime.conversation_store.read_message_body(msg))
+            approx_tokens = total_chars // 4
             chat.write(
-                "[bold]Available commands:[/bold]\n"
-                "  /help              Show this help\n"
-                "  /session           Show the current session\n"
-                "  /sessions          List project sessions\n"
-                "  /new-session [t]   Create and switch to a new session\n"
-                "  /rename-session t  Rename the current session\n"
-                "  /archive-session   Archive the current session\n"
-                "  /switch-session i  Switch to an existing session\n"
-                "  /config            Edit global configuration\n"
-                "  /workflows         List workflow definitions\n"
-                "  /workflow <name>   Select a workflow\n"
-                "  /agent <name>      Open a direct thread with an agent\n"
-                "  /memory            Show memory facts\n"
-                "  /threads           List all threads"
+                f"[bold]Context usage:[/bold]\n"
+                f"  Messages: {len(messages)}\n"
+                f"  Characters: {total_chars:,}\n"
+                f"  Estimated tokens: ~{approx_tokens:,}"
             )
         elif command == "/session":
             session = self.runtime.current_session()
@@ -548,6 +608,79 @@ class ErgonStudioApp(App[None]):
                     count = len(self.runtime.list_thread_messages(thread.id))
                     lines.append(f"  {agent} ({thread.kind}) [{count} msgs]")
                 chat.write("\n".join(lines))
+        elif command == "/model":
+            if not args:
+                lines = ["[bold]Model assignments:[/bold]"]
+                for agent_id in self.runtime.list_agent_ids():
+                    provider = self.runtime.assigned_provider_name(agent_id)
+                    if provider:
+                        details = self.runtime.provider_details(provider)
+                        model = details.get("model", "?") if details else "?"
+                        lines.append(f"  {agent_id}: {model} [dim]via {provider}[/dim]")
+                    else:
+                        lines.append(f"  {agent_id}: [red]not assigned[/red]")
+                chat.write("\n".join(lines))
+            else:
+                chat.write("[dim]Use /config to change model assignments.[/dim]")
+        elif command == "/status":
+            lines = ["[bold]Provider status:[/bold]"]
+            for pid in self.runtime.list_provider_ids():
+                details = self.runtime.provider_details(pid)
+                if details:
+                    model = details.get("model", "?")
+                    url = details.get("base_url", "?")
+                    lines.append(f"  [green]●[/green] {pid}: {model} @ {url}")
+                else:
+                    lines.append(f"  [red]●[/red] {pid}: invalid config")
+            if not self.runtime.list_provider_ids():
+                lines.append("  [red]No providers configured.[/red] Use /config")
+            chat.write("\n".join(lines))
+        elif command == "/doctor":
+            issues: list[str] = []
+            if not self.runtime.list_provider_ids():
+                issues.append("[red]✗[/red] No providers configured")
+            for agent_id in self.runtime.list_agent_ids():
+                summary = self.runtime.agent_status_summary(agent_id)
+                if "not configured" in summary:
+                    issues.append(f"[red]✗[/red] {agent_id}: {summary}")
+            if not issues:
+                chat.write("[green]All checks passed.[/green] Providers configured, agents ready.")
+            else:
+                chat.write("[bold]Issues found:[/bold]\n" + "\n".join(issues))
+        elif command == "/team":
+            from ergon_studio.tui.widgets import AGENT_SPRITES, AGENT_COLORS
+            lines = ["[bold]Team:[/bold]"]
+            for agent_id in self.runtime.list_agent_ids():
+                sprite = AGENT_SPRITES.get(agent_id, "  ")
+                color = AGENT_COLORS.get(agent_id, "white")
+                summary = self.runtime.agent_status_summary(agent_id)
+                lines.append(f"  [{color}]{sprite}[/{color}] {agent_id}: {summary}")
+            chat.write("\n".join(lines))
+        elif command == "/approvals":
+            all_approvals = self.runtime.list_approvals()
+            if not all_approvals:
+                chat.write("[dim]No approvals yet.[/dim]")
+            else:
+                lines = ["[bold]Approvals:[/bold]"]
+                for a in all_approvals[-10:]:
+                    status_color = {"approved": "green", "rejected": "red"}.get(a.status, "yellow")
+                    lines.append(f"  [{status_color}]{a.status}[/{status_color}] {a.action} by {a.requester}")
+                chat.write("\n".join(lines))
+        elif command == "/events":
+            events = self.runtime.list_events()
+            if not events:
+                chat.write("[dim]No events yet.[/dim]")
+            else:
+                lines = ["[bold]Recent events:[/bold]"]
+                for e in events[-15:]:
+                    lines.append(f"  [dim]{e.kind}:[/dim] {e.summary}")
+                chat.write("\n".join(lines))
+        elif command == "/init":
+            chat.write(
+                "[dim]Project already initialized.\n"
+                f"UUID: {self.runtime.paths.project_uuid}\n"
+                f"Data: {self.runtime.paths.project_data_dir}[/dim]"
+            )
         else:
             chat.write(f"[red]Unknown command: {command}[/red]. Type /help for available commands.")
 
@@ -791,6 +924,60 @@ class ErgonStudioApp(App[None]):
             title="Approval",
             expand=True,
         )
+
+    def _rewind_last_exchange(self) -> None:
+        """Remove the last user message and its reply from the chat display."""
+        chat = self.query_one("#main-chat", RichLog)
+        messages = self.runtime.list_main_messages()
+        if len(messages) < 2:
+            chat.write("[dim]Nothing to rewind.[/dim]")
+            return
+        # Find the last user message and everything after it
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].sender == "user":
+                last_user_idx = i
+                break
+        if last_user_idx is None:
+            chat.write("[dim]No user message to rewind.[/dim]")
+            return
+        # Clear and reload without the last exchange
+        chat.clear()
+        self._chat_message_count = 0
+        for msg in messages[:last_user_idx]:
+            body = self.runtime.conversation_store.read_message_body(msg).rstrip("\n")
+            chat.write(self._format_message(msg.sender, body))
+            self._chat_message_count += 1
+        chat.write("[dim]Rewound last exchange.[/dim]")
+
+    async def _compact_conversation(self, focus: str | None = None) -> str:
+        """Summarize the conversation using the orchestrator's LLM."""
+        messages = self.runtime.list_main_messages()
+        if not messages:
+            return "No messages to compact."
+        conversation_text = []
+        for msg in messages:
+            body = self.runtime.conversation_store.read_message_body(msg).rstrip("\n")
+            conversation_text.append(f"[{msg.sender}] {body}")
+        full_text = "\n\n".join(conversation_text)
+        focus_hint = f"\nFocus on: {focus}" if focus else ""
+        prompt = (
+            "Summarize this conversation for continuity. Preserve:\n"
+            "- Current goals and active tasks\n"
+            "- Decisions made and their rationale\n"
+            "- Key technical facts (file paths, architecture choices, conventions)\n"
+            "- Outstanding issues and blockers\n"
+            "- User preferences expressed during the session\n"
+            "Discard: verbose reasoning, repeated attempts, intermediate tool outputs.\n"
+            f"{focus_hint}\n\n"
+            f"Conversation:\n{full_text}"
+        )
+        result = await self.runtime.generate_agent_text_without_tools(
+            agent_id="orchestrator",
+            body=prompt,
+            created_at=self._next_timestamp(),
+        )
+        return result or "Compaction produced no output."
 
     def _next_timestamp(self) -> int:
         self._time_cursor += 1

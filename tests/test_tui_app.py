@@ -46,6 +46,11 @@ def _make_env():
 
 
 class TestAppRendering(IsolatedAsyncioTestCase):
+    async def test_app_selects_metadata_driven_default_workflow(self):
+        _, runtime, app = _make_env()
+        async with app.run_test():
+            self.assertEqual(app.selected_workflow_id, "standard-build")
+
     async def test_app_renders_status_bar(self):
         _, _, app = _make_env()
         async with app.run_test():

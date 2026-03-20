@@ -57,6 +57,24 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 ]
 
 
+def _default_selected_workflow_id(runtime: RuntimeContext) -> str | None:
+    summaries = runtime.list_workflow_summaries()
+    if not summaries:
+        return None
+    for summary in summaries:
+        if "staged_delivery" in summary.get("selection_hints", ()) and summary.get("delivery_candidate"):
+            workflow_id = summary.get("id")
+            if isinstance(workflow_id, str):
+                return workflow_id
+    for summary in summaries:
+        if summary.get("delivery_candidate"):
+            workflow_id = summary.get("id")
+            if isinstance(workflow_id, str):
+                return workflow_id
+    workflow_id = summaries[0].get("id")
+    return workflow_id if isinstance(workflow_id, str) else None
+
+
 class DefinitionEditorScreen(ModalScreen[None]):
     BINDINGS = [
         ("ctrl+s", "save", "Save"),
@@ -211,7 +229,7 @@ class ErgonStudioApp(App[None]):
         super().__init__()
         self.runtime = runtime
         self.open_session_picker_on_mount = open_session_picker_on_mount
-        self.selected_workflow_id = "standard-build"
+        self.selected_workflow_id = _default_selected_workflow_id(runtime)
         self.selected_workflow_run_id: str | None = None
         self._timeline_notices: list[NoticeItem] = []
         self._hidden_main_message_ids: set[str] = set()
@@ -864,6 +882,7 @@ class ErgonStudioApp(App[None]):
 
     def _replace_runtime(self, runtime: RuntimeContext, *, notice: str | None = None) -> None:
         self.runtime = runtime
+        self.selected_workflow_id = _default_selected_workflow_id(runtime)
         self.selected_workflow_run_id = None
         self._timeline_notices = []
         self._hidden_main_message_ids = set()

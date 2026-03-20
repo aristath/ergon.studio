@@ -993,6 +993,7 @@ class ErgonStudioApp(App[None]):
                 selected_workflow_run_id=self.selected_workflow_run_id,
                 selected_workflow_id=self.selected_workflow_id,
                 permission_mode=self._permission_mode,
+                turn_status=self._turn_status_text(),
             )
             self.query_one("#agent-status-bar", AgentStatusBar).refresh_from_runtime()
         except (NoMatches, ScreenStackError):
@@ -1116,6 +1117,20 @@ class ErgonStudioApp(App[None]):
     def _has_inflight_turns(self) -> bool:
         active = self._active_turn_task is not None and not self._active_turn_task.done()
         return active or bool(self._queued_turns)
+
+    def _turn_status_text(self) -> str | None:
+        active = self._active_turn_task is not None and not self._active_turn_task.done()
+        if not active and not self._queued_turns:
+            return None
+        if self._turn_backgrounded:
+            label = "orchestrator: backgrounded"
+        elif active:
+            label = "orchestrator: working"
+        else:
+            label = "orchestrator: queued"
+        if self._queued_turns:
+            label = f"{label} (+{len(self._queued_turns)} queued)"
+        return label
 
     def _start_live_subscription(self) -> None:
         self._stop_live_subscription()

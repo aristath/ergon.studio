@@ -430,6 +430,8 @@ class TestMessages(IsolatedAsyncioTestCase):
                 self.assertEqual(len(app._queued_turns), 1)
                 self.assertIn("user: second", _timeline_text(app))
                 self.assertIn("Queued message for the orchestrator", _timeline_text(app))
+                info = app.query_one("#info-bar", InfoBar)
+                self.assertIn("orchestrator: working (+1 queued)", str(info.content))
                 first_release.set()
                 second_release.set()
                 for _ in range(20):
@@ -490,6 +492,8 @@ class TestMessages(IsolatedAsyncioTestCase):
                 self.assertFalse(thinking.has_class("visible"))
                 self.assertIsNotNone(app._active_turn_task)
                 self.assertIn("Operation continues in background", _timeline_text(app))
+                info = app.query_one("#info-bar", InfoBar)
+                self.assertIn("orchestrator: backgrounded", str(info.content))
                 release.set()
                 await task
                 await pilot.pause()

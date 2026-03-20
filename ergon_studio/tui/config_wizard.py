@@ -241,6 +241,7 @@ class ProviderEditorScreen(ModalScreen[dict[str, Any] | None]):
 
         result: dict[str, Any] = {
             "name": name,
+            "original_name": self._initial_name or None,
             "type": "openai_chat",
             "model": model,
             "base_url": url,
@@ -385,6 +386,7 @@ class ConfigWizardScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="config-wizard-container"):
             yield Static("[b]Configuration[/b]")
+            yield Static("", id="config-status")
 
             yield Label("Providers")
             yield OptionList(id="provider-list")
@@ -396,6 +398,7 @@ class ConfigWizardScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self._refresh_provider_list()
+        self._refresh_status()
 
     def _refresh_provider_list(self) -> None:
         provider_list = self.query_one("#provider-list", OptionList)
@@ -403,7 +406,7 @@ class ConfigWizardScreen(ModalScreen[None]):
         config = self._load_config()
         providers = config.get("providers", {})
         if not providers:
-            provider_list.add_option("(no providers configured)")
+            provider_list.add_option("(no providers yet)")
         else:
             for name, details in providers.items():
                 if isinstance(details, dict):
@@ -412,6 +415,21 @@ class ConfigWizardScreen(ModalScreen[None]):
                     provider_list.add_option(f"{name}  {url}  [{model}]")
                 else:
                     provider_list.add_option(name)
+
+    def _refresh_status(self, message: str | None = None) -> None:
+        status = self.query_one("#config-status", Static)
+        if message is not None:
+            status.update(message)
+            return
+        providers = self._load_config().get("providers", {})
+        if not providers:
+            status.update("[yellow]Add your first provider to bring the team online.[/yellow]")
+            return
+        orchestrator_reason = self.runtime.agent_unavailable_reason("orchestrator")
+        if orchestrator_reason is not None:
+            status.update("[yellow]Providers saved. Finish role assignments so the orchestrator can start.[/yellow]")
+            return
+        status.update("[green]Team ready. The orchestrator can start taking work.[/green]")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add-btn":
@@ -449,7 +467,17 @@ class ConfigWizardScreen(ModalScreen[None]):
             return
         config = self._load_config()
         name = result.pop("name")
-        config.setdefault("providers", {})[name] = result
+        original_name = result.pop("original_name", None)
+        providers = config.setdefault("providers", {})
+        if original_name and original_name != name and original_name in providers:
+            providers.pop(original_name)
+            assignments = config.get("role_assignments", {})
+            if isinstance(assignments, dict):
+                config["role_assignments"] = {
+                    role: name if provider_name == original_name else provider_name
+                    for role, provider_name in assignments.items()
+                }
+        providers[name] = result
 
         # Auto-assign if this is the first provider and no assignments exist
         assignments = config.get("role_assignments", {})
@@ -459,12 +487,14 @@ class ConfigWizardScreen(ModalScreen[None]):
 
         self._save_config(config)
         self._refresh_provider_list()
+        self._refresh_status()
 
     def _open_role_assignments(self) -> None:
         config = self._load_config()
         providers = config.get("providers", {})
         provider_names = sorted(providers.keys())
         if not provider_names:
+            self._refresh_status("[yellow]Add a provider before editing role assignments.[/yellow]")
             return
         roles = self.runtime.list_agent_ids()
         current = config.get("role_assignments", {})
@@ -479,6 +509,7 @@ class ConfigWizardScreen(ModalScreen[None]):
         config = self._load_config()
         config["role_assignments"] = result
         self._save_config(config)
+        self._refresh_status()
 
     def _load_config(self) -> dict[str, Any]:
         return json.loads(self.runtime.read_global_config_text())

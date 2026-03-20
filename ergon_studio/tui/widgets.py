@@ -158,6 +158,11 @@ class InfoBar(Static):
         if compose_target_label:
             parts.append(f"target: {compose_target_label}")
 
+        if turn_status is None:
+            setup_reason = self.runtime.agent_unavailable_reason("orchestrator")
+            if setup_reason is not None:
+                parts.append("setup: /config")
+
         if turn_status:
             parts.append(turn_status)
 

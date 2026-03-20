@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from agent_framework import AgentSession, ResponseStream
 from textual.containers import VerticalScroll
-from textual.widgets import Input, OptionList
+from textual.widgets import Input, OptionList, Static
 
 from ergon_studio.runtime import load_runtime
 from ergon_studio.tui.app import DefinitionEditorScreen, ErgonStudioApp, SessionPickerScreen
@@ -172,6 +172,13 @@ class TestAppRendering(IsolatedAsyncioTestCase):
         async with app.run_test():
             info = app.query_one("#info-bar", InfoBar)
             self.assertIn(runtime.current_session().title, str(info.content))
+
+    async def test_info_bar_shows_setup_hint_when_orchestrator_is_unavailable(self):
+        _, runtime, app = _make_env()
+        with patch.object(type(runtime), "agent_unavailable_reason", return_value="missing provider"):
+            async with app.run_test():
+                info = app.query_one("#info-bar", InfoBar)
+                self.assertIn("setup: /config", str(info.content))
 
     async def test_app_can_open_session_picker_on_mount(self):
         _, runtime, _ = _make_env()
@@ -1558,3 +1565,63 @@ class TestConfigWizard(IsolatedAsyncioTestCase):
             self.assertTrue(assignments)
             for provider in assignments.values():
                 self.assertEqual(provider, "local")
+
+    async def test_wizard_renames_provider_and_updates_assignments(self):
+        from ergon_studio.tui.config_wizard import ConfigWizardScreen
+
+        _, runtime, app = _make_env()
+        runtime.save_global_config_text(
+            text=json.dumps(
+                {
+                    "providers": {
+                        "local": {
+                            "type": "openai_chat",
+                            "model": "test-model",
+                            "base_url": "http://localhost:8080/v1",
+                        }
+                    },
+                    "role_assignments": {
+                        "orchestrator": "local",
+                        "coder": "local",
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        async with app.run_test() as pilot:
+            screen = ConfigWizardScreen(runtime)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._on_provider_saved(
+                {
+                    "name": "primary",
+                    "original_name": "local",
+                    "type": "openai_chat",
+                    "model": "test-model",
+                    "base_url": "http://localhost:8080/v1",
+                }
+            )
+            await pilot.pause()
+
+            config = json.loads(runtime.read_global_config_text())
+            self.assertNotIn("local", config["providers"])
+            self.assertIn("primary", config["providers"])
+            self.assertEqual(config["role_assignments"]["orchestrator"], "primary")
+            self.assertEqual(config["role_assignments"]["coder"], "primary")
+
+    async def test_wizard_guides_assignment_flow_when_no_providers_exist(self):
+        from ergon_studio.tui.config_wizard import ConfigWizardScreen
+
+        _, runtime, app = _make_env()
+        async with app.run_test() as pilot:
+            screen = ConfigWizardScreen(runtime)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._open_role_assignments()
+            await pilot.pause()
+
+            status = screen.query_one("#config-status", Static)
+            self.assertIn("Add a provider before editing role assignments", str(status.content))

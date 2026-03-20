@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import unittest
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from agent_framework import ResponseStream
@@ -149,6 +150,60 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payload["object"], "response")
         self.assertEqual(payload["output_text"], "Done.")
 
+    def test_chat_completions_returns_server_error_for_failed_turn(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("provider exploded"), ProxyFinishEvent("error")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with self.assertRaises(HTTPError) as exc:
+            urlopen(request)
+
+        payload = json.loads(exc.exception.read().decode("utf-8"))
+        self.assertEqual(exc.exception.code, 500)
+        self.assertEqual(payload["error"]["message"], "provider exploded")
+
+    def test_responses_returns_server_error_for_failed_turn(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("provider exploded"), ProxyFinishEvent("error")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with self.assertRaises(HTTPError) as exc:
+            urlopen(request)
+
+        payload = json.loads(exc.exception.read().decode("utf-8"))
+        self.assertEqual(exc.exception.code, 500)
+        self.assertEqual(payload["error"]["message"], "provider exploded")
+
     def test_responses_streams_response_events(self) -> None:
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
@@ -178,6 +233,32 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn("\"type\":\"response.reasoning_text.done\"", body)
         self.assertIn("\"type\":\"response.output_item.done\"", body)
         self.assertIn("\"type\":\"response.completed\"", body)
+
+    def test_responses_stream_uses_failed_terminal_event_for_errors(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("provider exploded"), ProxyFinishEvent("error")]),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+        self.assertIn("\"type\":\"response.failed\"", body)
+        self.assertNotIn("\"type\":\"response.completed\"", body)
 
     def test_responses_stream_uses_consistent_output_indexes(self) -> None:
         handle = start_proxy_server_in_thread(

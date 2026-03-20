@@ -102,6 +102,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}")
             return
+        if result.finish_reason == "error":
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed")
+            return
         self._send_json(
             HTTPStatus.OK,
             build_chat_completion_response(
@@ -163,6 +166,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             result = asyncio.run(self._run_chat_completion(request))
         except Exception as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}")
+            return
+        if result.finish_reason == "error":
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed")
             return
         self._send_json(
             HTTPStatus.OK,

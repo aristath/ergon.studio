@@ -144,6 +144,23 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
 
         self.assertEqual([item["type"] for item in payload], ["response.completed"])
 
+    def test_finish_event_uses_failed_terminal_event_for_errors(self) -> None:
+        payload = encode_responses_stream_events(
+            event=ProxyFinishEvent("error"),
+            response_id="resp_1",
+            model="ergon",
+            created_at=123,
+            sequence_number=3,
+            reasoning_item_id="rs_1",
+            message_item_id="msg_1",
+            message_text="provider exploded",
+            include_output_done=False,
+        )
+
+        self.assertEqual(payload[-1]["type"], "response.failed")
+        self.assertEqual(payload[-1]["response"]["status"], "failed")
+        self.assertEqual(payload[-1]["response"]["error"]["message"], "provider exploded")
+
     def test_response_stream_output_indexes_can_be_offset(self) -> None:
         reasoning = encode_responses_stream_events(
             event=ProxyReasoningDeltaEvent("Plan."),

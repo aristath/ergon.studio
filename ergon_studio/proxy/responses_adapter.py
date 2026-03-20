@@ -246,17 +246,36 @@ def encode_responses_stream_events(
                 }
             )
             sequence_number += 1
-        payloads.append(
-            {
-                "type": "response.completed",
-                "event_id": f"event_{uuid4().hex}",
+        terminal_event_type = "response.completed"
+        terminal_payload: dict[str, Any] = {
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": created_at,
+                "model": model,
+                "status": "completed",
+            }
+        }
+        if event.reason == "error":
+            terminal_event_type = "response.failed"
+            terminal_payload = {
                 "response": {
                     "id": response_id,
                     "object": "response",
                     "created_at": created_at,
                     "model": model,
-                    "status": "completed",
-                },
+                    "status": "failed",
+                    "error": {
+                        "message": message_text or "proxy turn failed",
+                        "type": "server_error",
+                    },
+                }
+            }
+        payloads.append(
+            {
+                "type": terminal_event_type,
+                "event_id": f"event_{uuid4().hex}",
+                **terminal_payload,
                 "sequence_number": sequence_number,
             }
         )

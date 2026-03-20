@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAUNCHER="$SCRIPT_DIR/.venv/bin/ergon-studio"
+
+if [[ ! -x "$LAUNCHER" ]]; then
+  echo "Missing launcher: $LAUNCHER" >&2
+  echo "Set up the project virtualenv first." >&2
+  exit 1
+fi
+
+exec "$LAUNCHER" "$@"

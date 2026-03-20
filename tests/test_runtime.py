@@ -42,6 +42,37 @@ class RuntimeTests(unittest.TestCase):
             (("coder",), ("reviewer",)),
         )
 
+    def test_workflow_is_non_delivery_honors_delivery_candidate_metadata(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            runtime = load_runtime(project_root=project_root, home_dir=home_dir)
+            runtime.save_workflow_definition_text(
+                workflow_id="architecture-first",
+                text="""---
+id: architecture-first
+name: Architecture First
+kind: workflow
+orchestration: sequential
+delivery_candidate: true
+acceptance_mode: design_brief
+steps:
+  - architect
+---
+## Purpose
+Ship a design deliverable.
+""",
+                created_at=10,
+            )
+
+            self.assertFalse(runtime._workflow_is_non_delivery("architecture-first"))
+
     def test_load_runtime_combines_paths_registry_and_tools(self) -> None:
         from ergon_studio.runtime import load_runtime
 

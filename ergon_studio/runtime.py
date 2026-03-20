@@ -1761,7 +1761,7 @@ class RuntimeContext:
         definition = self.registry.workflow_definitions.get(workflow_id)
         if definition is None:
             return False
-        return is_non_delivery_acceptance_mode(acceptance_mode_for_metadata(definition.metadata))
+        return not delivery_candidate_for_metadata(definition.metadata)
 
     async def generate_agent_text_without_tools(
         self,

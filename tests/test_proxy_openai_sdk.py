@@ -27,6 +27,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
 
         self.assertEqual(response.choices[0].message.content, "Done.")
         self.assertEqual(response.choices[0].finish_reason, "stop")
+        self.assertEqual(response.model, "ergon")
 
     def test_chat_completions_create_returns_parsed_tool_calls(self) -> None:
         handle = start_proxy_server_in_thread(
@@ -196,6 +197,20 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         self.assertEqual(events[1].item.type, "function_call")
         self.assertEqual(events[1].item.name, "read_file")
         self.assertEqual(events[-1].type, "response.completed")
+
+    def test_models_list_returns_proxy_model_id(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+            model_id="ergon-proxy",
+        )
+        self.addCleanup(handle.close)
+        client = _client(handle.port)
+
+        models = client.models.list()
+
+        self.assertEqual(models.data[0].id, "ergon-proxy")
 
 
 class _FakeCore:

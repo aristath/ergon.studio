@@ -104,7 +104,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             build_chat_completion_response(
                 completion_id=completion_id,
-                model=request.model,
+                model=self.server.model_id,
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
@@ -125,7 +125,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             chunk = encode_chat_stream_sse(
                 event,
                 completion_id=completion_id,
-                model=request.model,
+                model=self.server.model_id,
                 created_at=created_at,
             )
             self.wfile.write(chunk)
@@ -166,7 +166,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             build_responses_response(
                 response_id=response_id,
-                model=request.model,
+                model=self.server.model_id,
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
@@ -181,13 +181,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
-            "response": {
-                "id": response_id,
-                "object": "response",
-                "created_at": created_at,
-                "model": request.model,
-                "status": "in_progress",
-            },
+                "response": {
+                    "id": response_id,
+                    "object": "response",
+                    "created_at": created_at,
+                    "model": self.server.model_id,
+                    "status": "in_progress",
+                },
             "sequence_number": 1,
         }
         self.wfile.write(encode_responses_stream_sse(created_payload))
@@ -200,7 +200,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             for payload in encode_responses_stream_events(
                 event=event,
                 response_id=response_id,
-                model=request.model,
+                model=self.server.model_id,
                 created_at=created_at,
                 sequence_number=sequence_number,
                 reasoning_item_id=reasoning_item_id,

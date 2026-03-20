@@ -237,6 +237,7 @@ class ErgonStudioApp(App[None]):
         self._turn_backgrounded: bool = False
         self._live_subscription: LiveRuntimeSubscription | None = None
         self._live_subscription_task: asyncio.Task[None] | None = None
+        self._live_refresh_task: asyncio.Task[None] | None = None
 
     def _default_workflow_id(self) -> str | None:
         summaries = self.runtime.list_workflow_summaries()
@@ -1170,6 +1171,9 @@ class ErgonStudioApp(App[None]):
         if self._live_subscription_task is not None:
             self._live_subscription_task.cancel()
             self._live_subscription_task = None
+        if self._live_refresh_task is not None:
+            self._live_refresh_task.cancel()
+            self._live_refresh_task = None
 
     async def _watch_live_runtime(self) -> None:
         subscription = self._live_subscription
@@ -1178,10 +1182,23 @@ class ErgonStudioApp(App[None]):
         try:
             async for event in subscription:
                 self._handle_live_runtime_event(event)
-                self._refresh_timeline()
-                await asyncio.sleep(0)
+                self._queue_live_refresh()
         except asyncio.CancelledError:
             return
+
+    def _queue_live_refresh(self) -> None:
+        if self._live_refresh_task is not None and not self._live_refresh_task.done():
+            return
+        self._live_refresh_task = asyncio.create_task(self._flush_live_refresh())
+
+    async def _flush_live_refresh(self) -> None:
+        try:
+            await asyncio.sleep(0.02)
+            self._refresh_timeline()
+        except asyncio.CancelledError:
+            return
+        finally:
+            self._live_refresh_task = None
 
     def _handle_live_runtime_event(self, event: LiveRuntimeEvent) -> None:
         if event.kind != "message_failed":

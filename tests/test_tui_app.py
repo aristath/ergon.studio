@@ -387,6 +387,42 @@ class TestMessages(IsolatedAsyncioTestCase):
             self.assertIn("standard-build", text)
             self.assertNotIn("<live>", text)
 
+    async def test_live_runtime_events_coalesce_timeline_refreshes(self):
+        _, runtime, app = _make_env()
+
+        async with app.run_test() as pilot:
+            refresh_count = 0
+            original_refresh = app._refresh_timeline
+
+            def counted_refresh() -> None:
+                nonlocal refresh_count
+                refresh_count += 1
+                original_refresh()
+
+            with patch.object(app, "_refresh_timeline", side_effect=counted_refresh):
+                runtime.live_state.start_draft(
+                    draft_id="draft-live-1",
+                    thread_id=runtime.main_thread_id,
+                    sender="orchestrator",
+                    kind="chat",
+                    created_at=10,
+                )
+                runtime.live_state.append_delta(
+                    draft_id="draft-live-1",
+                    delta="A",
+                    created_at=11,
+                )
+                runtime.live_state.append_delta(
+                    draft_id="draft-live-1",
+                    delta="B",
+                    created_at=12,
+                )
+                await asyncio.sleep(0.05)
+                await pilot.pause()
+
+            self.assertEqual(refresh_count, 1)
+            self.assertIn("orchestrator: AB <live>", _timeline_text(app))
+
     async def test_workflow_turn_surfaces_failed_internal_workroom_activity(self):
         from ergon_studio.runtime import OrchestratorTurnDecision
 

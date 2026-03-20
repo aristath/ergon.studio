@@ -3737,6 +3737,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             ),
             "orchestrator": FakeAgent(
                 [
+                    '{"accepted": false, "summary": "The workspace may already satisfy the goal, but the recorded execution evidence is incomplete.", "findings": ["Need a direct clarification about why no new file edit was necessary."], "requires_replan": false, "replan_summary": ""}',
                     '{"action": "clarify", "summary": "Ask the coder to explain why no additional edit is needed.", "agent_id": "coder", "request": "Explain briefly why the current workspace already satisfies the goal and why no new file edit is necessary.", "tool_mode": "none"}',
                     '{"accepted": true, "summary": "The coder clarified the blocked step clearly enough to accept the result.", "findings": [], "requires_replan": false, "replan_summary": ""}',
                 ]
@@ -3774,6 +3775,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             team = [thread.assigned_agent_id or thread.summary for thread in runtime.list_threads_for_workflow_run(workflow_run.id)]
             self.assertEqual(team[-2:], ["orchestrator", "coder"])
             event_kinds = [event.kind for event in runtime.list_events_for_workflow_run(workflow_run.id)]
+            self.assertIn("workflow_step_missing_evidence", event_kinds)
             self.assertIn("workflow_clarification_requested", event_kinds)
             self.assertIn("workflow_clarification_cycle_requested", event_kinds)
             report = next(
@@ -3782,6 +3784,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             )
             body = runtime.read_artifact_body(report.id)
             self.assertIn("Clarification cycles: 1", body)
+            self.assertIn("## Evidence Gaps Observed", body)
 
     async def test_runtime_uses_orchestrator_selected_initial_staffing(self) -> None:
         from ergon_studio.runtime import load_runtime

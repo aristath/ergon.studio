@@ -40,6 +40,7 @@ class _ExecutionTracker:
     completed_step_indices: set[int] = field(default_factory=set)
     thread_outputs: dict[str, str] = field(default_factory=dict)
     thread_tool_modes: dict[str, str] = field(default_factory=dict)
+    evidence_gaps: dict[str, str] = field(default_factory=dict)
     blocked_step_index: int | None = None
     blocked_thread_id: str | None = None
     blocked_summary: str | None = None
@@ -212,6 +213,7 @@ class _ThreadExecutor(Executor):
             new_tool_ids=before_tool_ids,
             required_tools=required_tools,
         ):
+            self.tracker.evidence_gaps.pop(self.thread.id, None)
             return reply, reply_body
 
         self.runtime.append_event(
@@ -249,23 +251,23 @@ class _ThreadExecutor(Executor):
             new_tool_ids=before_retry_ids,
             required_tools=required_tools,
         ):
+            self.tracker.evidence_gaps.pop(self.thread.id, None)
             return retry_reply, retry_body
 
-        self.tracker.blocked_step_index = self.step_index
-        self.tracker.blocked_thread_id = self.thread.id
-        self.tracker.blocked_summary = (
+        evidence_gap = (
             f"{self.thread.assigned_agent_id or self.thread.id} replied without the required tool evidence "
             f"({', '.join(required_tools)})."
         )
-        self.tracker.blocked_reason = "missing_tool_evidence"
+        self.tracker.evidence_gaps[self.thread.id] = evidence_gap
         self.tracker.last_thread_id = self.thread.id
-        if self.thread.parent_task_id is not None:
-            self.runtime.update_task_state(
-                task_id=self.thread.parent_task_id,
-                state="blocked",
-                updated_at=self.cursor.next(),
-            )
-        raise RuntimeError(f"workflow step missing required tool use: {self.thread.assigned_agent_id or self.thread.id}")
+        self.runtime.append_event(
+            kind="workflow_step_missing_evidence",
+            summary=evidence_gap,
+            created_at=self.cursor.next(),
+            thread_id=self.thread.id,
+            task_id=self.thread.parent_task_id,
+        )
+        return retry_reply, retry_body
 
 
 class _GroupChatParticipantExecutor(Executor):
@@ -467,6 +469,7 @@ async def _perform_orchestrator_review(
         goal=goal,
         payload=payload,
         workspace_files=runtime._workspace_file_list(limit=16),
+        tracker=tracker,
         prior_findings=tracker.review_findings,
     )
     runtime.append_message_to_thread(
@@ -2116,6 +2119,7 @@ def _render_followup_payload(
     custom_request: str | None = None,
 ) -> str:
     changed_files = runtime._workflow_changed_files(run_view.workflow_run.id) if run_view is not None else []
+    evidence_gap_lines = _workflow_evidence_gap_lines(run_view=run_view, tracker=tracker)
     lines = [
         f"Workflow: {workflow_id}",
         f"Follow-up: {cycle_kind}",
@@ -2131,6 +2135,9 @@ def _render_followup_payload(
     if changed_files:
         lines.extend(["", "Files touched so far:"])
         lines.extend(f"- {path}" for path in changed_files)
+    if evidence_gap_lines:
+        lines.extend(["", "Recorded evidence gaps:"])
+        lines.extend(evidence_gap_lines)
     step_outputs = _recent_step_outputs(run_view=run_view, tracker=tracker, limit=3) if run_view is not None else []
     if step_outputs:
         lines.extend(["", "Recent workflow evidence:"])
@@ -2354,6 +2361,7 @@ def _render_review_prompt(
     goal: str,
     payload: str | list[str],
     workspace_files: list[str],
+    tracker: _ExecutionTracker,
     prior_findings: tuple[str, ...] = (),
 ) -> str:
     lines = [
@@ -2389,6 +2397,14 @@ def _render_review_prompt(
     if prior_findings:
         lines.append("Previous findings that should now be addressed:")
         lines.extend(f"- {finding}" for finding in prior_findings)
+        lines.append("")
+    evidence_gap_lines = _workflow_evidence_gap_lines(
+        run_view=runtime.describe_workflow_run(workflow_run.id),
+        tracker=tracker,
+    )
+    if evidence_gap_lines:
+        lines.extend(["Recorded evidence gaps from workflow execution:"])
+        lines.extend(evidence_gap_lines)
         lines.append("")
     lines.extend(
         [
@@ -2445,6 +2461,25 @@ def _workflow_review_evidence_lines(runtime: RuntimeContext, workflow_run_id: st
     return lines
 
 
+def _workflow_evidence_gap_lines(
+    *,
+    run_view: WorkflowRunView | None,
+    tracker: _ExecutionTracker,
+) -> list[str]:
+    if not tracker.evidence_gaps:
+        return []
+    labels: dict[str, str] = {}
+    if run_view is not None:
+        for step in run_view.steps:
+            for thread in step.threads:
+                labels[thread.id] = thread.assigned_agent_id or thread.summary or thread.id
+    lines: list[str] = []
+    for thread_id, summary in tracker.evidence_gaps.items():
+        label = labels.get(thread_id, thread_id)
+        lines.append(f"- {label}: {summary}")
+    return lines
+
+
 def _step_role_rules(agent_id: str) -> str:
     if agent_id == "architect":
         return (
@@ -2482,6 +2517,7 @@ def _render_workflow_report(
     tracker: _ExecutionTracker,
     result,
 ) -> str:
+    evidence_gap_lines = _workflow_evidence_gap_lines(run_view=run_view, tracker=tracker)
     lines = [
         f"# Workflow Report: {workflow_run.workflow_id}",
         "",
@@ -2508,6 +2544,8 @@ def _render_workflow_report(
     lines.extend(["## Orchestrator Review", tracker.review_summary or "(no review summary)"])
     if tracker.review_findings:
         lines.extend(["", "## Findings", *[f"- {finding}" for finding in tracker.review_findings]])
+    if evidence_gap_lines:
+        lines.extend(["", "## Evidence Gaps Observed", *evidence_gap_lines])
     if tracker.clarification_cycles:
         lines.extend(["", f"- Clarification cycles: {tracker.clarification_cycles}"])
     if tracker.repair_cycles:
@@ -2625,6 +2663,7 @@ def _workflow_followup_decision_prompt(
     run_view: WorkflowRunView | None,
 ) -> str:
     changed_files = runtime._workflow_changed_files(run_view.workflow_run.id) if run_view is not None else []
+    evidence_gap_lines = _workflow_evidence_gap_lines(run_view=run_view, tracker=tracker)
     trigger = "blocked worker step" if tracker.blocked_step_index is not None else "rejected orchestrator review"
     lines = [
         f"Workflow: {workflow_id}",
@@ -2656,6 +2695,9 @@ def _workflow_followup_decision_prompt(
     if tracker.review_findings:
         lines.extend(["", "Current findings:"])
         lines.extend(f"- {finding}" for finding in tracker.review_findings)
+    if evidence_gap_lines:
+        lines.extend(["", "Recorded evidence gaps:"])
+        lines.extend(evidence_gap_lines)
     if changed_files:
         lines.extend(["", "Files touched so far:"])
         lines.extend(f"- {path}" for path in changed_files)

@@ -14,11 +14,12 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     continuation_result_map,
     continuation_tool_calls,
+    decode_original_tool_call,
     encode_continuation_tool_call,
     latest_pending_continuation,
     original_tool_call_id,
 )
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent, ProxyTurnResult
+from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent, ProxyTurnResult
 from ergon_studio.proxy.planner import ProxyTurnPlan, build_turn_planner_instructions, build_turn_planner_prompt, parse_turn_plan, summarize_conversation
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.tool_passthrough import build_declaration_tools, extract_tool_calls
@@ -1162,6 +1163,23 @@ def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuat
                 author_name=pending_continuation.state.agent_id,
             )
         )
+    elif pending_continuation.assistant_message is None:
+        synthetic_tool_calls = _synthetic_tool_calls_from_results(pending_continuation)
+        if synthetic_tool_calls:
+            messages.append(
+                Message(
+                    role="assistant",
+                    contents=[
+                        Content.from_function_call(
+                            call_id=tool_call.id,
+                            name=tool_call.name,
+                            arguments=tool_call.arguments_json,
+                        )
+                        for tool_call in synthetic_tool_calls
+                    ],
+                    author_name=pending_continuation.state.agent_id,
+                )
+            )
 
     for tool_call in continuation_tool_calls(pending_continuation):
         result_text = continuation_result_map(pending_continuation).get(tool_call.id, "")
@@ -1173,16 +1191,29 @@ def _build_agent_messages(*, prompt: str, pending_continuation: PendingContinuat
             )
         )
     if pending_continuation.assistant_message is None:
+        synthetic_tool_calls_by_id = {
+            tool_call.id: tool_call
+            for tool_call in _synthetic_tool_calls_from_results(pending_continuation)
+        }
         for tool_result in pending_continuation.tool_results:
             original_call_id = original_tool_call_id(tool_result.tool_call_id or "") or tool_result.tool_call_id or ""
+            synthetic_tool_call = synthetic_tool_calls_by_id.get(tool_result.tool_call_id or "")
             messages.append(
                 Message(
                     role="tool",
                     contents=[Content.from_function_result(call_id=original_call_id, result=tool_result.content)],
-                    author_name="host_tool",
+                    author_name=synthetic_tool_call.name if synthetic_tool_call is not None else "host_tool",
                 )
             )
     return messages
+
+
+def _synthetic_tool_calls_from_results(pending_continuation: PendingContinuation) -> list[ProxyToolCall]:
+    return [
+        tool_call
+        for tool_result in pending_continuation.tool_results
+        if (tool_call := decode_original_tool_call(tool_result.tool_call_id or "")) is not None
+    ]
 
 
 def _summary_instructions() -> str:

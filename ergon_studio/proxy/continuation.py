@@ -37,6 +37,8 @@ def encode_continuation_tool_call(tool_call: ProxyToolCall, *, state: Continuati
         "v": _TOKEN_VERSION,
         "m": state.mode,
         "a": state.agent_id,
+        "tn": tool_call.name,
+        "ta": tool_call.arguments_json,
     }
     if state.workflow_id is not None:
         payload["w"] = state.workflow_id
@@ -61,18 +63,8 @@ def encode_continuation_tool_call(tool_call: ProxyToolCall, *, state: Continuati
 
 
 def decode_continuation_from_tool_call_id(tool_call_id: str) -> ContinuationState | None:
-    if not tool_call_id.startswith(_TOKEN_PREFIX):
-        return None
-    try:
-        encoded_payload, _original = tool_call_id[len(_TOKEN_PREFIX) :].split(":", 1)
-    except ValueError:
-        return None
-    padding = "=" * (-len(encoded_payload) % 4)
-    try:
-        payload = json.loads(zlib.decompress(urlsafe_b64decode((encoded_payload + padding).encode("ascii"))).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
+    payload = _decode_payload(tool_call_id)
+    if payload is None:
         return None
     if payload.get("v") != _TOKEN_VERSION:
         return None
@@ -112,6 +104,41 @@ def decode_continuation_from_tool_call_id(tool_call_id: str) -> ContinuationStat
         current_brief=current_brief,
         workflow_outputs=tuple(workflow_outputs),
     )
+
+
+def decode_original_tool_call(tool_call_id: str) -> ProxyToolCall | None:
+    payload = _decode_payload(tool_call_id)
+    original = original_tool_call_id(tool_call_id)
+    if payload is None or original is None:
+        return None
+    name = payload.get("tn")
+    arguments = payload.get("ta", "")
+    if not isinstance(name, str) or not name:
+        return None
+    if not isinstance(arguments, str):
+        return None
+    return ProxyToolCall(
+        id=tool_call_id,
+        name=name,
+        arguments_json=arguments,
+    )
+
+
+def _decode_payload(tool_call_id: str) -> dict[str, object] | None:
+    if not tool_call_id.startswith(_TOKEN_PREFIX):
+        return None
+    try:
+        encoded_payload, _original = tool_call_id[len(_TOKEN_PREFIX) :].split(":", 1)
+    except ValueError:
+        return None
+    padding = "=" * (-len(encoded_payload) % 4)
+    try:
+        payload = json.loads(zlib.decompress(urlsafe_b64decode((encoded_payload + padding).encode("ascii"))).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def original_tool_call_id(tool_call_id: str) -> str | None:

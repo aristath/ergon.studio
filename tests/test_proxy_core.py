@@ -478,9 +478,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         await stream.get_final_response()
 
         messages = captured["messages"]
-        self.assertEqual([message.role for message in messages], ["user", "tool"])
-        self.assertEqual(messages[1].contents[0].type, "function_result")
-        self.assertEqual(messages[1].contents[0].call_id, "call_1")
+        self.assertEqual([message.role for message in messages], ["user", "assistant", "tool"])
+        self.assertEqual(messages[1].contents[0].type, "function_call")
+        self.assertEqual(messages[1].contents[0].call_id, tool_call.id)
+        self.assertEqual(messages[1].contents[0].name, "read_file")
+        self.assertEqual(messages[2].contents[0].type, "function_result")
+        self.assertEqual(messages[2].contents[0].call_id, "call_1")
 
 
 class _FakeRegistry:

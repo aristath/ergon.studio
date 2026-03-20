@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
+from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
 from ergon_studio.proxy.planner import build_turn_planner_prompt, parse_turn_plan, resolve_workflow_reference
 from ergon_studio.registry import RuntimeRegistry
 
@@ -25,6 +25,36 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertIn("Build a calculator", prompt)
         self.assertIn("assistant: I will help", prompt)
+
+    def test_build_turn_planner_prompt_includes_tool_names(self) -> None:
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Inspect the file"),
+                ProxyInputMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="call_1",
+                            name="read_file",
+                            arguments_json="{\"path\":\"main.py\"}",
+                        ),
+                    ),
+                ),
+                ProxyInputMessage(
+                    role="tool",
+                    name="read_file",
+                    content="print('hello')",
+                    tool_call_id="call_1",
+                ),
+            ),
+        )
+
+        prompt = build_turn_planner_prompt(request)
+
+        self.assertIn("assistant: [tool_calls read_file]", prompt)
+        self.assertIn("tool_result[call_1]<read_file>: print('hello')", prompt)
 
     def test_parse_turn_plan_resolves_known_workflow(self) -> None:
         registry = _make_registry()

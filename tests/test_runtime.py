@@ -2453,7 +2453,7 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(completed_run.state, "completed")
             self.assertEqual(repaired_run.state, "repairing")
-            self.assertEqual([thread.assigned_agent_id for thread in repair_threads], ["fixer", "reviewer"])
+            self.assertEqual([thread.assigned_agent_id for thread in repair_threads], ["fixer", "tester", "reviewer"])
             self.assertEqual(repaired_run.current_step_index, 4)
             self.assertEqual(runtime.get_task(repaired_run.root_task_id).state, "in_progress")
             self.assertIn("workflow_fix_cycle_requested", [event.kind for event in runtime.list_events()])

@@ -2475,16 +2475,37 @@ class RuntimeContext:
         )
         return acceptance_criteria_for_mode(acceptance_mode)
 
+    def _workflow_followup_step_groups(
+        self,
+        *,
+        workflow_id: str,
+        metadata_key: str,
+    ) -> tuple[tuple[str, ...], ...]:
+        definition = self.registry.workflow_definitions[workflow_id]
+        configured = definition.metadata.get(metadata_key)
+        if configured is None:
+            return ()
+        if not isinstance(configured, list):
+            raise ValueError(f"workflow '{workflow_id}' metadata '{metadata_key}' must be a list")
+        return tuple(validate_workflow_group(workflow_id, group) for group in configured)
+
     def request_workflow_fix_cycle(
         self,
         *,
         workflow_run_id: str,
         created_at: int,
     ) -> tuple[WorkflowRunRecord, list[ThreadRecord]]:
+        workflow_run = self.get_workflow_run(workflow_run_id)
+        if workflow_run is None:
+            raise ValueError(f"unknown workflow run: {workflow_run_id}")
+        repair_step_groups = self._workflow_followup_step_groups(
+            workflow_id=workflow_run.workflow_id,
+            metadata_key="repair_step_groups",
+        ) or (("fixer",), ("reviewer",))
         return self.request_workflow_followup_cycle(
             workflow_run_id=workflow_run_id,
             created_at=created_at,
-            step_groups=(("fixer",), ("reviewer",)),
+            step_groups=repair_step_groups,
             state="repairing",
             event_kind="workflow_fix_cycle_requested",
             event_summary="Requested fix cycle",

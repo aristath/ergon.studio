@@ -3785,9 +3785,38 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 return []
 
         class FakeBuiltHandoffWorkflow:
-            async def run(self, goal, include_status_events=True):
+            def run(self, goal, *, stream=False, include_status_events=True):
                 del goal, include_status_events
-                return FakeWorkflowResult(
+
+                events = [
+                    SimpleNamespace(
+                        type="output",
+                        executor_id="Architect",
+                        data=SimpleNamespace(text="Typer keeps the CLI easier to extend."),
+                    ),
+                    SimpleNamespace(
+                        type="executor_completed",
+                        executor_id="Architect",
+                        data=None,
+                        details=None,
+                    ),
+                    SimpleNamespace(
+                        type="handoff_sent",
+                        data=SimpleNamespace(source="architect", target="reviewer"),
+                    ),
+                    SimpleNamespace(
+                        type="output",
+                        executor_id="Reviewer",
+                        data=SimpleNamespace(text="Recommendation: choose Typer for the initial CLI."),
+                    ),
+                    SimpleNamespace(
+                        type="executor_completed",
+                        executor_id="Reviewer",
+                        data=None,
+                        details=None,
+                    ),
+                ]
+                result = FakeWorkflowResult(
                     events=[
                         SimpleNamespace(
                             type="handoff_sent",
@@ -3807,6 +3836,14 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                         ),
                     ]],
                 )
+                if not stream:
+                    return result
+
+                async def _updates():
+                    for event in events:
+                        yield event
+
+                return ResponseStream(_updates(), finalizer=lambda _updates: result)
 
         class FakeHandoffBuilder:
             def __init__(self, *, name=None, participants=None, description=None, checkpoint_storage=None, termination_condition=None) -> None:
@@ -3850,10 +3887,10 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
             ), patch(
                 "ergon_studio.workflow_runtime._build_handoff_agents",
                 return_value={
-                    "architect": SimpleNamespace(name="architect"),
-                    "researcher": SimpleNamespace(name="researcher"),
-                    "brainstormer": SimpleNamespace(name="brainstormer"),
-                    "reviewer": SimpleNamespace(name="reviewer"),
+                    "architect": SimpleNamespace(id="architect", name="Architect"),
+                    "researcher": SimpleNamespace(id="researcher", name="Researcher"),
+                    "brainstormer": SimpleNamespace(id="brainstormer", name="Brainstormer"),
+                    "reviewer": SimpleNamespace(id="reviewer", name="Reviewer"),
                 },
             ):
                 result = await runtime.run_workflow(
@@ -3891,15 +3928,23 @@ class RuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
                 return self._request_info_events
 
         class FakeBuiltHandoffWorkflow:
-            async def run(self, goal, include_status_events=True):
+            def run(self, goal, *, stream=False, include_status_events=True):
                 del goal, include_status_events
-                return FakeWorkflowResult(
+                result = FakeWorkflowResult(
                     events=[],
                     outputs=[],
                     request_info_events=[
                         SimpleNamespace(request_id="info-1", question="Need the target Python version before continuing.")
                     ],
                 )
+                if not stream:
+                    return result
+
+                async def _updates():
+                    if False:
+                        yield None
+
+                return ResponseStream(_updates(), finalizer=lambda _updates: result)
 
         class FakeHandoffBuilder:
             def __init__(self, *, name=None, participants=None, description=None, checkpoint_storage=None, termination_condition=None) -> None:

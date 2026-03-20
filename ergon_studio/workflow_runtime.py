@@ -88,6 +88,13 @@ class WorkflowFollowupDecision:
     tool_mode: str = "default"
 
 
+@dataclass
+class _ProjectedThreadDraft:
+    draft_id: str
+    sender: str
+    body: str = ""
+
+
 class _TimestampCursor:
     def __init__(self, start_at: int) -> None:
         self._counter = count(start_at)
@@ -1067,11 +1074,18 @@ async def _execute_handoff_workflow(
     )
     _apply_handoff_topology(builder, runtime, workflow_run.workflow_id, agents, participant_ids)
     workflow = builder.build()
+    executor_senders = _handoff_executor_sender_map(agents)
 
     try:
-        result = await workflow.run(
-            Message(role="user", text=goal, author_name="workflow"),
-            include_status_events=True,
+        result = await _run_streamed_handoff_workflow(
+            runtime=runtime,
+            workflow=workflow,
+            thread=workroom_thread,
+            executor_senders=executor_senders,
+            task_id=workflow_run.root_task_id,
+            cursor=cursor,
+            tracker=tracker,
+            goal=goal,
         )
     except Exception as exc:
         tracker.failed = True
@@ -1094,24 +1108,6 @@ async def _execute_handoff_workflow(
             result=None,
         )
 
-    handoff_results = [result]
-
-    for handoff_result in handoff_results:
-        _record_handoff_events(
-            runtime=runtime,
-            result=handoff_result,
-            thread=workroom_thread,
-            task_id=workflow_run.root_task_id,
-            cursor=cursor,
-        )
-    _append_output_messages_to_thread(
-        runtime=runtime,
-        thread=workroom_thread,
-        outputs=_combine_workflow_outputs(handoff_results),
-        cursor=cursor,
-        tracker=tracker,
-        assistant_only=True,
-    )
     request_info_events = result.get_request_info_events()
     if request_info_events:
         request_lines = _request_info_lines(request_info_events)
@@ -1513,6 +1509,21 @@ def _build_handoff_agents(
     return agents
 
 
+def _handoff_executor_sender_map(agents: dict[str, Agent]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for sender_id, agent in agents.items():
+        aliases = {sender_id}
+        agent_id = getattr(agent, "id", None)
+        if isinstance(agent_id, str) and agent_id.strip():
+            aliases.add(agent_id.strip())
+        agent_name = getattr(agent, "name", None)
+        if isinstance(agent_name, str) and agent_name.strip():
+            aliases.add(agent_name.strip())
+        for alias in aliases:
+            mapping[alias] = sender_id
+    return mapping
+
+
 def _handoff_agent_instructions(runtime: RuntimeContext, workflow_id: str, agent_id: str) -> str:
     acceptance_mode = acceptance_mode_for_metadata(
         runtime.registry.workflow_definitions[workflow_id].metadata
@@ -1631,6 +1642,173 @@ def _build_handoff_termination_condition(runtime: RuntimeContext, workflow_id: s
         return max_rounds is not None and len(assistant_messages) >= max_rounds
 
     return _termination
+
+
+async def _run_streamed_handoff_workflow(
+    *,
+    runtime: RuntimeContext,
+    workflow,
+    thread: ThreadRecord,
+    executor_senders: dict[str, str],
+    task_id: str | None,
+    cursor: _TimestampCursor,
+    tracker: _ExecutionTracker,
+    goal: str,
+):
+    projector = _WorkflowThreadProjector(
+        runtime=runtime,
+        thread=thread,
+        cursor=cursor,
+        tracker=tracker,
+    )
+    participant_set = set(executor_senders)
+    stream = workflow.run(
+        Message(role="user", text=goal, author_name="workflow"),
+        stream=True,
+    )
+    async for event in stream:
+        if event.type == "handoff_sent":
+            data = getattr(event, "data", None)
+            source = getattr(data, "source", None)
+            target = getattr(data, "target", None)
+            if isinstance(source, str) and isinstance(target, str):
+                runtime.append_event(
+                    kind="workflow_handoff",
+                    summary=f"{source} handed off to {target}",
+                    created_at=cursor.next(),
+                    thread_id=thread.id,
+                    task_id=task_id,
+                )
+            continue
+        if event.type == "output" and event.executor_id in participant_set:
+            delta_text = _workflow_event_text_delta(getattr(event, "data", None))
+            if delta_text:
+                projector.append_delta(sender=executor_senders[event.executor_id], delta=delta_text)
+            continue
+        if event.type == "executor_completed" and event.executor_id in participant_set:
+            projector.complete(executor_senders[event.executor_id])
+            continue
+        if event.type == "executor_failed" and event.executor_id in participant_set:
+            details = getattr(event, "details", None)
+            message = getattr(details, "message", None)
+            projector.fail(
+                executor_senders[event.executor_id],
+                error=message if isinstance(message, str) else "workflow executor failed",
+            )
+            continue
+    result = await stream.get_final_response()
+    projector.flush()
+    if not tracker.thread_outputs.get(thread.id):
+        _append_output_messages_to_thread(
+            runtime=runtime,
+            thread=thread,
+            outputs=result.get_outputs(),
+            cursor=cursor,
+            tracker=tracker,
+            assistant_only=True,
+        )
+    return result
+
+
+class _WorkflowThreadProjector:
+    def __init__(
+        self,
+        *,
+        runtime: RuntimeContext,
+        thread: ThreadRecord,
+        cursor: _TimestampCursor,
+        tracker: _ExecutionTracker,
+    ) -> None:
+        self.runtime = runtime
+        self.thread = thread
+        self.cursor = cursor
+        self.tracker = tracker
+        self._drafts: dict[str, _ProjectedThreadDraft] = {}
+
+    def append_delta(self, *, sender: str, delta: str) -> None:
+        draft = self._drafts.get(sender)
+        if draft is None:
+            draft = _ProjectedThreadDraft(
+                draft_id=f"draft-{uuid4().hex}",
+                sender=sender,
+            )
+            self._drafts[sender] = draft
+            self.runtime.live_state.start_draft(
+                draft_id=draft.draft_id,
+                thread_id=self.thread.id,
+                sender=sender,
+                kind="chat",
+                created_at=self.cursor.next(),
+            )
+        draft.body += delta
+        self.runtime.live_state.append_delta(
+            draft_id=draft.draft_id,
+            delta=delta,
+            created_at=self.cursor.next(),
+        )
+
+    def complete(self, sender: str) -> None:
+        draft = self._drafts.pop(sender, None)
+        if draft is None:
+            return
+        final_text = draft.body.strip()
+        if not final_text:
+            self.runtime.live_state.fail_draft(
+                draft_id=draft.draft_id,
+                error="empty response",
+                created_at=self.cursor.next(),
+            )
+            return
+        message = self.runtime.append_message_to_thread(
+            thread_id=self.thread.id,
+            message_id=f"message-{uuid4().hex}",
+            sender=sender,
+            kind="chat",
+            body=final_text,
+            created_at=self.cursor.next(),
+        )
+        self.runtime.live_state.complete_draft(
+            draft_id=draft.draft_id,
+            message_id=message.id,
+            created_at=self.cursor.next(),
+        )
+        _append_thread_output(
+            tracker=self.tracker,
+            thread_id=self.thread.id,
+            speaker=sender,
+            body=final_text,
+        )
+        self.tracker.last_thread_id = self.thread.id
+
+    def fail(self, sender: str, *, error: str) -> None:
+        draft = self._drafts.pop(sender, None)
+        if draft is None:
+            return
+        self.runtime.live_state.fail_draft(
+            draft_id=draft.draft_id,
+            error=error,
+            created_at=self.cursor.next(),
+        )
+        self.tracker.last_thread_id = self.thread.id
+
+    def flush(self) -> None:
+        for sender in tuple(self._drafts):
+            self.complete(sender)
+
+
+def _workflow_event_text_delta(data: object) -> str:
+    if isinstance(data, Message):
+        return _message_text(data)
+    text = getattr(data, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text
+    messages = getattr(data, "messages", None)
+    if not isinstance(messages, list) or not messages:
+        return ""
+    last_message = messages[-1]
+    if isinstance(last_message, Message):
+        return _message_text(last_message)
+    return ""
 
 
 def _record_magentic_events(

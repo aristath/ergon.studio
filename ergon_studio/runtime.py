@@ -170,6 +170,16 @@ class RuntimeContext:
     def list_sessions(self, *, include_archived: bool = False) -> list[SessionRecord]:
         return self.session_store.list_sessions(include_archived=include_archived)
 
+    def session_preview(self, session_id: str, *, limit: int = 72) -> str:
+        thread_id = _main_thread_id_for_session(session_id)
+        messages = self.conversation_store.list_messages(thread_id)
+        for message in reversed(messages):
+            body = self.conversation_store.read_message_body(message).strip()
+            if not body:
+                continue
+            return _truncate_preview(" ".join(body.split()), limit=limit)
+        return "No messages yet."
+
     def rename_session(self, *, session_id: str, title: str, created_at: int) -> SessionRecord:
         session = self.session_store.rename_session(
             session_id=session_id,
@@ -2974,6 +2984,12 @@ def _session_title_from_message(body: str, *, limit: int = 60) -> str:
         return normalized
     trimmed = normalized[: limit - 1].rstrip()
     return f"{trimmed}…"
+
+
+def _truncate_preview(text: str, *, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1].rstrip()}…"
 
 
 def _orchestrator_turn_planner_instructions(runtime: RuntimeContext) -> str:

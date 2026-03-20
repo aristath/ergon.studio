@@ -8,6 +8,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from textual.widgets import Collapsible, Input, RichLog, Static
+from textual.widgets import OptionList
 
 from ergon_studio.tui.widgets import ComposerTextArea
 
@@ -98,6 +99,8 @@ class TestAppRendering(IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             await pilot.pause()
             self.assertIsInstance(app.screen, SessionPickerScreen)
+            options = app.screen.query_one("#session-picker-options", OptionList)
+            self.assertIn("Parallel lane", str(options.get_option_at_index(0).prompt))
 
     async def test_app_renders_existing_messages(self):
         _, runtime, app = _make_env()

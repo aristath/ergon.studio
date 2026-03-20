@@ -238,6 +238,36 @@ class RuntimeTests(unittest.TestCase):
             resumed = load_runtime(project_root=project_root, home_dir=home_dir)
             self.assertEqual(resumed.main_session_id, runtime.main_session_id)
 
+    def test_session_preview_uses_latest_message_body(self) -> None:
+        from ergon_studio.runtime import load_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            project_root = base / "repo"
+            home_dir = base / "home"
+            project_root.mkdir()
+            home_dir.mkdir()
+
+            first = load_runtime(project_root=project_root, home_dir=home_dir)
+            second = load_runtime(
+                project_root=project_root,
+                home_dir=home_dir,
+                create_session=True,
+                session_title="Parallel lane",
+            )
+            second.append_message_to_main_thread(
+                message_id="message-1",
+                sender="user",
+                kind="chat",
+                body="Investigate the failing billing import worker",
+                created_at=50,
+            )
+
+            self.assertEqual(
+                first.session_preview(second.main_session_id),
+                "Investigate the failing billing import worker",
+            )
+
     def test_runtime_can_build_orchestrator_when_provider_is_configured(self) -> None:
         from ergon_studio.runtime import load_runtime
 

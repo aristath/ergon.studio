@@ -106,8 +106,9 @@ class SessionPickerScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, *, sessions, current_session_id: str) -> None:
+    def __init__(self, *, runtime: RuntimeContext, sessions, current_session_id: str) -> None:
         super().__init__()
+        self.runtime = runtime
         self.sessions = list(sessions)
         self.current_session_id = current_session_id
 
@@ -117,7 +118,10 @@ class SessionPickerScreen(ModalScreen[str | None]):
             options = []
             for session in self.sessions:
                 marker = "•" if session.id == self.current_session_id else " "
-                options.append(f"{marker} {session.title}  [dim]{session.id}[/dim]")
+                preview = self.runtime.session_preview(session.id)
+                options.append(
+                    f"{marker} {session.title}  [dim]{preview} · {session.id}[/dim]"
+                )
             yield OptionList(*options, id="session-picker-options")
 
     def action_cancel(self) -> None:
@@ -627,6 +631,7 @@ class ErgonStudioApp(App[None]):
 
         self.push_screen(
             SessionPickerScreen(
+                runtime=self.runtime,
                 sessions=sessions,
                 current_session_id=self.runtime.main_session_id,
             ),

@@ -1837,25 +1837,6 @@ def _workflow_event_text_delta(data: object) -> str:
     return ""
 
 
-def _record_magentic_events(
-    *,
-    runtime: RuntimeContext,
-    result,
-    thread: ThreadRecord,
-    task_id: str | None,
-    cursor: _TimestampCursor,
-) -> None:
-    for event in result:
-        _record_magentic_event(
-            runtime=runtime,
-            event=event,
-            thread=thread,
-            task_id=task_id,
-            cursor=cursor,
-            tracker=None,
-        )
-
-
 def _record_magentic_event(
     *,
     runtime: RuntimeContext,
@@ -1899,30 +1880,6 @@ def _record_magentic_event(
             body=body,
         )
         tracker.last_thread_id = thread.id
-
-
-def _record_handoff_events(
-    *,
-    runtime: RuntimeContext,
-    result,
-    thread: ThreadRecord,
-    task_id: str | None,
-    cursor: _TimestampCursor,
-) -> None:
-    for event in result:
-        if event.type != "handoff_sent":
-            continue
-        data = getattr(event, "data", None)
-        source = getattr(data, "source", None)
-        target = getattr(data, "target", None)
-        if isinstance(source, str) and isinstance(target, str):
-            runtime.append_event(
-                kind="workflow_handoff",
-                summary=f"{source} handed off to {target}",
-                created_at=cursor.next(),
-                thread_id=thread.id,
-                task_id=task_id,
-            )
 
 
 def _append_output_messages_to_thread(
@@ -2025,16 +1982,6 @@ def _request_info_lines(events: Sequence[object]) -> list[str]:
         "",
         *details,
     ]
-
-
-def _combine_workflow_outputs(results: Sequence[object]) -> list[object]:
-    outputs: list[object] = []
-    for result in results:
-        getter = getattr(result, "get_outputs", None)
-        if getter is None:
-            continue
-        outputs.extend(getter())
-    return outputs
 
 
 def _message_text(message: Message) -> str:

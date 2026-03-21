@@ -52,7 +52,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(captured[0].active_workroom)
         assert captured[0].active_workroom is not None
         self.assertEqual(captured[0].active_workroom.workroom_id, "debate")
-        self.assertIsNone(captured[0].active_workroom.member_index)
         reasoning = "".join(
             event.delta
             for event in events
@@ -237,7 +236,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         reviewer_prompt = streamed_prompts[0]
         self.assertIn("Latest lead-dev message to this workroom:", reviewer_prompt)
         self.assertIn("Choose one clear direction.", reviewer_prompt)
-        self.assertIn("Prior workroom outputs:", reviewer_prompt)
+        self.assertIn("Relevant team work so far:", reviewer_prompt)
         self.assertIn("coder[1]: Idea A", reviewer_prompt)
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
 
@@ -277,7 +276,7 @@ def _continuation_state():
         workroom_participants=("reviewer",),
         member_index=0,
         agent_id="reviewer",
-        workroom_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+        round_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 
 

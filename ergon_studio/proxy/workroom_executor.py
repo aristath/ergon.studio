@@ -20,6 +20,7 @@ from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
+    ActiveWorkroom,
     ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
@@ -88,10 +89,9 @@ class ProxyWorkroomExecutor:
             if workroom_message is not None
             else None
         )
-        workroom_outputs: list[str] = (
-            list(continuation.workroom_outputs) if continuation is not None else []
+        round_outputs: list[str] = (
+            list(continuation.round_outputs) if continuation is not None else []
         )
-        round_outputs: list[str] = []
 
         if self._should_try_parallel_round(
             staffed_members=staffed_members,
@@ -123,7 +123,6 @@ class ProxyWorkroomExecutor:
                     state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                     round_outputs.append(reasoning_delta)
-                workroom_outputs.extend(round_outputs)
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(round_outputs),
@@ -131,9 +130,6 @@ class ProxyWorkroomExecutor:
                             definition=definition,
                             round_participants=round_participants,
                             workroom_message=workroom_message,
-                            loop_state=loop_state,
-                            workroom_outputs=workroom_outputs,
-                            staffed_members=staffed_members,
                         ),
                     )
                 )
@@ -153,7 +149,10 @@ class ProxyWorkroomExecutor:
                 user_request=user_request,
                 workroom_message=workroom_message,
                 transcript_summary=summarize_conversation(request.messages),
-                prior_outputs=tuple(workroom_outputs),
+                prior_work=_prior_work(
+                    loop_state=loop_state,
+                    round_outputs=round_outputs,
+                ),
             )
             agent_text = ""
             first = True
@@ -188,11 +187,10 @@ class ProxyWorkroomExecutor:
                         workroom_message=workroom_message,
                         member_index=member_index,
                         agent_id=participant.agent_id,
-                        participant_label=participant.label,
                         worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
-                        workroom_outputs=tuple(workroom_outputs),
+                        round_outputs=tuple(round_outputs),
                     ),
                     state=state,
                 )
@@ -202,7 +200,6 @@ class ProxyWorkroomExecutor:
                     return
             round_output = f"{participant.label}: {agent_text.strip()}"
             round_outputs.append(round_output)
-            workroom_outputs.append(round_output)
         result_sink(
             ProxyMoveResult(
                 worklog_lines=tuple(round_outputs),
@@ -210,9 +207,6 @@ class ProxyWorkroomExecutor:
                     definition=definition,
                     round_participants=round_participants,
                     workroom_message=workroom_message,
-                    loop_state=loop_state,
-                    workroom_outputs=workroom_outputs,
-                    staffed_members=staffed_members,
                 ),
             )
         )
@@ -274,7 +268,7 @@ class ProxyWorkroomExecutor:
             user_request=user_request,
             workroom_message=workroom_message,
             transcript_summary=summarize_conversation(request.messages),
-            prior_outputs=(),
+            prior_work=(),
         )
         text = ""
         response_holder: dict[str, Any] = {}
@@ -314,22 +308,30 @@ def _active_workroom_state(
     definition: DefinitionDocument,
     round_participants: tuple[str, ...],
     workroom_message: str | None,
-    loop_state: ProxyDecisionLoopState | None,
-    workroom_outputs: list[str],
-    staffed_members: tuple[StaffedParticipant, ...],
-) -> ContinuationState | None:
-    if not staffed_members:
+) -> ActiveWorkroom | None:
+    if not round_participants:
         return None
-    return ContinuationState(
-        mode="workroom",
-        agent_id=staffed_members[0].agent_id,
-        participant_label=staffed_members[0].label,
+    return ActiveWorkroom(
         workroom_id=definition.id,
         workroom_participants=round_participants,
         workroom_message=workroom_message,
-        worklog=loop_state.worklog if loop_state is not None else (),
-        workroom_outputs=tuple(workroom_outputs),
     )
+
+
+def _prior_work(
+    *,
+    loop_state: ProxyDecisionLoopState | None,
+    round_outputs: list[str],
+) -> tuple[str, ...]:
+    prior_work = [
+        *(loop_state.worklog if loop_state is not None else ()),
+        *round_outputs,
+    ]
+    if not prior_work:
+        return ()
+    return tuple(prior_work[-6:])
+
+
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:
     if len(staffed_members) <= 1:
         return False

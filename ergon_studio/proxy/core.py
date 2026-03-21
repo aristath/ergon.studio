@@ -34,6 +34,7 @@ from ergon_studio.proxy.orchestrator_tools import (
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
+    ActiveWorkroom,
     ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
@@ -301,7 +302,9 @@ class ProxyOrchestrationCore:
                 )
                 async for event in self._message_workroom(
                     request=request,
-                    continuation=continuation,
+                    workroom_id=continuation.workroom_id,
+                    participants=continuation.workroom_participants,
+                    workroom_message=continuation.workroom_message,
                     pending=None,
                     state=state,
                     result_sink=partial(_store_result, result_holder),
@@ -417,7 +420,13 @@ class ProxyOrchestrationCore:
             return ProxyDecisionLoopState()
         continuation = pending.state
         active_workroom = (
-            continuation if continuation.workroom_id is not None else None
+            ActiveWorkroom(
+                workroom_id=continuation.workroom_id,
+                workroom_participants=continuation.workroom_participants,
+                workroom_message=continuation.workroom_message,
+            )
+            if continuation.workroom_id is not None
+            else None
         )
         return ProxyDecisionLoopState(
             worklog=continuation.worklog,
@@ -457,27 +466,21 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
 
 
 def _update_workroom_message(
-    continuation: ContinuationState,
+    active_workroom: ActiveWorkroom,
     *,
     participants: tuple[str, ...],
     message: str,
-) -> ContinuationState:
-    next_participants = participants or continuation.workroom_participants
+) -> ActiveWorkroom:
+    next_participants = participants or active_workroom.workroom_participants
     if (
-        message == continuation.workroom_message
-        and next_participants == continuation.workroom_participants
+        message == active_workroom.workroom_message
+        and next_participants == active_workroom.workroom_participants
     ):
-        return continuation
-    return ContinuationState(
-        mode=continuation.mode,
-        agent_id=continuation.agent_id,
-        participant_label=continuation.participant_label,
-        workroom_id=continuation.workroom_id,
+        return active_workroom
+    return ActiveWorkroom(
+        workroom_id=active_workroom.workroom_id,
         workroom_participants=next_participants,
         workroom_message=message,
-        member_index=continuation.member_index,
-        worklog=continuation.worklog,
-        workroom_outputs=continuation.workroom_outputs,
     )
 
 
@@ -497,7 +500,7 @@ def _result(
 def _should_continue_active_workroom(
     *,
     action: MessageWorkroomAction,
-    active_workroom: ContinuationState | None,
+    active_workroom: ActiveWorkroom | None,
 ) -> bool:
     if active_workroom is None:
         return False

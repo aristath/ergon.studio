@@ -15,13 +15,12 @@ _TOKEN_VERSION = 1
 class ContinuationState:
     mode: str
     agent_id: str
-    participant_label: str | None = None
     workroom_id: str | None = None
     workroom_participants: tuple[str, ...] = ()
     workroom_message: str | None = None
     member_index: int | None = None
     worklog: tuple[str, ...] = ()
-    workroom_outputs: tuple[str, ...] = ()
+    round_outputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,8 +40,6 @@ def encode_continuation_tool_call(
         "tn": tool_call.name,
         "ta": tool_call.arguments_json,
     }
-    if state.participant_label is not None:
-        payload["al"] = state.participant_label
     if state.workroom_id is not None:
         payload["w"] = state.workroom_id
     if state.workroom_participants:
@@ -53,8 +50,8 @@ def encode_continuation_tool_call(
         payload["i"] = state.member_index
     if state.worklog:
         payload["h"] = list(state.worklog)
-    if state.workroom_outputs:
-        payload["o"] = list(state.workroom_outputs)
+    if state.round_outputs:
+        payload["ro"] = list(state.round_outputs)
     encoded = (
         urlsafe_b64encode(
             zlib.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -79,16 +76,13 @@ def decode_continuation_from_tool_call_id(
         return None
     mode = payload.get("m")
     agent_id = payload.get("a")
-    participant_label = payload.get("al")
     workroom_id = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
     member_index = payload.get("i")
     worklog = payload.get("h", [])
-    workroom_outputs = payload.get("o", [])
+    round_outputs = payload.get("ro", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
-        return None
-    if participant_label is not None and not isinstance(participant_label, str):
         return None
     if workroom_id is not None and not isinstance(workroom_id, str):
         return None
@@ -104,20 +98,19 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in worklog
     ):
         return None
-    if not isinstance(workroom_outputs, list) or not all(
-        isinstance(item, str) for item in workroom_outputs
+    if not isinstance(round_outputs, list) or not all(
+        isinstance(item, str) for item in round_outputs
     ):
         return None
     return ContinuationState(
         mode=mode,
         agent_id=agent_id,
-        participant_label=participant_label,
         workroom_id=workroom_id,
         workroom_participants=tuple(workroom_participants),
         workroom_message=workroom_message,
         member_index=member_index,
         worklog=tuple(worklog),
-        workroom_outputs=tuple(workroom_outputs),
+        round_outputs=tuple(round_outputs),
     )
 
 

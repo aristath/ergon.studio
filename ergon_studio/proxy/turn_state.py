@@ -2,20 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ergon_studio.proxy.continuation import ContinuationState
 from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
+
+
+@dataclass(frozen=True)
+class ActiveWorkroom:
+    workroom_id: str
+    workroom_participants: tuple[str, ...]
+    workroom_message: str | None = None
 
 
 @dataclass(frozen=True)
 class ProxyMoveResult:
     worklog_lines: tuple[str, ...]
-    active_workroom: ContinuationState | None = None
+    active_workroom: ActiveWorkroom | None = None
 
 
 @dataclass
 class ProxyDecisionLoopState:
     worklog: tuple[str, ...] = field(default_factory=tuple)
-    active_workroom: ContinuationState | None = None
+    active_workroom: ActiveWorkroom | None = None
 
     def absorb_result(
         self,

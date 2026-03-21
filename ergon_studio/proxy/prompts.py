@@ -66,7 +66,7 @@ def workroom_round_prompt(
     user_request: str,
     workroom_message: str | None = None,
     transcript_summary: str,
-    prior_outputs: tuple[str, ...],
+    prior_work: tuple[str, ...],
 ) -> str:
     lines = [
         f"You are {agent_id} working inside workroom {workroom_id}.",
@@ -107,12 +107,12 @@ def workroom_round_prompt(
                 workroom_message,
             ]
         )
-    if prior_outputs:
+    if prior_work:
         lines.extend(
             [
                 "",
-                "Prior workroom outputs:",
-                *prior_outputs[-6:],
+                "Relevant team work so far:",
+                *prior_work[-6:],
             ]
         )
     return "\n".join(lines).strip()

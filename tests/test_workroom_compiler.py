@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import load_definition
-from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
+from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
 
-class WorkflowCompilerTests(unittest.TestCase):
-    def test_workflow_step_groups_support_grouped_steps(self) -> None:
+class WorkroomCompilerTests(unittest.TestCase):
+    def test_workroom_step_groups_support_grouped_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             definition_path = Path(temp_dir) / "best-of-n.md"
             definition_path.write_text(
@@ -27,13 +27,13 @@ Generate multiple candidates in parallel.
                 encoding="utf-8",
             )
 
-            step_groups = workflow_step_groups_for_definition(
+            step_groups = workroom_step_groups_for_definition(
                 load_definition(definition_path)
             )
 
             self.assertEqual(step_groups, (("coder", "coder", "coder"), ("reviewer",)))
 
-    def test_workflow_step_groups_reject_invalid_step_groups(self) -> None:
+    def test_workroom_step_groups_reject_invalid_step_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             definition_path = Path(temp_dir) / "broken.md"
             definition_path.write_text(
@@ -51,9 +51,9 @@ Broken.
 
             definition = load_definition(definition_path)
             with self.assertRaisesRegex(ValueError, "non-empty lists"):
-                workflow_step_groups_for_definition(definition)
+                workroom_step_groups_for_definition(definition)
 
-    def test_workflow_step_groups_require_explicit_steps(self) -> None:
+    def test_workroom_step_groups_require_explicit_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             definition_path = Path(temp_dir) / "broken.md"
             definition_path.write_text(
@@ -72,9 +72,9 @@ Broken.
             with self.assertRaisesRegex(
                 ValueError, "must declare `steps` or `step_groups`"
             ):
-                workflow_step_groups_for_definition(definition)
+                workroom_step_groups_for_definition(definition)
 
-    def test_workflow_step_groups_preserve_orchestrated_participants(self) -> None:
+    def test_workroom_step_groups_preserve_orchestrated_participants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             definition_path = Path(temp_dir) / "debate.md"
             definition_path.write_text(
@@ -91,7 +91,7 @@ Compare competing approaches.
                 encoding="utf-8",
             )
 
-            step_groups = workflow_step_groups_for_definition(
+            step_groups = workroom_step_groups_for_definition(
                 load_definition(definition_path)
             )
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 
-def selection_hints_for_metadata(metadata: Mapping[str, object]) -> tuple[str, ...]:
+def workroom_selection_hints_for_metadata(
+    metadata: Mapping[str, object],
+) -> tuple[str, ...]:
     configured = metadata.get("selection_hints")
     if configured is None:
         return ()
@@ -20,13 +22,13 @@ def selection_hints_for_metadata(metadata: Mapping[str, object]) -> tuple[str, .
     return tuple(hints)
 
 
-def acceptance_mode_for_metadata(metadata: Mapping[str, object]) -> str:
+def workroom_acceptance_mode_for_metadata(metadata: Mapping[str, object]) -> str:
     value = metadata.get("acceptance_mode", "delivery")
     return str(value)
 
 
-def delivery_candidate_for_metadata(metadata: Mapping[str, object]) -> bool:
+def workroom_delivery_candidate_for_metadata(metadata: Mapping[str, object]) -> bool:
     configured = metadata.get("delivery_candidate")
     if isinstance(configured, bool):
         return configured
-    return acceptance_mode_for_metadata(metadata) == "delivery"
+    return workroom_acceptance_mode_for_metadata(metadata) == "delivery"

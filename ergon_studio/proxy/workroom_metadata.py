@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
+from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
 
 def workroom_orchestration_for_definition(definition: DefinitionDocument) -> str:
@@ -17,7 +17,7 @@ def workroom_participants_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
     participants: list[str] = []
-    for group in workflow_step_groups_for_definition(definition):
+    for group in workroom_step_groups_for_definition(definition):
         for agent_id in group:
             if agent_id not in participants:
                 participants.append(agent_id)

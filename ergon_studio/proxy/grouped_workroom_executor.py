@@ -28,7 +28,7 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
+from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -503,7 +503,7 @@ def _filtered_step_groups(
     specialists: tuple[str, ...],
     specialist_counts: tuple[tuple[str, int], ...],
 ) -> tuple[tuple[str, ...], ...]:
-    step_groups = workflow_step_groups_for_definition(definition)
+    step_groups = workroom_step_groups_for_definition(definition)
     if not specialists and not specialist_counts:
         return step_groups
     count_map = dict(specialist_counts)

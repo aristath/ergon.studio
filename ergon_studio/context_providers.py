@@ -63,18 +63,18 @@ class AgentProfileContextProvider(BaseContextProvider):
                     continue
                 agent_role = str(definition.metadata.get("role", agent_id))
                 agent_summaries.append(f"{agent_id}({agent_role})")
-            workflow_summaries = []
-            for workflow_id, definition in sorted(
+            workroom_summaries = []
+            for workroom_id, definition in sorted(
                 self.registry.workroom_definitions.items()
             ):
                 orchestration = str(definition.metadata.get("orchestration", "unknown"))
-                workflow_summaries.append(f"{workflow_id}({orchestration})")
+                workroom_summaries.append(f"{workroom_id}({orchestration})")
             lines.append(
                 "Available specialists: "
                 + (", ".join(agent_summaries) if agent_summaries else "none")
             )
             lines.append(
                 "Available workrooms: "
-                + (", ".join(workflow_summaries) if workflow_summaries else "none")
+                + (", ".join(workroom_summaries) if workroom_summaries else "none")
             )
         context.extend_instructions(self.source_id, "\n".join(lines))

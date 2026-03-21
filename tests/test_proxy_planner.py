@@ -118,7 +118,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must include action"):
             parse_turn_plan(
-                '{"mode":"workflow","workroom_id":"standard-build"}',
+                '{"mode":"workroom","workroom_id":"standard-build"}',
                 registry=registry,
             )
 

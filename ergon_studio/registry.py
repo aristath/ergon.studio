@@ -11,7 +11,7 @@ from ergon_studio.proxy.workroom_metadata import (
     workroom_start_agent_for_definition,
 )
 from ergon_studio.upstream import UpstreamSettings
-from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
+from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ def _validate_workroom_references(
     for workroom_id, definition in workroom_definitions.items():
         referenced_agents: set[str] = set()
 
-        for group in workflow_step_groups_for_definition(definition):
+        for group in workroom_step_groups_for_definition(definition):
             referenced_agents.update(group)
         referenced_agents.update(workroom_selection_sequence_for_definition(definition))
         referenced_agents.update(workroom_finalizers_for_definition(definition))

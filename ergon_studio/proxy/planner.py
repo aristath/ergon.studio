@@ -12,10 +12,10 @@ from ergon_studio.proxy.delivery_requirements import (
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
 from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID
 from ergon_studio.registry import RuntimeRegistry
-from ergon_studio.workflow_policy import (
-    acceptance_mode_for_metadata,
-    delivery_candidate_for_metadata,
-    selection_hints_for_metadata,
+from ergon_studio.workroom_policy import (
+    workroom_acceptance_mode_for_metadata,
+    workroom_delivery_candidate_for_metadata,
+    workroom_selection_hints_for_metadata,
 )
 
 
@@ -36,10 +36,14 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
     delivery_values = ", ".join(DELIVERY_REQUIREMENT_VALUES)
     workroom_lines = []
     for workroom_id, definition in sorted(registry.workroom_definitions.items()):
-        hints = ", ".join(selection_hints_for_metadata(definition.metadata)) or "none"
+        hints = ", ".join(
+            workroom_selection_hints_for_metadata(definition.metadata)
+        ) or "none"
         orchestration = definition.metadata.get("orchestration", "unknown")
-        delivery_candidate = delivery_candidate_for_metadata(definition.metadata)
-        acceptance_mode = acceptance_mode_for_metadata(definition.metadata)
+        delivery_candidate = workroom_delivery_candidate_for_metadata(
+            definition.metadata
+        )
+        acceptance_mode = workroom_acceptance_mode_for_metadata(definition.metadata)
         workroom_lines.append(
             f"- {workroom_id}: orchestration={orchestration} "
             f"delivery_candidate={delivery_candidate} "
@@ -368,7 +372,7 @@ def resolve_workroom_reference(
         if lowered
         in {
             hint.casefold()
-            for hint in selection_hints_for_metadata(definition.metadata)
+            for hint in workroom_selection_hints_for_metadata(definition.metadata)
         }
     ]
     if len(by_hint) == 1:

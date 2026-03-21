@@ -11,7 +11,11 @@ from ergon_studio.proxy_cli import main
 class ProxyCliTests(unittest.TestCase):
     def test_proxy_cli_starts_proxy_server_in_headless_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy:
+            with (
+                patch("ergon_studio.proxy_cli.load_registry") as load_registry,
+                patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy,
+            ):
+                load_registry.return_value = object()
                 exit_code = main(
                     [
                         "--serve",
@@ -38,6 +42,30 @@ class ProxyCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaisesRegex(ValueError, "missing upstream base URL"):
                 main(["--serve", "--app-dir", temp_dir])
+
+    def test_proxy_cli_does_not_bootstrap_workspace_in_headless_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("ergon_studio.proxy_cli.ensure_workspace") as ensure_workspace,
+                patch("ergon_studio.proxy_cli.load_registry") as load_registry,
+                patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy,
+            ):
+                load_registry.return_value = object()
+                exit_code = main(
+                    [
+                        "--serve",
+                        "--app-dir",
+                        temp_dir,
+                        "--definitions-dir",
+                        str(Path(temp_dir) / "definitions"),
+                        "--upstream-base-url",
+                        "http://localhost:8080/v1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            ensure_workspace.assert_not_called()
+            serve_proxy.assert_called_once()
 
     def test_proxy_cli_launches_tui_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

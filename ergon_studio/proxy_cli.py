@@ -3,7 +3,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ergon_studio.app_config import ProxyAppConfig, default_app_dir, load_app_config
+from ergon_studio.app_config import (
+    ProxyAppConfig,
+    config_path,
+    default_app_dir,
+    load_app_config,
+)
+from ergon_studio.app_config import (
+    definitions_dir as default_definitions_dir,
+)
 from ergon_studio.proxy.config_tui import run_config_tui
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
@@ -53,7 +61,21 @@ def run_proxy_server(*, definitions_dir: Path, config: ProxyAppConfig) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    workspace = ensure_workspace(args.app_dir or default_app_dir())
+    app_dir = args.app_dir or default_app_dir()
+    if args.serve:
+        config = _resolve_config(
+            load_app_config(config_path(app_dir)),
+            host=args.host,
+            port=args.port,
+            upstream_base_url=args.upstream_base_url,
+            upstream_api_key=args.upstream_api_key,
+            instruction_role=args.instruction_role,
+            disable_tool_calling=args.disable_tool_calling,
+        )
+        definitions_dir = args.definitions_dir or default_definitions_dir(app_dir)
+        return run_proxy_server(definitions_dir=definitions_dir, config=config)
+
+    workspace = ensure_workspace(app_dir)
     config = _resolve_config(
         load_app_config(workspace.config_path),
         host=args.host,
@@ -64,8 +86,6 @@ def main(argv: list[str] | None = None) -> int:
         disable_tool_calling=args.disable_tool_calling,
     )
     definitions_dir = args.definitions_dir or workspace.definitions_dir
-    if args.serve:
-        return run_proxy_server(definitions_dir=definitions_dir, config=config)
     return run_config_tui(
         app_dir=workspace.app_dir,
         definitions_dir=definitions_dir,

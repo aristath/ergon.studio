@@ -12,11 +12,30 @@ name = "ergon-studio"
 version = "0.1.0"
 description = "OpenAI-compatible orchestration proxy for local coding models."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+authors = [
+  { name = "Aristeidis Stathopoulos", email = "aristath@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+
 dependencies = [
   "openai",
   "PyYAML",
 ]
+
+[project.urls]
+Repository = "https://github.com/aristath/ergon.studio"
+Issues = "https://github.com/aristath/ergon.studio/issues"
 
 [project.optional-dependencies]
 tui = [

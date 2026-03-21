@@ -15,7 +15,7 @@ _TOKEN_VERSION = 1
 class ContinuationState:
     mode: str
     agent_id: str
-    workroom_id: str | None = None
+    workroom_name: str | None = None
     workroom_participants: tuple[str, ...] = ()
     workroom_message: str | None = None
     participant_label: str | None = None
@@ -39,8 +39,8 @@ def encode_continuation_tool_call(
         "tn": tool_call.name,
         "ta": tool_call.arguments_json,
     }
-    if state.workroom_id is not None:
-        payload["w"] = state.workroom_id
+    if state.workroom_name is not None:
+        payload["w"] = state.workroom_name
     if state.workroom_participants:
         payload["p"] = list(state.workroom_participants)
     if state.workroom_message is not None:
@@ -73,14 +73,14 @@ def decode_continuation_from_tool_call_id(
         return None
     mode = payload.get("m")
     agent_id = payload.get("a")
-    workroom_id = payload.get("w")
+    workroom_name = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
     participant_label = payload.get("pl")
     worklog = payload.get("h", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
-    if workroom_id is not None and not isinstance(workroom_id, str):
+    if workroom_name is not None and not isinstance(workroom_name, str):
         return None
     if not isinstance(workroom_participants, list) or not all(
         isinstance(item, str) for item in workroom_participants
@@ -97,7 +97,7 @@ def decode_continuation_from_tool_call_id(
     return ContinuationState(
         mode=mode,
         agent_id=agent_id,
-        workroom_id=workroom_id,
+        workroom_name=workroom_name,
         workroom_participants=tuple(workroom_participants),
         workroom_message=workroom_message,
         participant_label=participant_label,

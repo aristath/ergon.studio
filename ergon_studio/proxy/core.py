@@ -250,7 +250,7 @@ class ProxyOrchestrationCore:
                 return
             async for event in self._message_workroom(
                 request=request,
-                workroom_id=action.preset,
+                workroom_name=action.preset,
                 participants=action.participants,
                 workroom_message=action.message,
                 state=state,
@@ -289,7 +289,7 @@ class ProxyOrchestrationCore:
         self,
         *,
         request: ProxyTurnRequest,
-        workroom_id: str | None = None,
+        workroom_name: str | None = None,
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
         state: ProxyTurnState,
@@ -299,20 +299,9 @@ class ProxyOrchestrationCore:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         if continuation is not None:
-            if (
-                continuation.workroom_id is not None
-                and continuation.workroom_id not in self.registry.workroom_definitions
-            ):
-                error_text = (
-                    f"Unknown workroom: {continuation.workroom_id or '(none)'}"
-                )
-                state.finish_reason = "error"
-                state.content = error_text
-                yield ProxyContentDeltaEvent(error_text)
-                return
-            workroom_id = continuation.workroom_id
+            workroom_name = continuation.workroom_name or "ad hoc"
             intro = _workroom_notice(
-                f"Orchestrator: continuing workroom {(workroom_id or 'ad hoc')} with "
+                f"Orchestrator: continuing workroom {workroom_name} with "
                 f"{continuation.agent_id or '(unknown)'}."
             )
             participants = continuation.workroom_participants
@@ -320,22 +309,22 @@ class ProxyOrchestrationCore:
         else:
             resolved = _resolve_workroom_target(
                 registry=self.registry,
-                workroom_id=workroom_id,
+                preset=workroom_name,
                 participants=participants,
             )
             if resolved is None:
-                error_text = f"Unknown workroom: {workroom_id or '(none)'}"
+                error_text = f"Unknown workroom: {workroom_name or '(none)'}"
                 state.finish_reason = "error"
                 state.content = error_text
                 yield ProxyContentDeltaEvent(error_text)
                 return
-            workroom_id, participants = resolved
-            intro = _workroom_notice(_workroom_intro(workroom_id))
+            workroom_name, participants = resolved
+            intro = _workroom_notice(_workroom_intro(workroom_name))
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         async for event in self._workroom_executor.execute(
             request=request,
-            workroom_id=workroom_id,
+            workroom_name=workroom_name or "ad hoc",
             participants=participants,
             workroom_message=workroom_message,
             state=state,
@@ -396,19 +385,19 @@ def _store_result(holder: dict[str, object], result: ProxyMoveResult) -> None:
 def _resolve_workroom_target(
     *,
     registry: RuntimeRegistry,
-    workroom_id: str | None,
+    preset: str | None,
     participants: tuple[str, ...],
-) -> tuple[str | None, tuple[str, ...]] | None:
-    if workroom_id is not None:
-        definition = registry.workroom_definitions.get(workroom_id)
+) -> tuple[str, tuple[str, ...]] | None:
+    if preset is not None:
+        definition = registry.workroom_definitions.get(preset)
         if definition is None:
             return None
         resolved_participants = participants or workroom_participants_for_definition(
             definition
         )
-        return workroom_id, resolved_participants
+        return preset, resolved_participants
     if participants:
-        return None, participants
+        return "ad hoc", participants
     return None
 
 
@@ -416,7 +405,7 @@ def _workroom_notice(base: str) -> str:
     return base + "\n"
 
 
-def _workroom_intro(workroom_id: str | None) -> str:
-    if workroom_id is None:
+def _workroom_intro(workroom_name: str) -> str:
+    if workroom_name == "ad hoc":
         return "Orchestrator: opening an ad hoc workroom."
-    return f"Orchestrator: opening workroom {workroom_id}."
+    return f"Orchestrator: opening workroom {workroom_name}."

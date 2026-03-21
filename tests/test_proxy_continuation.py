@@ -25,7 +25,7 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="architect",
-                workroom_id="standard-build",
+                workroom_name="standard-build",
             ),
         )
 
@@ -34,7 +34,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertIsNotNone(decoded)
         self.assertEqual(decoded.mode, "workroom")
         self.assertEqual(decoded.agent_id, "architect")
-        self.assertEqual(decoded.workroom_id, "standard-build")
+        self.assertEqual(decoded.workroom_name, "standard-build")
         self.assertEqual(decoded.workroom_participants, ())
         self.assertEqual(decoded.participant_label, None)
         self.assertEqual(decoded.worklog, ())
@@ -49,7 +49,7 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                workroom_id="standard-build",
+                workroom_name="standard-build",
                 workroom_participants=("coder", "coder", "coder", "reviewer"),
                 workroom_message="Polish the selected candidate.",
                 participant_label="coder[1]",

@@ -65,7 +65,7 @@ class ProxyWorkroomExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        workroom_id: str | None,
+        workroom_name: str,
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
         state: ProxyTurnState,
@@ -74,8 +74,7 @@ class ProxyWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None],
         worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
-        workroom_name = _workroom_name(workroom_id)
-        workroom_key = _workroom_key(workroom_id)
+        workroom_key = _workroom_key(workroom_name)
         round_participants = _round_participants(
             participants=participants,
             continuation=continuation,
@@ -211,7 +210,7 @@ class ProxyWorkroomExecutor:
                         request=request,
                         continuation=ContinuationState(
                             mode="workroom",
-                            workroom_id=workroom_id,
+                            workroom_name=workroom_name,
                             workroom_participants=round_participants,
                             workroom_message=workroom_message,
                             agent_id=participant.agent_id,
@@ -380,12 +379,8 @@ def _prior_work(
     return tuple(prior_work[-6:])
 
 
-def _workroom_name(workroom_id: str | None) -> str:
-    return workroom_id or "ad hoc"
-
-
-def _workroom_key(workroom_id: str | None) -> str:
-    return workroom_id or "__ad_hoc__"
+def _workroom_key(workroom_name: str) -> str:
+    return workroom_name.replace(" ", "_")
 
 
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:

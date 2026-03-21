@@ -39,7 +39,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id="debate",
+                workroom_name="debate",
                 participants=("architect", "reviewer"),
                 state=state,
                 result_sink=captured.append,
@@ -86,7 +86,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id="debate",
+                workroom_name="debate",
                 participants=("architect", "reviewer", "reviewer"),
                 state=state,
                 result_sink=captured.append,
@@ -137,7 +137,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id="best-of-n",
+                workroom_name="best-of-n",
                 participants=("coder", "coder", "coder"),
                 state=state,
                 result_sink=captured.append,
@@ -183,7 +183,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id="best-of-n",
+                workroom_name="best-of-n",
                 participants=("coder", "coder", "coder"),
                 state=state,
                 result_sink=captured.append,
@@ -246,7 +246,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id=None,
+                workroom_name="ad hoc",
                 participants=("coder",),
                 state=state,
                 result_sink=captured.append,
@@ -291,7 +291,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                workroom_id="debate",
+                workroom_name="debate",
                 workroom_message="Choose one clear direction.",
                 participants=("reviewer",),
                 state=state,
@@ -312,7 +312,7 @@ def _continuation_state():
 
     return ContinuationState(
         mode="workroom",
-        workroom_id="debate",
+        workroom_name="debate",
         workroom_participants=("reviewer",),
         agent_id="reviewer",
         participant_label="reviewer",

@@ -15,6 +15,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_metadata import (
     workflow_finalizers_for_definition,
@@ -106,7 +107,7 @@ class ProxyHandoffWorkflowExecutor:
                 if continuation is not None
                 and round_index == (continuation.step_index or 0)
                 else None,
-                final_response_sink=_response_holder_sink(response_holder),
+                final_response_sink=response_holder_sink(response_holder),
             ):
                 agent_text += delta
                 reasoning_delta = f"{current_agent}: {delta}" if first else delta
@@ -159,11 +160,3 @@ class ProxyHandoffWorkflowExecutor:
             state=state,
         ):
             yield summary_event
-
-
-def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
-    scope["response"] = value
-
-
-def _response_holder_sink(scope: dict[str, Any]) -> Callable[[Any], None]:
-    return lambda value: _set_response_holder(scope, value)

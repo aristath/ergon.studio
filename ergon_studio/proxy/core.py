@@ -50,6 +50,7 @@ from ergon_studio.proxy.prompts import (
     specialist_prompt,
     summary_instructions,
 )
+from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
@@ -264,7 +265,7 @@ class ProxyOrchestrationCore:
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
             pending_continuation=pending,
-            final_response_sink=_response_holder_sink(response_holder),
+            final_response_sink=response_holder_sink(response_holder),
         ):
             state.append_content(delta)
             yield ProxyContentDeltaEvent(delta)
@@ -311,7 +312,7 @@ class ProxyOrchestrationCore:
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
             pending_continuation=pending,
-            final_response_sink=_response_holder_sink(response_holder),
+            final_response_sink=response_holder_sink(response_holder),
         ):
             specialist_text += delta
             reasoning_delta = f"{agent_id}: {delta}" if first else delta
@@ -534,10 +535,3 @@ class ProxyOrchestrationCore:
         for call in encoded_calls:
             state.record_output_item("tool_call", call_id=call.id)
         return events
-
-def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
-    scope["response"] = value
-
-
-def _response_holder_sink(scope: dict[str, Any]) -> Callable[[Any], None]:
-    return lambda value: _set_response_holder(scope, value)

@@ -15,6 +15,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
 
@@ -94,7 +95,7 @@ class ProxyGroupedWorkflowExecutor:
                     pending_continuation=pending
                     if step_index == start_index and agent_index == group_start_index
                     else None,
-                    final_response_sink=_response_holder_sink(response_holder),
+                    final_response_sink=response_holder_sink(response_holder),
                 ):
                     agent_text += delta
                     reasoning_delta = f"{agent_id}: {delta}" if first else delta
@@ -133,11 +134,3 @@ class ProxyGroupedWorkflowExecutor:
             state=state,
         ):
             yield summary_event
-
-
-def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
-    scope["response"] = value
-
-
-def _response_holder_sink(scope: dict[str, Any]) -> Callable[[Any], None]:
-    return lambda value: _set_response_holder(scope, value)

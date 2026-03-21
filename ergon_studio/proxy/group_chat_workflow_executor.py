@@ -15,6 +15,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import group_chat_turn_prompt
+from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_metadata import (
     workflow_max_rounds_for_definition,
@@ -103,7 +104,7 @@ class ProxyGroupChatWorkflowExecutor:
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending if turn_index == start_turn else None,
-                final_response_sink=_response_holder_sink(response_holder),
+                final_response_sink=response_holder_sink(response_holder),
             ):
                 agent_text += delta
                 reasoning_delta = f"{agent_id}: {delta}" if first else delta
@@ -141,11 +142,3 @@ class ProxyGroupChatWorkflowExecutor:
             state=state,
         ):
             yield summary_event
-
-
-def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
-    scope["response"] = value
-
-
-def _response_holder_sink(scope: dict[str, Any]) -> Callable[[Any], None]:
-    return lambda value: _set_response_holder(scope, value)

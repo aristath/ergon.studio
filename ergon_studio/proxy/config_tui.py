@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
@@ -22,6 +23,7 @@ from textual.widgets import (
     TabPane,
     TextArea,
 )
+from textual.worker import Worker, WorkerState
 
 from ergon_studio.app_config import (
     ProxyAppConfig,
@@ -31,7 +33,7 @@ from ergon_studio.app_config import (
 )
 from ergon_studio.file_ops import atomic_write_text
 from ergon_studio.registry import load_registry
-from ergon_studio.server_control import ProxyServerController
+from ergon_studio.server_control import ProxyServerController, ProxyServerStatus
 from ergon_studio.upstream import UpstreamSettings
 
 _VALID_DEFINITION_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -48,6 +50,21 @@ class DefinitionMutation:
 class DefinitionRollback:
     restore_content: str | None = None
     delete_path: bool = False
+
+
+@dataclass(frozen=True)
+class ServerUpdateResult:
+    status: ProxyServerStatus
+    reason: str
+
+
+@dataclass(frozen=True)
+class EndpointSaveResult:
+    status: ProxyServerStatus
+    config: ProxyAppConfig
+    endpoint_message: str
+    server_reason: str
+    applied: bool
 
 
 class DefinitionListItem(ListItem):
@@ -333,6 +350,7 @@ class ProxyConfigApp(App[None]):
         self.config_path = app_dir / "config.json"
         self.config = initial_config
         self.server_controller = server_controller or ProxyServerController()
+        self._server_update_in_progress = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -377,13 +395,25 @@ class ProxyConfigApp(App[None]):
         )
 
     def on_mount(self) -> None:
-        self._restart_server("Ready")
+        self._begin_background_restart("Ready")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save-endpoint":
             self._save_endpoint()
 
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.worker.name == "server-restart":
+            self._handle_server_restart_worker(event)
+            return
+        if event.worker.name == "endpoint-save":
+            self._handle_endpoint_save_worker(event)
+
     def _save_endpoint(self) -> None:
+        if self._server_update_in_progress:
+            self.query_one("#endpoint-message", Static).update(
+                "Server update in progress. Please wait."
+            )
+            return
         host_text = self.query_one("#proxy-host", Input).value.strip()
         port_text = self.query_one("#proxy-port", Input).value.strip()
         try:
@@ -400,45 +430,23 @@ class ProxyConfigApp(App[None]):
             instruction_role=self.config.instruction_role,
             disable_tool_calling=self.config.disable_tool_calling,
         )
-        try:
-            status = self.server_controller.start(
-                config=candidate,
-                definitions_dir=self.definitions_dir,
-            )
-        except Exception as exc:
-            self.query_one("#endpoint-message", Static).update(
-                f"Could not apply endpoint settings: {exc}"
-            )
-            self._show_server_status(reason="Endpoint settings unchanged")
-            return
-        previous_config = self.config
-        try:
-            save_app_config(self.config_path, candidate)
-        except OSError as exc:
-            rollback_reason = f"Could not persist endpoint settings: {exc}"
-            try:
-                self.server_controller.start(
-                    config=previous_config,
-                    definitions_dir=self.definitions_dir,
-                )
-                self._show_server_status(reason="Endpoint settings unchanged")
-            except Exception as rollback_exc:
-                self.query_one("#server-status", Static).update(
-                    _status_text(
-                        status.message,
-                        status.url,
-                        f"{rollback_reason} | rollback failed: {rollback_exc}",
-                    )
-                )
-            self.query_one("#endpoint-message", Static).update(rollback_reason)
-            return
-        self.config = candidate
-        self.query_one("#endpoint-message", Static).update("Saved endpoint settings")
-        self.query_one("#server-status", Static).update(
-            _status_text(status.message, status.url, "Endpoint settings saved")
+        self._server_update_in_progress = True
+        self._set_endpoint_controls_disabled(True)
+        self.query_one("#endpoint-message", Static).update(
+            "Applying endpoint settings..."
         )
+        self.query_one("#server-status", Static).update(
+            _status_text(
+                self.server_controller.status.message,
+                self.server_controller.status.url,
+                "Applying endpoint settings...",
+            )
+        )
+        self._apply_endpoint_settings(candidate, self.config)
 
     def _apply_definition_mutation(self, mutation: DefinitionMutation) -> str:
+        if self._server_update_in_progress:
+            raise ValueError("Server update in progress. Please wait.")
         self._validate_definition_mutation(mutation)
         rollback = self._capture_definition_rollback(mutation)
         try:
@@ -474,6 +482,146 @@ class ProxyConfigApp(App[None]):
         self.query_one("#server-status", Static).update(
             _status_text(status.message, status.url, reason)
         )
+
+    def _begin_background_restart(self, reason: str) -> None:
+        if self._server_update_in_progress:
+            return
+        self._server_update_in_progress = True
+        self._set_endpoint_controls_disabled(True)
+        self.query_one("#endpoint-message", Static).update("")
+        self._show_server_status(reason=f"{reason} | Starting...")
+        self._restart_server_background(reason)
+
+    @work(
+        name="server-restart",
+        group="server-updates",
+        exclusive=True,
+        exit_on_error=False,
+        thread=True,
+    )
+    def _restart_server_background(self, reason: str) -> ServerUpdateResult:
+        try:
+            status = self.server_controller.start(
+                config=self.config,
+                definitions_dir=self.definitions_dir,
+            )
+        except Exception as exc:
+            return ServerUpdateResult(
+                status=self.server_controller.status,
+                reason=f"{reason} | Server error: {exc}",
+            )
+        return ServerUpdateResult(status=status, reason=reason)
+
+    @work(
+        name="endpoint-save",
+        group="server-updates",
+        exclusive=True,
+        exit_on_error=False,
+        thread=True,
+    )
+    def _apply_endpoint_settings(
+        self,
+        candidate: ProxyAppConfig,
+        previous_config: ProxyAppConfig,
+    ) -> EndpointSaveResult:
+        try:
+            status = self.server_controller.start(
+                config=candidate,
+                definitions_dir=self.definitions_dir,
+            )
+        except Exception as exc:
+            return EndpointSaveResult(
+                status=self.server_controller.status,
+                config=previous_config,
+                endpoint_message=f"Could not apply endpoint settings: {exc}",
+                server_reason="Endpoint settings unchanged",
+                applied=False,
+            )
+        try:
+            save_app_config(self.config_path, candidate)
+        except OSError as exc:
+            rollback_reason = f"Could not persist endpoint settings: {exc}"
+            try:
+                rollback_status = self.server_controller.start(
+                    config=previous_config,
+                    definitions_dir=self.definitions_dir,
+                )
+                return EndpointSaveResult(
+                    status=rollback_status,
+                    config=previous_config,
+                    endpoint_message=rollback_reason,
+                    server_reason="Endpoint settings unchanged",
+                    applied=False,
+                )
+            except Exception as rollback_exc:
+                return EndpointSaveResult(
+                    status=status,
+                    config=previous_config,
+                    endpoint_message=rollback_reason,
+                    server_reason=(
+                        f"{rollback_reason} | rollback failed: {rollback_exc}"
+                    ),
+                    applied=False,
+                )
+        return EndpointSaveResult(
+            status=status,
+            config=candidate,
+            endpoint_message="Saved endpoint settings",
+            server_reason="Endpoint settings saved",
+            applied=True,
+        )
+
+    def _handle_server_restart_worker(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.ERROR:
+            self._server_update_in_progress = False
+            self._set_endpoint_controls_disabled(False)
+            error = event.worker.error
+            self._show_server_status(reason=f"Server error: {error}")
+            return
+        if event.state != WorkerState.SUCCESS:
+            return
+        self._server_update_in_progress = False
+        self._set_endpoint_controls_disabled(False)
+        result = event.worker.result
+        if not isinstance(result, ServerUpdateResult):
+            return
+        self.query_one("#server-status", Static).update(
+            _status_text(result.status.message, result.status.url, result.reason)
+        )
+
+    def _handle_endpoint_save_worker(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.ERROR:
+            self._server_update_in_progress = False
+            self._set_endpoint_controls_disabled(False)
+            error = event.worker.error
+            self.query_one("#endpoint-message", Static).update(
+                f"Could not apply endpoint settings: {error}"
+            )
+            self._show_server_status(reason="Endpoint settings unchanged")
+            return
+        if event.state != WorkerState.SUCCESS:
+            return
+        self._server_update_in_progress = False
+        self._set_endpoint_controls_disabled(False)
+        result = event.worker.result
+        if not isinstance(result, EndpointSaveResult):
+            return
+        self.config = result.config
+        self.query_one("#endpoint-message", Static).update(result.endpoint_message)
+        self.query_one("#server-status", Static).update(
+            _status_text(
+                result.status.message,
+                result.status.url,
+                result.server_reason,
+            )
+        )
+
+    def _set_endpoint_controls_disabled(self, disabled: bool) -> None:
+        self.query_one("#endpoint-url", Input).disabled = disabled
+        self.query_one("#endpoint-key", Input).disabled = disabled
+        self.query_one("#proxy-host", Input).disabled = disabled
+        self.query_one("#proxy-port", Input).disabled = disabled
+        self.query_one("#save-endpoint", Button).disabled = disabled
 
     def _validate_definition_mutation(self, mutation: DefinitionMutation) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

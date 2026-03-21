@@ -26,3 +26,23 @@ Point it at a definitions directory containing:
 Required startup inputs:
 - `--definitions-dir` or `ERGON_DEFINITIONS_DIR`
 - `--upstream-base-url` or `ERGON_UPSTREAM_BASE_URL`
+
+## Development checks
+
+Install the dev dependencies in the project virtualenv:
+
+```bash
+.venv/bin/pip install -e '.[dev]'
+```
+
+Run the quality checks:
+
+```bash
+./scripts/check
+```
+
+Available commands:
+- `./scripts/format`
+- `.venv/bin/ruff check .`
+- `.venv/bin/mypy`
+- `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`

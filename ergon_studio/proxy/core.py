@@ -8,10 +8,7 @@ from agent_framework import ResponseStream
 
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.proxy.agent_runner import ProxyAgentRunner
-from ergon_studio.proxy.continuation import (
-    PendingContinuation,
-    latest_pending_continuation,
-)
+from ergon_studio.proxy.continuation import latest_pending_continuation
 from ergon_studio.proxy.group_chat_workflow_executor import (
     ProxyGroupChatWorkflowExecutor,
 )
@@ -30,7 +27,6 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
     ProxyTurnResult,
 )
-from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
@@ -59,61 +55,61 @@ class ProxyOrchestrationCore:
         agent_builder: Callable[..., Any] = build_agent,
     ) -> None:
         self.registry = registry
-        self._agent_runner = ProxyAgentRunner(
+        agent_runner = ProxyAgentRunner(
             registry,
             agent_builder=agent_builder,
         )
-        self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
-        self._workflow_support = ProxyWorkflowSupport(
-            run_text_agent=self._agent_runner.run_text_agent,
+        tool_call_emitter = ProxyToolCallEmitter(agent_runner)
+        workflow_support = ProxyWorkflowSupport(
+            run_text_agent=agent_runner.run_text_agent,
         )
-        self._turn_executor = ProxyTurnExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            run_text_agent=self._agent_runner.run_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
+        turn_executor = ProxyTurnExecutor(
+            stream_text_agent=agent_runner.stream_text_agent,
+            run_text_agent=agent_runner.run_text_agent,
+            emit_tool_calls=tool_call_emitter.emit_tool_calls,
         )
         self._turn_planner = ProxyTurnPlanner(
             registry,
-            run_text_agent=self._agent_runner.run_text_agent,
+            run_text_agent=agent_runner.run_text_agent,
         )
-        self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=self._workflow_support.emit_summary,
+        grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=agent_runner.stream_text_agent,
+            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            emit_workflow_summary=workflow_support.emit_summary,
         )
-        self._group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=self._workflow_support.emit_summary,
+        group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
+            stream_text_agent=agent_runner.stream_text_agent,
+            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            emit_workflow_summary=workflow_support.emit_summary,
         )
-        self._magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=self._workflow_support.emit_summary,
-            select_manager_agent=self._workflow_support.select_manager_agent,
+        magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
+            stream_text_agent=agent_runner.stream_text_agent,
+            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            emit_workflow_summary=workflow_support.emit_summary,
+            select_manager_agent=workflow_support.select_manager_agent,
         )
-        self._handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=self._workflow_support.emit_summary,
-            select_handoff_target=self._workflow_support.select_handoff_target,
+        handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
+            stream_text_agent=agent_runner.stream_text_agent,
+            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            emit_workflow_summary=workflow_support.emit_summary,
+            select_handoff_target=workflow_support.select_handoff_target,
         )
-        self._workflow_dispatcher = ProxyWorkflowDispatcher(
+        workflow_dispatcher = ProxyWorkflowDispatcher(
             registry,
-            execute_grouped_workflow=self._grouped_workflow_executor.execute,
-            execute_group_chat_workflow=self._group_chat_workflow_executor.execute,
-            execute_magentic_workflow=self._magentic_workflow_executor.execute,
-            execute_handoff_workflow=self._handoff_workflow_executor.execute,
+            execute_grouped_workflow=grouped_workflow_executor.execute,
+            execute_group_chat_workflow=group_chat_workflow_executor.execute,
+            execute_magentic_workflow=magentic_workflow_executor.execute,
+            execute_handoff_workflow=handoff_workflow_executor.execute,
         )
-        self._workflow_request_executor = ProxyWorkflowRequestExecutor(
-            self._workflow_dispatcher,
+        workflow_request_executor = ProxyWorkflowRequestExecutor(
+            workflow_dispatcher,
         )
         self._turn_router = ProxyTurnRouter(
-            execute_direct=self._execute_direct,
-            execute_delegation=self._execute_delegation,
-            execute_workflow=self._workflow_request_executor.execute_workflow,
+            execute_direct=turn_executor.execute_direct,
+            execute_delegation=turn_executor.execute_delegation,
+            execute_workflow=workflow_request_executor.execute_workflow,
             execute_workflow_continuation=(
-                self._workflow_request_executor.execute_workflow_continuation
+                workflow_request_executor.execute_workflow_continuation
             ),
         )
 
@@ -168,35 +164,3 @@ class ProxyOrchestrationCore:
                 output_items=state.output_items,
             ),
         )
-
-    async def _execute_direct(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        state: ProxyTurnState,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._turn_executor.execute_direct(
-            request=request,
-            state=state,
-            pending=pending,
-        ):
-            yield event
-
-    async def _execute_delegation(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        plan: ProxyTurnPlan,
-        state: ProxyTurnState,
-        current_brief: str | None = None,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._turn_executor.execute_delegation(
-            request=request,
-            plan=plan,
-            state=state,
-            current_brief=current_brief,
-            pending=pending,
-        ):
-            yield event

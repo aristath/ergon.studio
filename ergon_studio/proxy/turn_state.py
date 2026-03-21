@@ -21,6 +21,8 @@ class ProxyDecisionLoopState:
     workflow_progress: ContinuationState | None = None
     current_move_rationale: str | None = None
     current_move_success_criteria: str | None = None
+    current_comparison_mode: str | None = None
+    current_comparison_criteria: str | None = None
 
     def absorb_result(
         self,
@@ -34,6 +36,8 @@ class ProxyDecisionLoopState:
         self.workflow_progress = result.workflow_progress
         self.current_move_rationale = None
         self.current_move_success_criteria = None
+        self.current_comparison_mode = None
+        self.current_comparison_criteria = None
 
 
 @dataclass

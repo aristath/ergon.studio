@@ -19,6 +19,8 @@ class ProxyTurnPlan:
     workflow_id: str | None = None
     agent_id: str | None = None
     specialists: tuple[str, ...] = ()
+    comparison_mode: str | None = None
+    comparison_criteria: str | None = None
     request: str | None = None
     goal: str | None = None
     rationale: str | None = None
@@ -83,6 +85,10 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "the lead developer should bring in a specific subset of the team."
             ),
             (
+                "- When a move is about judging alternatives, you may set "
+                "comparison_mode to select_best, synthesize_best, or critique_options."
+            ),
+            (
                 "- Prefer act for discussion, clarification, planning with the product "
                 "manager, and small direct actions."
             ),
@@ -121,7 +127,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -194,11 +200,14 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     if agent_id is not None and agent_id not in registry.agent_definitions:
         agent_id = None
     specialists = _normalize_specialists(payload.get("specialists"), registry=registry)
+    comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
     return ProxyTurnPlan(
         mode=mode,
         workflow_id=workflow_id,
         agent_id=agent_id,
         specialists=specialists,
+        comparison_mode=comparison_mode,
+        comparison_criteria=_optional_text(payload.get("comparison_criteria")),
         request=_optional_text(payload.get("request")),
         goal=_optional_text(payload.get("goal")),
         rationale=_optional_text(payload.get("rationale")),
@@ -260,6 +269,15 @@ def _normalize_specialists(
             continue
         specialists.append(candidate)
     return tuple(specialists)
+
+
+def _normalize_comparison_mode(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    if candidate in {"select_best", "synthesize_best", "critique_options"}:
+        return candidate
+    return None
 
 
 def summarize_conversation(

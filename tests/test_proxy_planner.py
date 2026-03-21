@@ -67,6 +67,8 @@ class ProxyPlannerTests(unittest.TestCase):
             (
                 '{"mode":"workflow","workflow_id":"standard-build",'
                 '"goal":"Build it","rationale":"This needs staged work",'
+                '"comparison_mode":"select_best",'
+                '"comparison_criteria":"Prefer the safest implementation",'
                 '"success_criteria":"Have a reviewed implementation",'
                 '"deliverable_expected":true}'
             ),
@@ -76,6 +78,11 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.mode, "workflow")
         self.assertEqual(plan.workflow_id, "standard-build")
         self.assertEqual(plan.rationale, "This needs staged work")
+        self.assertEqual(plan.comparison_mode, "select_best")
+        self.assertEqual(
+            plan.comparison_criteria,
+            "Prefer the safest implementation",
+        )
         self.assertEqual(plan.success_criteria, "Have a reviewed implementation")
         self.assertTrue(plan.deliverable_expected)
 

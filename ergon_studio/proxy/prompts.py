@@ -189,6 +189,8 @@ def workflow_step_prompt(
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
     comparison_candidates: tuple[str, ...] = (),
+    comparison_mode: str | None = None,
+    comparison_criteria: str | None = None,
     move_rationale: str | None = None,
     success_criteria: str | None = None,
 ) -> str:
@@ -242,6 +244,22 @@ def workflow_step_prompt(
                     "Treat these as competing options to compare, select, or "
                     "build on deliberately."
                 ),
+            ]
+        )
+    if comparison_mode:
+        lines.extend(
+            [
+                "",
+                "Current comparison task:",
+                _comparison_mode_instruction(comparison_mode),
+            ]
+        )
+    if comparison_criteria:
+        lines.extend(
+            [
+                "",
+                "Comparison criteria:",
+                comparison_criteria,
             ]
         )
     if move_rationale:
@@ -492,3 +510,16 @@ def workflow_summary_prompt(
             "Write the final host-facing answer.",
         ]
     ).strip()
+
+
+def _comparison_mode_instruction(mode: str) -> str:
+    if mode == "select_best":
+        return "Choose the strongest candidate and explain why it wins."
+    if mode == "synthesize_best":
+        return "Combine the strongest parts of the alternatives into a better result."
+    if mode == "critique_options":
+        return (
+            "Critique the alternatives clearly and surface the most important "
+            "tradeoffs."
+        )
+    return mode

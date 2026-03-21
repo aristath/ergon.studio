@@ -190,6 +190,16 @@ class ProxyGroupedWorkflowExecutor:
                         if last_stage_parallel_attempts
                         else ()
                     ),
+                    comparison_mode=(
+                        loop_state.current_comparison_mode
+                        if loop_state is not None
+                        else None
+                    ),
+                    comparison_criteria=(
+                        loop_state.current_comparison_criteria
+                        if loop_state is not None
+                        else None
+                    ),
                     move_rationale=(
                         loop_state.current_move_rationale
                         if loop_state is not None
@@ -356,6 +366,14 @@ class ProxyGroupedWorkflowExecutor:
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
             comparison_candidates=(),
+            comparison_mode=(
+                loop_state.current_comparison_mode if loop_state is not None else None
+            ),
+            comparison_criteria=(
+                loop_state.current_comparison_criteria
+                if loop_state is not None
+                else None
+            ),
             move_rationale=(
                 loop_state.current_move_rationale if loop_state is not None else None
             ),

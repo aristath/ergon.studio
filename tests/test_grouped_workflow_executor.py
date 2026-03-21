@@ -14,7 +14,7 @@ from ergon_studio.proxy.models import (
     ProxyReasoningDeltaEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 
 
 class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -288,6 +288,62 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder[1]: Idea A", reviewer_prompt)
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
         self.assertIn("Treat these as competing options", reviewer_prompt)
+
+    async def test_next_stage_receives_explicit_comparison_directive(self) -> None:
+        streamed_prompts: list[str] = []
+
+        async def _stream_text_agent(**kwargs):
+            streamed_prompts.append(kwargs["prompt"])
+            yield "Selected best option"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Pick the best one"),),
+        )
+        state = ProxyTurnState()
+
+        [event async for event in executor.execute(
+            request=request,
+            definition=_best_of_n_review_definition(),
+            goal="Pick the best one",
+            state=state,
+            loop_state=ProxyDecisionLoopState(
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                current_comparison_mode="select_best",
+                current_comparison_criteria="Prefer the safer and simpler approach.",
+            ),
+            continuation=ContinuationState(
+                mode="workflow",
+                workflow_id="best-of-n",
+                workflow_specialists=("coder", "reviewer"),
+                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                last_stage_parallel_attempts=True,
+                step_index=1,
+                agent_index=0,
+                agent_id="reviewer",
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+            ),
+        )]
+
+        reviewer_prompt = streamed_prompts[0]
+        self.assertIn("Current comparison task:", reviewer_prompt)
+        self.assertIn("Choose the strongest candidate", reviewer_prompt)
+        self.assertIn("Comparison criteria:", reviewer_prompt)
+        self.assertIn("Prefer the safer and simpler approach.", reviewer_prompt)
 
 
 def _definition() -> DefinitionDocument:

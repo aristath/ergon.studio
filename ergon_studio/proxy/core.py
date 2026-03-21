@@ -210,6 +210,8 @@ class ProxyOrchestrationCore:
                 loop_state.goal = plan.goal
             loop_state.current_move_rationale = plan.rationale
             loop_state.current_move_success_criteria = plan.success_criteria
+            loop_state.current_comparison_mode = plan.comparison_mode
+            loop_state.current_comparison_criteria = plan.comparison_criteria
             result_holder: dict[str, object] = {}
             async for event in self._turn_router.execute_plan(
                 request=request,
@@ -224,10 +226,14 @@ class ProxyOrchestrationCore:
             if plan.mode in {"act", "finish"}:
                 loop_state.current_move_rationale = None
                 loop_state.current_move_success_criteria = None
+                loop_state.current_comparison_mode = None
+                loop_state.current_comparison_criteria = None
                 return
             if not result_holder:
                 loop_state.current_move_rationale = None
                 loop_state.current_move_success_criteria = None
+                loop_state.current_comparison_mode = None
+                loop_state.current_comparison_criteria = None
                 return
             loop_state.absorb_result(result=_result(result_holder, loop_state))
 

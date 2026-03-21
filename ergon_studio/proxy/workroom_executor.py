@@ -17,6 +17,12 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
+from ergon_studio.proxy.orchestrator_tools import (
+    ReplyLeadDevAction,
+    build_workroom_internal_tools,
+    is_internal_tool_name,
+    parse_internal_action,
+)
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
@@ -47,6 +53,8 @@ class _AgentAttemptResult:
 
 
 class ProxyWorkroomExecutor:
+    _MAX_PARTICIPANT_MOVES = 8
+
     def __init__(
         self,
         *,
@@ -135,67 +143,122 @@ class ProxyWorkroomExecutor:
 
         for member_index in range(start_index, len(staffed_members)):
             participant = staffed_members[member_index]
-            prompt = workroom_round_prompt(
-                workroom_id=definition.id,
-                agent_id=participant.agent_id,
-                role_instance_label=(
-                    participant.label
-                    if participant.label != participant.agent_id
-                    else None
-                ),
-                role_instance_context=participant_context(participant),
-                user_request=user_request,
-                workroom_message=workroom_message,
-                transcript_summary=summarize_conversation(request.messages),
-                prior_work=_prior_work(
-                    worklog=worklog,
-                    round_outputs=round_outputs,
-                ),
-            )
-            agent_text = ""
-            first = True
-            response_holder: dict[str, Any] = {}
-            async for delta in self._stream_text_agent(
-                agent_id=participant.agent_id,
-                prompt=prompt,
-                session_id=(
-                    f"proxy-workroom-{definition.id}-{participant.label}-{uuid4().hex}"
-                ),
-                model_id_override=request.model,
-                host_tools=request.tools,
-                tool_choice=request.tool_choice,
-                parallel_tool_calls=request.parallel_tool_calls,
-                pending_continuation=pending if member_index == start_index else None,
-                final_response_sink=partial(_store_response, response_holder),
-            ):
-                agent_text += delta
-                reasoning_delta = f"{participant.label}: {delta}" if first else delta
-                first = False
-                state.append_reasoning(reasoning_delta)
-                yield ProxyReasoningDeltaEvent(reasoning_delta)
-            response = response_holder.get("response")
-            if response is not None:
-                emitted = self._emit_tool_calls(
-                    response=response,
-                    request=request,
-                    continuation=ContinuationState(
-                        mode="workroom",
-                        workroom_id=_active_workroom_id(definition),
-                        workroom_participants=round_participants,
-                        workroom_message=workroom_message,
-                        member_index=member_index,
-                        agent_id=participant.agent_id,
-                        worklog=worklog,
-                        round_outputs=tuple(round_outputs),
+            participant_pending = pending if member_index == start_index else None
+            participant_move_count = 0
+            while True:
+                prompt = workroom_round_prompt(
+                    workroom_id=definition.id,
+                    agent_id=participant.agent_id,
+                    role_instance_label=(
+                        participant.label
+                        if participant.label != participant.agent_id
+                        else None
                     ),
-                    state=state,
+                    role_instance_context=participant_context(participant),
+                    user_request=user_request,
+                    workroom_message=workroom_message,
+                    transcript_summary=summarize_conversation(request.messages),
+                    prior_work=_prior_work(
+                        worklog=worklog,
+                        round_outputs=round_outputs,
+                    ),
                 )
-                if emitted:
-                    for event in emitted:
-                        yield event
-                    return
-            round_output = f"{participant.label}: {agent_text.strip()}"
-            round_outputs.append(round_output)
+                agent_text = ""
+                first = True
+                response_holder: dict[str, Any] = {}
+                async for delta in self._stream_text_agent(
+                    agent_id=participant.agent_id,
+                    prompt=prompt,
+                    session_id=(
+                        f"proxy-workroom-{definition.id}-{participant.label}-{uuid4().hex}"
+                    ),
+                    model_id_override=request.model,
+                    host_tools=request.tools,
+                    extra_tools=build_workroom_internal_tools(),
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                    pending_continuation=participant_pending,
+                    final_response_sink=partial(_store_response, response_holder),
+                ):
+                    agent_text += delta
+                    reasoning_delta = (
+                        f"{participant.label}: {delta}" if first else delta
+                    )
+                    first = False
+                    state.append_reasoning(reasoning_delta)
+                    yield ProxyReasoningDeltaEvent(reasoning_delta)
+                participant_pending = None
+                response = response_holder.get("response")
+                if response is None:
+                    response = AgentRunResult(text=agent_text.strip(), tool_calls=())
+                internal_tool_calls = tuple(
+                    tool_call
+                    for tool_call in response.tool_calls
+                    if is_internal_tool_name(tool_call.name)
+                )
+                host_tool_calls = tuple(
+                    tool_call
+                    for tool_call in response.tool_calls
+                    if not is_internal_tool_name(tool_call.name)
+                )
+                if internal_tool_calls and host_tool_calls:
+                    raise ValueError(
+                        "workroom participants cannot mix internal actions with host "
+                        "tool calls"
+                    )
+                if len(internal_tool_calls) > 1:
+                    raise ValueError(
+                        "workroom participants must use at most one internal action "
+                        "at a time"
+                    )
+                if host_tool_calls:
+                    emitted = self._emit_tool_calls(
+                        tool_calls=host_tool_calls,
+                        request=request,
+                        continuation=ContinuationState(
+                            mode="workroom",
+                            workroom_id=_active_workroom_id(definition),
+                            workroom_participants=round_participants,
+                            workroom_message=workroom_message,
+                            member_index=member_index,
+                            agent_id=participant.agent_id,
+                            worklog=worklog,
+                            round_outputs=tuple(round_outputs),
+                        ),
+                        state=state,
+                    )
+                    if emitted:
+                        for event in emitted:
+                            yield event
+                        return
+                if internal_tool_calls:
+                    action = parse_internal_action(
+                        internal_tool_calls[0],
+                        registry=None,
+                    )
+                    if isinstance(action, ReplyLeadDevAction):
+                        reasoning_delta = (
+                            f"{participant.label}: {action.message.strip()}"
+                        )
+                        state.append_reasoning(reasoning_delta)
+                        yield ProxyReasoningDeltaEvent(reasoning_delta)
+                        round_outputs.append(reasoning_delta)
+                        break
+                    raise ValueError(
+                        f"unsupported workroom internal action: {type(action).__name__}"
+                    )
+                text_summary = agent_text.strip()
+                if text_summary:
+                    round_outputs.append(f"{participant.label}: {text_summary}")
+                if (
+                    len(staffed_members) == 1
+                    and definition.metadata.get("id") == "__ad_hoc__"
+                    and request.tools
+                    and participant_move_count + 1 < self._MAX_PARTICIPANT_MOVES
+                ):
+                    participant_move_count += 1
+                    continue
+                break
         result_sink(
             ProxyMoveResult(
                 worklog_lines=tuple(round_outputs),

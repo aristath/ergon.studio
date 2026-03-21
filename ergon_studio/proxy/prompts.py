@@ -125,4 +125,22 @@ def workroom_round_prompt(
                 *prior_work[-6:],
             ]
         )
+    lines.extend(
+        [
+            "",
+            "Keep ownership of the task while you are still actively working.",
+            (
+                "Do not hand the task back to the lead developer after every small "
+                "status update."
+            ),
+            (
+                "Use tools when you need them and keep working through the task "
+                "until you are done, blocked, or truly need a decision."
+            ),
+            (
+                "When you are done, blocked, or need a decision from the lead "
+                "developer, call `reply_lead_dev` with a concise update."
+            ),
+        ]
+    )
     return "\n".join(lines).strip()

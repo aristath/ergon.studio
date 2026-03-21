@@ -243,6 +243,60 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Final summary")
         self.assertEqual(result.mode, "orchestrator")
 
+    async def test_stream_turn_keeps_solo_worker_until_it_replies_to_lead_dev(
+        self,
+    ) -> None:
+        agent_order: list[str] = []
+
+        def _capture(invocation: AgentInvocation) -> None:
+            agent_order.append(invocation.agent.id)
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "message_workroom",
+                            participants=["coder"],
+                            message="Update the README.",
+                        ),
+                        "Final summary",
+                    ],
+                    "coder": [
+                        "Checked README.md and found the current intro.",
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Updated the README intro and added setup notes.",
+                        ),
+                    ],
+                },
+                capture=_capture,
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Update the README"),),
+            tools=(_host_tool("read_file"), _host_tool("write_file")),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("coder: Checked README.md", reasoning)
+        self.assertIn("coder: Updated the README intro", reasoning)
+        self.assertEqual(
+            agent_order,
+            ["orchestrator", "coder", "coder", "orchestrator"],
+        )
+        self.assertEqual(result.content, "Final summary")
+
     async def test_stream_turn_handles_workroom_rounds(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),

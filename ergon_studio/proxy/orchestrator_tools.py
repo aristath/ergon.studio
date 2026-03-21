@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from ergon_studio.proxy.models import ProxyFunctionTool, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 
-INTERNAL_TOOL_NAMES = frozenset({"message_workroom"})
+INTERNAL_TOOL_NAMES = frozenset({"message_workroom", "reply_lead_dev"})
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,12 @@ class MessageWorkroomAction:
     message: str
 
 
-InternalAction = MessageWorkroomAction
+@dataclass(frozen=True)
+class ReplyLeadDevAction:
+    message: str
+
+
+InternalAction = MessageWorkroomAction | ReplyLeadDevAction
 
 
 def build_orchestrator_internal_tools(
@@ -59,10 +64,29 @@ def build_orchestrator_internal_tools(
     )
 
 
+def build_workroom_internal_tools() -> tuple[ProxyFunctionTool, ...]:
+    return (
+        ProxyFunctionTool(
+            name="reply_lead_dev",
+            description=(
+                "Send a concise update back to the lead developer when you are "
+                "done, blocked, or need a decision."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                },
+                "required": ["message"],
+            },
+        ),
+    )
+
+
 def parse_internal_action(
     tool_call: ProxyToolCall,
     *,
-    registry: RuntimeRegistry,
+    registry: RuntimeRegistry | None,
 ) -> InternalAction:
     try:
         payload = json.loads(tool_call.arguments_json or "{}")
@@ -71,17 +95,22 @@ def parse_internal_action(
     if not isinstance(payload, dict):
         raise ValueError(f"{tool_call.name} arguments must be an object")
 
-    if tool_call.name != "message_workroom":
-        raise ValueError(f"unsupported internal tool: {tool_call.name}")
-
-    return MessageWorkroomAction(
-        preset=_optional_preset(payload.get("preset"), registry),
-        participants=_normalize_staffing_list(
-            payload.get("participants"),
-            registry=registry,
-        ),
-        message=_required_text(payload.get("message"), field="message"),
-    )
+    if tool_call.name == "message_workroom":
+        if registry is None:
+            raise ValueError("message_workroom requires a registry context")
+        return MessageWorkroomAction(
+            preset=_optional_preset(payload.get("preset"), registry),
+            participants=_normalize_staffing_list(
+                payload.get("participants"),
+                registry=registry,
+            ),
+            message=_required_text(payload.get("message"), field="message"),
+        )
+    if tool_call.name == "reply_lead_dev":
+        return ReplyLeadDevAction(
+            message=_required_text(payload.get("message"), field="message"),
+        )
+    raise ValueError(f"unsupported internal tool: {tool_call.name}")
 
 
 def is_internal_tool_name(name: str) -> bool:

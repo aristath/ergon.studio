@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import unittest
 from pathlib import Path
@@ -203,6 +204,71 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
         )
 
+    async def test_execute_keeps_single_tool_worker_until_it_replies_to_lead_dev(
+        self,
+    ) -> None:
+        call_count = 0
+
+        async def _stream_text_agent(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield "Checked README.md and found the current intro."
+                return
+            kwargs["final_response_sink"](
+                AgentRunResult(
+                    text="",
+                    tool_calls=(
+                        _internal_reply_tool_call(
+                            "Updated the README intro and added setup notes."
+                        ),
+                    ),
+                )
+            )
+            if False:
+                yield ""
+
+        executor = ProxyWorkroomExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(
+                ProxyInputMessage(
+                    role="user", content="Update the README and improve setup docs"
+                ),
+            ),
+            tools=(_host_tool("read_file"), _host_tool("write_file")),
+        )
+        state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
+
+        events = [
+            event
+            async for event in executor.execute(
+                request=request,
+                definition=_ad_hoc_solo_definition(),
+                state=state,
+                result_sink=captured.append,
+            )
+        ]
+
+        self.assertEqual(call_count, 2)
+        self.assertEqual(
+            captured[0].worklog_lines,
+            (
+                "coder: Checked README.md and found the current intro.",
+                "coder: Updated the README intro and added setup notes.",
+            ),
+        )
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("coder: Checked README.md", reasoning)
+
     async def test_round_prompt_receives_workroom_assignment_and_prior_outputs(
         self,
     ) -> None:
@@ -269,6 +335,19 @@ def _parallel_definition() -> DefinitionDocument:
     )
 
 
+def _ad_hoc_solo_definition() -> DefinitionDocument:
+    return DefinitionDocument(
+        id="__ad_hoc__",
+        path=Path("__ad_hoc__.md"),
+        metadata={
+            "id": "__ad_hoc__",
+            "participants": ["coder"],
+        },
+        body="## Purpose\nSolo implementation.",
+        sections={"Purpose": "Solo implementation."},
+    )
+
+
 def _continuation_state():
     from ergon_studio.proxy.continuation import ContinuationState
 
@@ -306,6 +385,14 @@ def _fake_response_with_tool_call(agent_id: str, call_index: int):
                 arguments_json='{"path":"main.py"}',
             ),
         ),
+    )
+
+
+def _internal_reply_tool_call(message: str) -> ProxyToolCall:
+    return ProxyToolCall(
+        id="internal_reply_lead_dev",
+        name="reply_lead_dev",
+        arguments_json='{"message":' + json.dumps(message) + "}",
     )
 
 

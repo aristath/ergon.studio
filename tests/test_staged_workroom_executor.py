@@ -124,7 +124,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Current staffed instance: coder[1]", streamed_prompts[0])
         self.assertIn("instance 2 of 3", streamed_prompts[1])
 
-    async def test_execute_expands_grouped_role_counts_from_staffing_plan(
+    async def test_execute_expands_repeated_role_instances_from_staffing_plan(
         self,
     ) -> None:
         summary_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -296,7 +296,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_next_stage_receives_parallel_attempts_as_comparison_candidates(
+    async def test_next_stage_receives_parallel_attempts_as_alternatives(
         self,
     ) -> None:
         streamed_prompts: list[str] = []

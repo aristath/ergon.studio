@@ -88,7 +88,7 @@ def workroom_round_prompt(
     workroom_request: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
-    comparison_candidates: tuple[str, ...] = (),
+    alternative_attempts: tuple[str, ...] = (),
 ) -> str:
     lines = [
         f"You are {agent_id} working inside workroom {workroom_id}.",
@@ -140,12 +140,12 @@ def workroom_round_prompt(
                 *prior_outputs[-6:],
             ]
         )
-    if comparison_candidates:
+    if alternative_attempts:
         lines.extend(
             [
                 "",
                 "Alternative attempts from the previous stage:",
-                *comparison_candidates[-8:],
+                *alternative_attempts[-8:],
                 "",
                 (
                     "Treat these as competing options to compare, select, or "

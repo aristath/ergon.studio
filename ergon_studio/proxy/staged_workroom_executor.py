@@ -121,7 +121,7 @@ class ProxyStagedWorkroomExecutor:
             group_start_index = start_member_index if stage_index == start_index else 0
             stage_entry_brief = current_brief
             stage_outputs: list[str] = []
-            comparison_candidates = (
+            alternative_attempts = (
                 tuple(last_stage_outputs) if last_stage_parallel_attempts else ()
             )
             if self._should_try_parallel_group(
@@ -206,7 +206,7 @@ class ProxyStagedWorkroomExecutor:
                     workroom_request=workroom_request,
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workroom_outputs),
-                    comparison_candidates=comparison_candidates,
+                    alternative_attempts=alternative_attempts,
                 )
                 agent_text = ""
                 first = True
@@ -368,7 +368,7 @@ class ProxyStagedWorkroomExecutor:
             workroom_request=workroom_request,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
-            comparison_candidates=(),
+            alternative_attempts=(),
         )
         text = ""
         response_holder: dict[str, Any] = {}

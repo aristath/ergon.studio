@@ -46,16 +46,16 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             [ProxyContentDeltaEvent],
         )
 
-    async def test_execute_workroom_dispatches_grouped_handler(self) -> None:
+    async def test_execute_workroom_dispatches_staged_handler(self) -> None:
         calls: list[tuple[str, str]] = []
 
-        async def _grouped_handler(**kwargs):
+        async def _staged_handler(**kwargs):
             calls.append((kwargs["definition"].id, kwargs["goal"]))
             yield ProxyContentDeltaEvent("done")
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_grouped_handler,
+            execute_staged_workroom=_staged_handler,
             execute_discussion_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
@@ -85,7 +85,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_builds_ad_hoc_workroom_definition(self) -> None:
         calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-        async def _group_chat_handler(**kwargs):
+        async def _discussion_handler(**kwargs):
             calls.append(
                 (
                     kwargs["definition"].id,
@@ -98,7 +98,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
             execute_staged_workroom=_empty_handler,
-            execute_discussion_workroom=_group_chat_handler,
+            execute_discussion_workroom=_discussion_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -130,7 +130,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         calls: list[tuple[str, str, tuple[str, ...], str]] = []
 
-        async def _grouped_handler(**kwargs):
+        async def _staged_handler(**kwargs):
             calls.append(
                 (
                     kwargs["definition"].id,
@@ -143,7 +143,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_grouped_handler,
+            execute_staged_workroom=_staged_handler,
             execute_discussion_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(

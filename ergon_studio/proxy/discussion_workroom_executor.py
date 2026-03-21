@@ -72,24 +72,24 @@ class ProxyDiscussionWorkroomExecutor:
             if continuation is not None
             else participants
         )
-        participants = expand_staffed_participants(
+        staffed_members = expand_staffed_participants(
             workroom_participants_for_definition(definition),
             participants=staffed_participants,
         )
         sequence = expand_staffed_sequence(
             workroom_turn_sequence_for_definition(definition),
-            participants=participants,
+            participants=staffed_members,
         )
         max_rounds = workroom_max_rounds_for_definition(
-            definition, default=max(len(sequence), len(participants), 1)
+            definition, default=max(len(sequence), len(staffed_members), 1)
         )
         if not sequence:
             sequence = (
                 tuple(
-                    participants[index % len(participants)].label
+                    staffed_members[index % len(staffed_members)].label
                     for index in range(max_rounds)
                 )
-                if participants
+                if staffed_members
                 else ()
             )
         else:
@@ -119,7 +119,10 @@ class ProxyDiscussionWorkroomExecutor:
             list(continuation.workroom_outputs) if continuation is not None else []
         )
         for turn_index in range(start_turn, len(sequence)):
-            participant = participant_by_label(participants, sequence[turn_index])
+            participant = participant_by_label(
+                staffed_members,
+                sequence[turn_index],
+            )
             if participant is None:
                 continue
             prompt = discussion_turn_prompt(
@@ -193,7 +196,7 @@ class ProxyDiscussionWorkroomExecutor:
                 workroom_progress = None
                 if next_turn < len(sequence):
                     next_participant = participant_by_label(
-                        participants,
+                        staffed_members,
                         sequence[next_turn],
                     )
                     workroom_progress = ContinuationState(

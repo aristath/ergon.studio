@@ -396,7 +396,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_workroom_continuation_keeps_remaining_agents_in_same_group(
         self,
     ) -> None:
-        registry = _grouped_workroom_registry()
+        registry = _staged_workroom_registry()
         first_core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -404,7 +404,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "open_workroom",
-                            workroom_id="grouped-build",
+                            workroom_id="staged-build",
                             message="Build calculator",
                         ),
                     ],
@@ -477,7 +477,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Reviewed", reasoning)
         self.assertEqual(resumed_result.content, "Workroom final summary")
 
-    async def test_group_chat_workroom_uses_steps_as_turn_order(self) -> None:
+    async def test_discussion_workroom_uses_turns_as_turn_order(self) -> None:
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -1015,18 +1015,18 @@ def _fake_registry():
     return _FakeRegistry()
 
 
-def _grouped_workroom_registry():
+def _staged_workroom_registry():
     registry = _FakeRegistry()
-    registry.workroom_definitions["grouped-build"] = DefinitionDocument(
-        id="grouped-build",
-        path=Path("grouped-build.md"),
+    registry.workroom_definitions["staged-build"] = DefinitionDocument(
+        id="staged-build",
+        path=Path("staged-build.md"),
         metadata={
-            "id": "grouped-build",
+            "id": "staged-build",
             "shape": "staged",
             "stages": [["architect", "coder", "reviewer"]],
         },
-        body="## Purpose\nGrouped build.",
-        sections={"Purpose": "Grouped build."},
+        body="## Purpose\nStaged build.",
+        sections={"Purpose": "Staged build."},
     )
     return registry
 

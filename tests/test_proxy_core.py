@@ -174,7 +174,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("workflow standard-build", reasoning)
+        self.assertIn("workroom template standard-build", reasoning)
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(result.content, "Workflow final summary")
@@ -454,7 +454,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in resumed_events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("continuing workflow standard-build with architect", reasoning)
+        self.assertIn("continuing workroom standard-build with architect", reasoning)
         self.assertIn("architect: Architecture", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(resumed_result.content, "Workflow final summary")

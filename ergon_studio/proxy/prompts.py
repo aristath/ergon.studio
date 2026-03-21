@@ -183,8 +183,11 @@ def workflow_step_prompt(
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"You are {agent_id} working inside playbook {workflow_id}.",
-        "The lead developer is using this playbook as a tactic, not as a rigid script.",
+        f"You are {agent_id} working inside workroom {workflow_id}.",
+        (
+            "The lead developer is using this workroom for collaboration, not as "
+            "a rigid script."
+        ),
     ]
     if role_instance_label:
         lines.extend(
@@ -217,7 +220,7 @@ def workflow_step_prompt(
         lines.extend(
             [
                 "",
-                "Current playbook round assignment:",
+                "Current workroom assignment:",
                 playbook_request,
             ]
         )
@@ -225,7 +228,7 @@ def workflow_step_prompt(
         lines.extend(
             [
                 "",
-                "Prior workflow outputs:",
+                "Prior workroom outputs:",
                 *prior_outputs[-6:],
             ]
         )
@@ -246,7 +249,7 @@ def workflow_step_prompt(
         lines.extend(
             [
                 "",
-                "Why the lead developer is using this playbook move now:",
+                "Why the lead developer is using this workroom move now:",
                 move_rationale,
             ]
         )
@@ -267,7 +270,7 @@ def group_chat_turn_prompt(
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"You are {agent_id} speaking in playbook {workflow_id}.",
+        f"You are {agent_id} speaking in workroom {workflow_id}.",
         "Respond to the current discussion and move the decision forward.",
         "Add real value from your role instead of repeating the room.",
     ]
@@ -302,7 +305,7 @@ def group_chat_turn_prompt(
         lines.extend(
             [
                 "",
-                "Current playbook round assignment:",
+                "Current workroom assignment:",
                 playbook_request,
             ]
         )
@@ -330,7 +333,7 @@ def workflow_manager_instructions(participants: tuple[str, ...]) -> str:
         [
             (
                 "You are helping the lead developer choose the next specialist "
-                "for an adaptive playbook."
+                "for an adaptive workroom."
             ),
             "Return JSON only.",
             f"Allowed agents: {', '.join(participants) or '(none)'}",
@@ -353,7 +356,7 @@ def workflow_manager_prompt(
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"Workflow: {workflow_id}",
+        f"Workroom: {workflow_id}",
         f"Goal: {goal or '(none)'}",
         f"Current brief: {current_brief or '(none)'}",
         f"Available specialists: {', '.join(participants) or '(none)'}",
@@ -361,7 +364,7 @@ def workflow_manager_prompt(
     if playbook_request:
         lines.append(f"Current round assignment: {playbook_request}")
     if move_rationale:
-        lines.append(f"Why continue this playbook now: {move_rationale}")
+        lines.append(f"Why continue this workroom now: {move_rationale}")
     lines.extend(
         [
             "",
@@ -375,7 +378,7 @@ def workflow_manager_prompt(
 def handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
     return "\n".join(
         [
-            "You are choosing the next specialist handoff in a collaborative playbook.",
+            "You are choosing the next specialist handoff in a collaborative workroom.",
             "Return JSON only.",
             f"Allowed next agents: {', '.join(allowed) or '(none)'}",
             (
@@ -398,7 +401,7 @@ def handoff_selection_prompt(
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"Workflow: {workflow_id}",
+        f"Workroom: {workflow_id}",
         f"You are {current_agent}.",
         f"Goal: {goal or '(none)'}",
         f"Current brief: {current_brief or '(none)'}",
@@ -489,7 +492,7 @@ def workflow_summary_prompt(
 ) -> str:
     return "\n".join(
         [
-            f"The playbook {workflow_id} completed.",
+            f"The workroom {workflow_id} completed.",
             "",
             "Goal:",
             goal or "(none)",

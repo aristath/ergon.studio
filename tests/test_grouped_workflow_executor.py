@@ -349,7 +349,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
         self.assertIn("Treat these as competing options", reviewer_prompt)
 
-    async def test_stage_prompt_receives_playbook_round_assignment(
+    async def test_stage_prompt_receives_workroom_assignment(
         self,
     ) -> None:
         streamed_prompts: list[str] = []
@@ -397,7 +397,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         )]
 
         reviewer_prompt = streamed_prompts[0]
-        self.assertIn("Current playbook round assignment:", reviewer_prompt)
+        self.assertIn("Current workroom assignment:", reviewer_prompt)
         self.assertIn(
             "Compare the two alternatives and choose one winner.",
             reviewer_prompt,

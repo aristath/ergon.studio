@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
@@ -16,7 +17,10 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_metadata import workflow_orchestration_for_definition
+from ergon_studio.proxy.workflow_metadata import (
+    workflow_orchestration_for_definition,
+)
+from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -61,15 +65,18 @@ class ProxyWorkflowDispatcher:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        definition = self.registry.workflow_definitions.get(workflow_id or "")
+        definition = self._resolve_workroom_definition(
+            workflow_id=workflow_id,
+            specialists=specialists,
+        )
         if definition is None:
             state.finish_reason = "error"
-            error_text = f"Unknown workflow: {workflow_id or '(none)'}"
+            error_text = f"Unknown workroom: {workflow_id or '(none)'}"
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
         intro = _workflow_notice(
-            base=f"Orchestrator: running workflow {definition.id}.",
+            base=_workroom_intro(definition),
             loop_state=loop_state,
         )
         state.append_reasoning(intro)
@@ -97,19 +104,22 @@ class ProxyWorkflowDispatcher:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        definition = self.registry.workflow_definitions.get(
-            continuation.workflow_id or ""
+        definition = self._resolve_workroom_definition(
+            workflow_id=continuation.workflow_id,
+            specialists=continuation.workflow_specialists,
         )
         if definition is None:
             state.finish_reason = "error"
-            error_text = f"Unknown workflow: {continuation.workflow_id or '(none)'}"
+            error_text = (
+                f"Unknown workroom: {continuation.workflow_id or '(none)'}"
+            )
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
         agent_name = continuation.agent_id or "(unknown)"
         intro = _workflow_notice(
             base=(
-                f"Orchestrator: continuing workflow {definition.id} with "
+                f"Orchestrator: continuing workroom {definition.id} with "
                 f"{agent_name}."
             ),
             loop_state=loop_state,
@@ -213,6 +223,18 @@ class ProxyWorkflowDispatcher:
             return
         raise ValueError(f"unsupported workflow orchestration: {orchestration}")
 
+    def _resolve_workroom_definition(
+        self,
+        *,
+        workflow_id: str | None,
+        specialists: tuple[str, ...],
+    ) -> DefinitionDocument | None:
+        if is_ad_hoc_workroom(workflow_id):
+            if not specialists:
+                return None
+            return _ad_hoc_workroom_definition(specialists)
+        return self.registry.workflow_definitions.get(workflow_id or "")
+
 
 def _workflow_notice(
     *,
@@ -223,3 +245,36 @@ def _workflow_notice(
     if loop_state is not None and loop_state.current_move_rationale:
         lines.append(f"Why: {loop_state.current_move_rationale}")
     return "\n".join(lines) + "\n"
+
+
+def _workroom_intro(definition: DefinitionDocument) -> str:
+    if is_ad_hoc_workroom(definition.id):
+        return "Orchestrator: opening an ad hoc workroom."
+    return f"Orchestrator: opening workroom template {definition.id}."
+
+
+def _ad_hoc_workroom_definition(
+    specialists: tuple[str, ...],
+) -> DefinitionDocument:
+    return DefinitionDocument(
+        id=AD_HOC_WORKROOM_ID,
+        path=Path(AD_HOC_WORKROOM_ID),
+        metadata={
+            "id": AD_HOC_WORKROOM_ID,
+            "name": "Ad Hoc Workroom",
+            "orchestration": "magentic",
+            "steps": list(specialists),
+            "max_rounds": max(len(specialists) * 2, 2),
+        },
+        body=(
+            "## Purpose\n"
+            "A temporary staffed workroom opened by the lead developer for "
+            "natural-language collaboration."
+        ),
+        sections={
+            "Purpose": (
+                "A temporary staffed workroom opened by the lead developer for "
+                "natural-language collaboration."
+            )
+        },
+    )

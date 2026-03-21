@@ -47,7 +47,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
     async def test_plan_turn_parses_valid_workflow_plan(self) -> None:
         async def _run_text_agent(**_kwargs):
             return (
-                '{"action":"start_playbook","target":"standard-build",'
+                '{"action":"open_workroom","target":"standard-build",'
                 '"assignment":"Build the calculator with the standard tactic"}'
             )
 
@@ -68,7 +68,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_turn_parses_continue_playbook_decision(self) -> None:
         async def _run_text_agent(**_kwargs):
-            return '{"action":"continue_playbook","target":"current"}'
+            return '{"action":"continue_workroom","target":"current"}'
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(
@@ -96,7 +96,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         async def _run_text_agent(**_kwargs):
-            return '{"action":"start_playbook","target":"standard-build"}'
+            return '{"action":"open_workroom","target":"standard-build"}'
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(

@@ -73,7 +73,7 @@ class ProxyPlannerTests(unittest.TestCase):
             active_specialist_counts=(("coder", 3),),
         )
 
-        self.assertIn("Playbook currently in progress:", prompt)
+        self.assertIn("Workroom currently in progress:", prompt)
         self.assertIn("best-of-n", prompt)
         self.assertIn("Currently staffed specialists:", prompt)
         self.assertIn("coder, reviewer", prompt)
@@ -92,7 +92,7 @@ class ProxyPlannerTests(unittest.TestCase):
             active_playbook_request="Compare the two alternatives and pick one.",
         )
 
-        self.assertIn("Current playbook round assignment:", prompt)
+        self.assertIn("Current workroom assignment:", prompt)
         self.assertIn("Compare the two alternatives and pick one.", prompt)
 
     def test_build_turn_planner_prompt_includes_delivery_requirements(self) -> None:
@@ -138,12 +138,12 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.request, "Implement the change")
         self.assertEqual(plan.rationale, "Keep this focused")
 
-    def test_parse_turn_plan_parses_compact_playbook_action(self) -> None:
+    def test_parse_turn_plan_parses_compact_workroom_action(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"action":"start_playbook","target":"standard-build",'
+                '{"action":"open_workroom","target":"standard-build",'
                 '"assignment":"Build the feature safely","staffing":['
                 '"coder","coder","reviewer"],'
                 '"delivery_requirements":["review"]}'
@@ -158,12 +158,12 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.specialist_counts, (("coder", 2),))
         self.assertEqual(plan.delivery_requirements, ("review",))
 
-    def test_parse_turn_plan_parses_compact_continue_action(self) -> None:
+    def test_parse_turn_plan_parses_compact_continue_workroom_action(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"action":"continue_playbook","target":"current",'
+                '{"action":"continue_workroom","target":"current",'
                 '"assignment":"Run one more review pass","staffing":["reviewer"]}'
             ),
             registry=registry,
@@ -189,7 +189,7 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"action":"start_playbook","target":"Standard Build"}',
+            '{"action":"open_workroom","target":"Standard Build"}',
             registry=registry,
         )
 
@@ -199,7 +199,7 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"action":"start_playbook","target":"staged_delivery"}',
+            '{"action":"open_workroom","target":"staged_delivery"}',
             registry=registry,
         )
 
@@ -210,7 +210,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
         plan = parse_turn_plan(
             (
-                '{"action":"start_playbook","target":"standard-build",'
+                '{"action":"open_workroom","target":"standard-build",'
                 '"staffing":["coder","orchestrator","ghost","coder"]}'
             ),
             registry=registry,
@@ -219,12 +219,27 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.specialists, ("coder",))
         self.assertEqual(plan.specialist_counts, (("coder", 2),))
 
+    def test_parse_turn_plan_opens_ad_hoc_workroom_from_staffing(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"action":"open_workroom","assignment":"Brainstorm a safe plan",'
+                '"staffing":["architect","coder","critic"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "workflow")
+        self.assertEqual(plan.workflow_id, "ad-hoc-workroom")
+        self.assertEqual(plan.specialists, ("architect", "coder", "critic"))
+
     def test_parse_turn_plan_allows_dense_staffing_list(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"action":"start_playbook","target":"best-of-n",'
+                '{"action":"open_workroom","target":"best-of-n",'
                 '"staffing":["coder","coder","coder","architect"]}'
             ),
             registry=registry,
@@ -235,12 +250,12 @@ class ProxyPlannerTests(unittest.TestCase):
             (("coder", 3),),
         )
 
-    def test_parse_turn_plan_parses_playbook_request(self) -> None:
+    def test_parse_turn_plan_parses_workroom_request(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"action":"continue_playbook","target":"current",'
+                '{"action":"continue_workroom","target":"current",'
                 '"assignment":"Compare the current options and pick one."}'
             ),
             registry=registry,
@@ -315,6 +330,13 @@ def _make_registry():
                 metadata={"id": "reviewer", "role": "reviewer"},
                 body="## Identity\nReviewer.",
                 sections={"Identity": "Reviewer."},
+            ),
+            "critic": DefinitionDocument(
+                id="critic",
+                path=Path("critic.md"),
+                metadata={"id": "critic", "role": "critic"},
+                body="## Identity\nCritic.",
+                sections={"Identity": "Critic."},
             ),
         },
         workflow_definitions={

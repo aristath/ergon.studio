@@ -10,6 +10,7 @@ from ergon_studio.proxy.delivery_requirements import (
     unmet_delivery_requirements,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
+from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.workflow_policy import (
     acceptance_mode_for_metadata,
@@ -72,8 +73,12 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             "Allowed actions:",
             '- "reply": the lead developer handles the next move directly.',
             '- "delegate": message one specialist with a focused assignment.',
-            '- "start_playbook": start a named playbook tactic.',
-            '- "continue_playbook": continue the playbook already in progress.',
+            (
+                '- "open_workroom": open a staffed collaboration room. '
+                "You may target a named template or leave target null for an "
+                "ad-hoc room."
+            ),
+            '- "continue_workroom": continue the room already in progress.',
             '- "deliver": return the current result to the product manager.',
             "",
             "Rules:",
@@ -83,16 +88,17 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "very next move."
             ),
             (
-                "- target names the specialist, playbook, or 'current' playbook "
-                "for continue_playbook."
+                "- target names the specialist, a workroom template, or "
+                "'current' for continue_workroom."
             ),
             (
                 "- assignment is the natural-language brief for the next move."
             ),
             (
-                "- staffing is optional and only for playbook actions. It is a list "
-                "of specialist ids. Repeating a role means multiple independent "
-                "instances, such as ['coder','coder','reviewer']."
+                "- staffing is optional for workroom actions. For ad-hoc rooms, "
+                "staffing defines who is in the room. Repeating a role means "
+                "multiple independent instances, such as "
+                "['coder','coder','reviewer']."
             ),
             (
                 "- You may optionally set delivery_requirements to express the "
@@ -115,12 +121,13 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "- Prefer delegate for narrow, well-bounded specialist work."
             ),
             (
-                "- Prefer start_playbook when the work would benefit from a known "
-                "multi-agent tactic."
+                "- Prefer open_workroom when the work would benefit from "
+                "multi-agent collaboration, brainstorming, critique, or "
+                "parallel attempts."
             ),
             (
-                "- Prefer continue_playbook when the current playbook is still the "
-                "right tactic and should advance another round."
+                "- Prefer continue_workroom when the current room is still the "
+                "right place to keep collaborating."
             ),
             (
                 "- Preserve the full delivery goal when the product manager expects "
@@ -131,14 +138,14 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "request and transcript."
             ),
             "",
-            "Available workflows:",
+            "Available workroom templates:",
             *workflow_lines,
             "",
             "Available specialists:",
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"action":"reply|delegate|start_playbook|continue_playbook|deliver","target":null,"assignment":"","staffing":[],"delivery_requirements":[],"rationale":""}',
+            '{"action":"reply|delegate|open_workroom|continue_workroom|deliver","target":null,"assignment":"","staffing":[],"delivery_requirements":[],"rationale":""}',
         ]
     )
 
@@ -191,7 +198,7 @@ def build_turn_planner_prompt(
         lines.extend(
             [
                 "",
-                "Playbook currently in progress:",
+                "Workroom currently in progress:",
                 active_workflow_id,
             ]
         )
@@ -199,7 +206,7 @@ def build_turn_planner_prompt(
         lines.extend(
             [
                 "",
-                "Current playbook round assignment:",
+                "Current workroom assignment:",
                 active_playbook_request,
             ]
         )
@@ -292,10 +299,13 @@ def _parse_action_plan(
             rationale=rationale,
         )
 
-    if action == "start_playbook":
+    if action == "open_workroom":
+        workroom_id = resolve_workflow_reference(registry, target)
+        if workroom_id is None and (specialists or specialist_counts):
+            workroom_id = AD_HOC_WORKROOM_ID
         return ProxyTurnPlan(
             mode="workflow",
-            workflow_id=resolve_workflow_reference(registry, target),
+            workflow_id=workroom_id,
             specialists=specialists,
             specialist_counts=specialist_counts,
             playbook_request=assignment,
@@ -303,11 +313,13 @@ def _parse_action_plan(
             rationale=rationale,
         )
 
-    if action == "continue_playbook":
+    if action == "continue_workroom":
         workflow_id = None if target == "current" else resolve_workflow_reference(
             registry,
             target,
         )
+        if workflow_id is None and target == AD_HOC_WORKROOM_ID:
+            workflow_id = AD_HOC_WORKROOM_ID
         return ProxyTurnPlan(
             mode="continue_playbook",
             workflow_id=workflow_id,
@@ -401,11 +413,15 @@ def _normalize_action(value: object) -> str:
     if normalized in {
         "reply",
         "delegate",
-        "start_playbook",
-        "continue_playbook",
+        "open_workroom",
+        "continue_workroom",
         "deliver",
     }:
         return normalized
+    if normalized == "start_playbook":
+        return "open_workroom"
+    if normalized == "continue_playbook":
+        return "continue_workroom"
     return "reply"
 
 

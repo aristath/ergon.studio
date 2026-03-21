@@ -98,28 +98,6 @@ class ProxyAgentRunner:
         )
         return self._invoker(invocation)
 
-    def emit_tool_calls(
-        self,
-        *,
-        response: AgentRunResult,
-        request: ProxyTurnRequest,
-        continuation: ContinuationState,
-    ) -> tuple[tuple[ProxyToolCall, ...], list[ProxyToolCallEvent]]:
-        tool_calls = self.validate_host_tool_calls(
-            response.tool_calls,
-            request=request,
-        )
-        if not tool_calls:
-            return (), []
-        encoded_calls = tuple(
-            encode_continuation_tool_call(tool_call, state=continuation)
-            for tool_call in tool_calls
-        )
-        return encoded_calls, [
-            ProxyToolCallEvent(call=call, index=index)
-            for index, call in enumerate(encoded_calls)
-        ]
-
     def emit_tool_call_events(
         self,
         *,
@@ -134,24 +112,23 @@ class ProxyAgentRunner:
                 raise ValueError(
                     "response is required when tool_calls are not provided"
                 )
-            encoded_calls, events = self.emit_tool_calls(
-                response=response,
+            validated_tool_calls = self._validate_host_tool_calls(
+                response.tool_calls,
                 request=request,
-                continuation=continuation,
             )
         else:
-            validated_tool_calls = self.validate_host_tool_calls(
+            validated_tool_calls = self._validate_host_tool_calls(
                 tuple(tool_calls),
                 request=request,
             )
-            encoded_calls = tuple(
-                encode_continuation_tool_call(tool_call, state=continuation)
-                for tool_call in validated_tool_calls
-            )
-            events = [
-                ProxyToolCallEvent(call=call, index=index)
-                for index, call in enumerate(encoded_calls)
-            ]
+        encoded_calls = tuple(
+            encode_continuation_tool_call(tool_call, state=continuation)
+            for tool_call in validated_tool_calls
+        )
+        events = [
+            ProxyToolCallEvent(call=call, index=index)
+            for index, call in enumerate(encoded_calls)
+        ]
         if not events:
             return []
         state.tool_calls = encoded_calls
@@ -160,15 +137,7 @@ class ProxyAgentRunner:
             state.record_output_item("tool_call", call_id=call.id)
         return events
 
-    def validate_host_tool_calls(
-        self,
-        tool_calls: tuple[ProxyToolCall, ...],
-        *,
-        request: ProxyTurnRequest,
-    ) -> tuple[ProxyToolCall, ...]:
-        return self._validated_tool_calls(tool_calls, request=request)
-
-    def _validated_tool_calls(
+    def _validate_host_tool_calls(
         self,
         tool_calls: tuple[ProxyToolCall, ...],
         *,
@@ -223,7 +192,7 @@ class ProxyAgentRunner:
             parallel_tool_calls=parallel_tool_calls,
         )
         declared_tools = tuple(allowed_tools) + tuple(extra_tools)
-        if declared_tools and not provider_supports_tool_calling(self.registry):
+        if declared_tools and not self.registry.upstream.tool_calling:
             if tool_options.get("tool_choice") not in (None, "auto", "none"):
                 raise ValueError(
                     f"provider for agent '{agent_id}' does not support tool calling"
@@ -340,10 +309,6 @@ def compose_instructions(
     if not base:
         return context
     return f"{base}\n\n{context}"
-
-
-def provider_supports_tool_calling(registry: RuntimeRegistry) -> bool:
-    return registry.upstream.tool_calling
 
 
 def build_agent_messages(

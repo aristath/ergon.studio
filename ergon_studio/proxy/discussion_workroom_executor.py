@@ -13,12 +13,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.playbook_staffing import (
-    expand_staffed_participants,
-    expand_staffed_sequence,
-    participant_by_label,
-    participant_context,
-)
 from ergon_studio.proxy.prompts import discussion_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.transcript import summarize_conversation
@@ -31,6 +25,12 @@ from ergon_studio.proxy.workroom_metadata import (
     workroom_max_rounds_for_definition,
     workroom_participants_for_definition,
     workroom_turn_sequence_for_definition,
+)
+from ergon_studio.proxy.workroom_staffing import (
+    expand_staffed_participants,
+    expand_staffed_sequence,
+    participant_by_label,
+    participant_context,
 )
 
 ProxyEvent = (
@@ -183,7 +183,7 @@ class ProxyDiscussionWorkroomExecutor:
                         participant_label=participant.label,
                         goal=goal,
                         current_brief=agent_text.strip() or current_brief,
-                        decision_history=(
+                        worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
                         workroom_outputs=tuple(workroom_outputs),
@@ -223,7 +223,7 @@ class ProxyDiscussionWorkroomExecutor:
                         ),
                         goal=goal,
                         current_brief=current_brief,
-                        decision_history=(
+                        worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
                         workroom_outputs=tuple(workroom_outputs),

@@ -225,7 +225,7 @@ class ProxyServerTests(unittest.TestCase):
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
             port=0,
-            core=_FailingCore(RuntimeError("planner exploded")),
+            core=_FailingCore(RuntimeError("core exploded")),
         )
         self.addCleanup(handle.close)
 
@@ -244,7 +244,7 @@ class ProxyServerTests(unittest.TestCase):
         with urlopen(request) as response:
             body = response.read().decode("utf-8")
 
-        self.assertIn('RuntimeError: planner exploded', body)
+        self.assertIn('RuntimeError: core exploded', body)
         self.assertIn('"finish_reason":"error"', body)
         self.assertIn("data: [DONE]", body)
 
@@ -966,7 +966,7 @@ class ProxyServerTests(unittest.TestCase):
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
             port=0,
-            core=_FailingCore(RuntimeError("planner exploded")),
+            core=_FailingCore(RuntimeError("core exploded")),
         )
         self.addCleanup(handle.close)
 
@@ -992,7 +992,7 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payloads[-1]["type"], "response.failed")
         self.assertEqual(
             payloads[-1]["response"]["error"]["message"],
-            "RuntimeError: planner exploded",
+            "RuntimeError: core exploded",
         )
 
     def test_responses_stream_failure_preserves_sequence_order(self) -> None:
@@ -1001,7 +1001,7 @@ class ProxyServerTests(unittest.TestCase):
             port=0,
             core=_LateFailingCore(
                 [ProxyReasoningDeltaEvent("Plan.")],
-                RuntimeError("planner exploded"),
+                RuntimeError("core exploded"),
             ),
         )
         self.addCleanup(handle.close)

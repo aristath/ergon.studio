@@ -59,7 +59,7 @@ class ProxyTurnExecutor:
             effective_brief = loop_state.current_brief
         prompt_text = specialist_prompt(
             specialist_id=agent_id,
-            request_text=message,
+            message=message,
             transcript_summary=summarize_conversation(request.messages),
             current_brief=effective_brief,
         )
@@ -90,10 +90,10 @@ class ProxyTurnExecutor:
                 continuation=ContinuationState(
                     mode="delegate",
                     agent_id=agent_id,
-                    request_text=message,
+                    message=message,
                     current_brief=specialist_text.strip() or effective_brief,
                     goal=loop_state.goal if loop_state is not None else None,
-                    decision_history=(
+                    worklog=(
                         loop_state.worklog if loop_state is not None else ()
                     ),
                 ),

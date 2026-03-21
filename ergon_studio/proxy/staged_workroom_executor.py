@@ -259,7 +259,7 @@ class ProxyStagedWorkroomExecutor:
                             agent_id=agent_id,
                             goal=goal,
                             current_brief=agent_text.strip() or stage_entry_brief,
-                            decision_history=(
+                            worklog=(
                                 loop_state.worklog if loop_state is not None else ()
                             ),
                             workroom_outputs=tuple(workroom_outputs),
@@ -435,7 +435,7 @@ class ProxyStagedWorkroomExecutor:
             agent_id=next_group[0],
             goal=goal,
             current_brief=current_brief,
-            decision_history=(
+            worklog=(
                 loop_state.worklog if loop_state is not None else ()
             ),
             workroom_outputs=tuple(workroom_outputs),

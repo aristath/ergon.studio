@@ -51,7 +51,7 @@ def orchestrator_turn_prompt(
 def specialist_prompt(
     *,
     specialist_id: str,
-    request_text: str,
+    message: str,
     transcript_summary: str,
     current_brief: str | None = None,
 ) -> str:
@@ -64,7 +64,7 @@ def specialist_prompt(
         transcript_summary or "(none)",
         "",
         "Assigned request:",
-        request_text or "(none)",
+        message or "(none)",
     ]
     if current_brief:
         lines.extend(
@@ -232,7 +232,7 @@ def summary_instructions() -> str:
 
 def delegation_summary_prompt(
     *,
-    request_text: str,
+    message: str,
     specialist_id: str,
     specialist_text: str,
 ) -> str:
@@ -244,7 +244,7 @@ def delegation_summary_prompt(
             ),
             "",
             "Original request:",
-            request_text or "(none)",
+            message or "(none)",
             "",
             "Specialist output:",
             specialist_text or "(none)",

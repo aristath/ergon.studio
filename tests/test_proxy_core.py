@@ -64,7 +64,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         def _builder(_registry, _agent_id: str, **_kwargs):
-            raise RuntimeError("planner exploded")
+            raise RuntimeError("core exploded")
 
         core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
         request = ProxyTurnRequest(
@@ -77,14 +77,14 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         result = await stream.get_final_response()
 
         self.assertEqual(result.finish_reason, "error")
-        self.assertEqual(result.content, "RuntimeError: planner exploded")
+        self.assertEqual(result.content, "RuntimeError: core exploded")
         self.assertEqual(
             "".join(
                 event.delta
                 for event in events
                 if isinstance(event, ProxyContentDeltaEvent)
             ),
-            "RuntimeError: planner exploded",
+            "RuntimeError: core exploded",
         )
 
     async def test_stream_turn_passes_requested_model_to_agent_builder(self) -> None:

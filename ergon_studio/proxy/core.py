@@ -365,7 +365,7 @@ class ProxyOrchestrationCore:
             async for event in self._turn_executor.execute_delegation(
                 request=request,
                 agent_id=continuation.agent_id,
-                message=continuation.request_text or request.latest_user_text() or "",
+                message=continuation.message or request.latest_user_text() or "",
                 state=state,
                 current_brief=continuation.current_brief,
                 pending=pending,
@@ -411,7 +411,7 @@ class ProxyOrchestrationCore:
         return ProxyDecisionLoopState(
             goal=goal,
             current_brief=current_brief,
-            worklog=continuation.decision_history,
+            worklog=continuation.worklog,
             workroom_progress=workroom_progress,
             current_workroom_request=continuation.workroom_request,
         )
@@ -444,7 +444,7 @@ def _orchestrator_continuation_state(
         ),
         goal=loop_state.goal,
         current_brief=loop_state.current_brief,
-        decision_history=loop_state.worklog,
+        worklog=loop_state.worklog,
     )
 
 

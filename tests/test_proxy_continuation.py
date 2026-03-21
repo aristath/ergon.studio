@@ -41,7 +41,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertFalse(decoded.last_stage_parallel_attempts)
         self.assertEqual(decoded.progress_index, 2)
         self.assertEqual(decoded.member_index, None)
-        self.assertEqual(decoded.request_text, None)
+        self.assertEqual(decoded.message, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
         self.assertEqual(decoded.workroom_outputs, ())
@@ -64,7 +64,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 last_stage_parallel_attempts=True,
                 progress_index=1,
                 member_index=0,
-                request_text="Implement A",
+                message="Implement A",
                 goal="Build calculator",
                 current_brief="Updating main.py",
                 workroom_outputs=("architect: use main.py",),
@@ -74,7 +74,7 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.request_text, "Implement A")
+        self.assertEqual(decoded.message, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
         self.assertEqual(decoded.workroom_specialists, ("coder", "reviewer"))

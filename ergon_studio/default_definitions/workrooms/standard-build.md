@@ -10,7 +10,7 @@ stages:
 ---
 
 ## Purpose
-Common delivery playbook for new features or meaningful code changes.
+Common delivery workroom for new features or meaningful code changes.
 
 ## Use When
 - the goal is concrete enough to build
@@ -19,5 +19,5 @@ Common delivery playbook for new features or meaningful code changes.
 - the work is non-trivial but not chaotic enough to require open-ended staffing
 
 ## Notes
-This is a playbook, not a law. The lead developer may skip stages, revisit them,
+This is a workroom preset, not a law. The lead developer may skip stages, revisit them,
 or use a different tactic entirely.

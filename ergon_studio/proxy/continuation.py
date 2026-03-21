@@ -24,10 +24,10 @@ class ContinuationState:
     last_stage_parallel_attempts: bool = False
     progress_index: int | None = None
     member_index: int | None = None
-    request_text: str | None = None
+    message: str | None = None
     goal: str | None = None
     current_brief: str | None = None
-    decision_history: tuple[str, ...] = ()
+    worklog: tuple[str, ...] = ()
     workroom_outputs: tuple[str, ...] = ()
 
 
@@ -68,14 +68,14 @@ def encode_continuation_tool_call(
         payload["x"] = state.progress_index
     if state.member_index is not None:
         payload["i"] = state.member_index
-    if state.request_text is not None:
-        payload["r"] = state.request_text
+    if state.message is not None:
+        payload["r"] = state.message
     if state.goal is not None:
         payload["g"] = state.goal
     if state.current_brief is not None:
         payload["c"] = state.current_brief
-    if state.decision_history:
-        payload["h"] = list(state.decision_history)
+    if state.worklog:
+        payload["h"] = list(state.worklog)
     if state.workroom_outputs:
         payload["o"] = list(state.workroom_outputs)
     encoded = (
@@ -111,10 +111,10 @@ def decode_continuation_from_tool_call_id(
     last_stage_parallel_attempts = payload.get("lp", False)
     progress_index = payload.get("x")
     member_index = payload.get("i")
-    request_text = payload.get("r")
+    message = payload.get("r")
     goal = payload.get("g")
     current_brief = payload.get("c")
-    decision_history = payload.get("h", [])
+    worklog = payload.get("h", [])
     workroom_outputs = payload.get("o", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
@@ -147,14 +147,14 @@ def decode_continuation_from_tool_call_id(
         return None
     if member_index is not None and not isinstance(member_index, int):
         return None
-    if request_text is not None and not isinstance(request_text, str):
+    if message is not None and not isinstance(message, str):
         return None
     if goal is not None and not isinstance(goal, str):
         return None
     if current_brief is not None and not isinstance(current_brief, str):
         return None
-    if not isinstance(decision_history, list) or not all(
-        isinstance(item, str) for item in decision_history
+    if not isinstance(worklog, list) or not all(
+        isinstance(item, str) for item in worklog
     ):
         return None
     if not isinstance(workroom_outputs, list) or not all(
@@ -173,10 +173,10 @@ def decode_continuation_from_tool_call_id(
         last_stage_parallel_attempts=last_stage_parallel_attempts,
         progress_index=progress_index,
         member_index=member_index,
-        request_text=request_text,
+        message=message,
         goal=goal,
         current_brief=current_brief,
-        decision_history=tuple(decision_history),
+        worklog=tuple(worklog),
         workroom_outputs=tuple(workroom_outputs),
     )
 

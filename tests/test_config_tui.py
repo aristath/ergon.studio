@@ -59,13 +59,13 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
                 tabs = app.query_one(TabbedContent)
                 tabs.active = "agents-tab"
                 await pilot.pause()
-                app.query_one("#agent-new-name", Input).value = "tester"
+                app.query_one("#agent-new-name", Input).value = "security-auditor"
                 app.query(DefinitionEditor).first()._add_definition()
                 await pilot.pause()
 
             self.assertEqual(len(controller.start_calls), 3)
             self.assertEqual(
-                (workspace.agents_dir / "tester.md").exists(),
+                (workspace.agents_dir / "security-auditor.md").exists(),
                 True,
             )
             saved_config = Path(temp_dir) / "config.json"

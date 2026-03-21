@@ -695,9 +695,11 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
             "temperature: 0\n"
             "---\n\n"
             "## Identity\n"
-            f"You are the {definition_id} specialist.\n\n"
+            f"You are the {definition_id} in an AI software firm.\n\n"
             "## Responsibilities\n"
-            "Describe the role here.\n"
+            "Describe what this role owns.\n\n"
+            "## Working Style\n"
+            "Describe how this role should think and collaborate.\n"
         )
     return (
         "---\n"
@@ -705,10 +707,18 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         f"name: {definition_id.replace('-', ' ').title()}\n"
         "orchestration: sequential\n"
         "steps:\n"
-        "  - orchestrator\n"
+        "  - coder\n"
+        "  - reviewer\n"
+        "selection_hints:\n"
+        "  - example_hint\n"
+        "acceptance_mode: delivery\n"
         "---\n\n"
         "## Purpose\n"
-        "Describe when this workflow should be used.\n"
+        "Describe what this playbook is for.\n\n"
+        "## Use When\n"
+        "Describe when the lead developer should reach for it.\n\n"
+        "## Notes\n"
+        "Playbooks are tactics for the orchestrator, not rigid scripts.\n"
     )
 
 

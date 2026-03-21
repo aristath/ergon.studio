@@ -31,16 +31,10 @@ ProxyToolChoice = str | dict[str, Any] | None
 
 
 @dataclass(frozen=True)
-class RuntimeAgent:
-    id: str
-    instructions: str
-    temperature: float | int | None = None
-    max_tokens: int | None = None
-
-
-@dataclass(frozen=True)
 class AgentInvocation:
-    agent: RuntimeAgent
+    agent_id: str
+    temperature: float | int | None
+    max_tokens: int | None
     model: str
     messages: tuple[dict[str, Any], ...]
     tools: tuple[ProxyFunctionTool, ...]
@@ -183,7 +177,7 @@ class ProxyAgentRunner:
         parallel_tool_calls: bool | None,
         pending_continuation: PendingContinuation | None,
     ) -> AgentInvocation:
-        agent = build_runtime_agent(self.registry, agent_id)
+        definition = self.registry.agent_definitions[agent_id]
         resolved_tool_choice = validate_tool_choice(tool_choice, tools=host_tools)
         allowed_tools = tuple(host_tools)
         if resolved_tool_choice == "none":
@@ -202,16 +196,19 @@ class ProxyAgentRunner:
             declared_tools = ()
             resolved_tool_choice = None
             parallel_tool_calls = None
+        instructions = compose_instructions(definition, registry=self.registry)
         messages = tuple(
             build_agent_messages(
                 registry=self.registry,
-                agent=agent,
+                instructions=instructions,
                 prompt=prompt,
                 pending_continuation=pending_continuation,
             )
         )
         return AgentInvocation(
-            agent=agent,
+            agent_id=definition.id,
+            temperature=_metadata_number(definition.metadata.get("temperature")),
+            max_tokens=_metadata_int(definition.metadata.get("max_tokens")),
             model=model_id_override,
             messages=messages,
             tools=declared_tools,
@@ -232,10 +229,10 @@ class ProxyAgentRunner:
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
-            if invocation.agent.temperature is not None:
-                create_kwargs["temperature"] = invocation.agent.temperature
-            if invocation.agent.max_tokens is not None:
-                create_kwargs["max_tokens"] = invocation.agent.max_tokens
+            if invocation.temperature is not None:
+                create_kwargs["temperature"] = invocation.temperature
+            if invocation.max_tokens is not None:
+                create_kwargs["max_tokens"] = invocation.max_tokens
             if invocation.tools:
                 create_kwargs["tools"] = [
                     _tool_to_openai(tool) for tool in invocation.tools
@@ -272,21 +269,6 @@ class ProxyAgentRunner:
                 tool_calls=accumulator.tool_calls(),
             ),
         )
-
-
-def build_runtime_agent(
-    registry: RuntimeRegistry,
-    agent_id: str,
-) -> RuntimeAgent:
-    definition = registry.agent_definitions[agent_id]
-    return RuntimeAgent(
-        id=definition.id,
-        instructions=compose_instructions(definition, registry=registry),
-        temperature=_metadata_number(definition.metadata.get("temperature")),
-        max_tokens=_metadata_int(definition.metadata.get("max_tokens")),
-    )
-
-
 def compose_instructions(
     definition: DefinitionDocument,
     *,
@@ -312,7 +294,7 @@ def compose_instructions(
 def build_agent_messages(
     *,
     registry: RuntimeRegistry,
-    agent: RuntimeAgent,
+    instructions: str,
     prompt: str,
     pending_continuation: PendingContinuation | None,
 ) -> list[dict[str, Any]]:
@@ -321,7 +303,7 @@ def build_agent_messages(
     messages.append(
         {
             "role": instruction_role,
-            "content": agent.instructions,
+            "content": instructions,
         }
     )
 

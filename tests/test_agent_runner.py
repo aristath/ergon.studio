@@ -8,7 +8,6 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import (
     _StreamAccumulator,
     build_agent_messages,
-    build_runtime_agent,
     compose_instructions,
 )
 from ergon_studio.proxy.continuation import (
@@ -22,16 +21,18 @@ from ergon_studio.upstream import UpstreamSettings
 
 
 class AgentRunnerTests(unittest.TestCase):
-    def test_build_runtime_agent_reads_definition_metadata(self) -> None:
+    def test_build_invocation_instruction_parts_come_from_definition_metadata(
+        self,
+    ) -> None:
         registry = _registry()
+        definition = registry.agent_definitions["orchestrator"]
+        instructions = compose_instructions(definition, registry=registry)
 
-        agent = build_runtime_agent(registry, "orchestrator")
-
-        self.assertEqual(agent.id, "orchestrator")
-        self.assertEqual(agent.temperature, 0.7)
-        self.assertEqual(agent.max_tokens, 1200)
-        self.assertIn("## Identity", agent.instructions)
-        self.assertIn("Agent profile: orchestrator", agent.instructions)
+        self.assertEqual(definition.id, "orchestrator")
+        self.assertEqual(definition.metadata["temperature"], 0.7)
+        self.assertEqual(definition.metadata["max_tokens"], 1200)
+        self.assertIn("## Identity", instructions)
+        self.assertIn("Agent profile: orchestrator", instructions)
 
     def test_compose_instructions_includes_orchestrator_profile_context(
         self,
@@ -51,7 +52,10 @@ class AgentRunnerTests(unittest.TestCase):
 
     def test_build_agent_messages_rebuilds_tool_history(self) -> None:
         registry = _registry()
-        agent = build_runtime_agent(registry, "orchestrator")
+        instructions = compose_instructions(
+            registry.agent_definitions["orchestrator"],
+            registry=registry,
+        )
         encoded_tool_call = encode_continuation_tool_call(
             ProxyToolCall(
                 id="call_1",
@@ -78,7 +82,7 @@ class AgentRunnerTests(unittest.TestCase):
 
         messages = build_agent_messages(
             registry=registry,
-            agent=agent,
+            instructions=instructions,
             prompt="Use the result.",
             pending_continuation=pending,
         )
@@ -97,7 +101,10 @@ class AgentRunnerTests(unittest.TestCase):
         self,
     ) -> None:
         registry = _registry()
-        agent = build_runtime_agent(registry, "orchestrator")
+        instructions = compose_instructions(
+            registry.agent_definitions["orchestrator"],
+            registry=registry,
+        )
         encoded_tool_call = encode_continuation_tool_call(
             ProxyToolCall(
                 id="call_1",
@@ -120,7 +127,7 @@ class AgentRunnerTests(unittest.TestCase):
 
         messages = build_agent_messages(
             registry=registry,
-            agent=agent,
+            instructions=instructions,
             prompt="Use the result.",
             pending_continuation=pending,
         )

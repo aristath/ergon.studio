@@ -136,7 +136,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         captured: dict[str, object] = {}
 
         def _capture(invocation: AgentInvocation) -> None:
-            captured["agent_id"] = invocation.agent.id
+            captured["agent_id"] = invocation.agent_id
             captured["model_id_override"] = invocation.model
 
         core = ProxyOrchestrationCore(
@@ -247,7 +247,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         agent_order: list[str] = []
 
         def _capture(invocation: AgentInvocation) -> None:
-            agent_order.append(invocation.agent.id)
+            agent_order.append(invocation.agent_id)
 
         core = ProxyOrchestrationCore(
             _fake_registry(),
@@ -1071,9 +1071,11 @@ def _fake_agent_invoker(
     def _invoke(invocation: AgentInvocation):
         if capture is not None:
             capture(invocation)
-        queue = remaining[invocation.agent.id]
+        queue = remaining[invocation.agent_id]
         if not queue:
-            raise AssertionError(f"no fake responses left for {invocation.agent.id}")
+            raise AssertionError(
+                f"no fake responses left for {invocation.agent_id}"
+            )
         raw = queue.pop(0)
         if isinstance(raw, str):
             payload = {"text": raw, "tool_calls": []}

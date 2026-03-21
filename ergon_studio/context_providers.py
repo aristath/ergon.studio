@@ -36,15 +36,6 @@ class AgentProfileContextProvider(BaseContextProvider):
         del agent, session, state
         role = str(self.definition.metadata.get("role", self.definition.id))
         tools = self.definition.metadata.get("tools", [])
-        flags = []
-        for key in (
-            "can_speak_unprompted",
-            "can_interrupt_on_risk",
-            "can_propose_replan",
-            "can_request_user_input",
-        ):
-            if key in self.definition.metadata:
-                flags.append(f"{key}={self.definition.metadata[key]}")
         tool_summary = (
             ", ".join(str(tool) for tool in tools)
             if isinstance(tools, list) and tools
@@ -55,8 +46,6 @@ class AgentProfileContextProvider(BaseContextProvider):
             f"Role: {role}",
             f"Tools: {tool_summary}",
         ]
-        if flags:
-            lines.append(f"Flags: {', '.join(flags)}")
         if role == "orchestrator" and self.registry is not None:
             agent_summaries = []
             for agent_id, definition in sorted(self.registry.agent_definitions.items()):

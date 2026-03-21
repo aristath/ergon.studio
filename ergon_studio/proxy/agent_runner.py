@@ -41,32 +41,6 @@ class ProxyAgentRunner:
         self.registry = registry
         self._agent_builder = agent_builder
 
-    async def run_text_agent(
-        self,
-        *,
-        agent_id: str,
-        prompt: str,
-        session_id: str,
-        model_id_override: str,
-        preamble: str = "",
-        pending_continuation: PendingContinuation | None = None,
-    ) -> str | None:
-        full_prompt = _merge_preamble(preamble, prompt)
-        response = await self._run_agent(
-            agent_id=agent_id,
-            prompt=full_prompt,
-            session_id=session_id,
-            model_id_override=model_id_override,
-            stream=False,
-            pending_continuation=pending_continuation,
-        )
-        if response is None:
-            return None
-        response_text = getattr(response, "text", response)
-        if not isinstance(response_text, str):
-            return None
-        return response_text.strip() or None
-
     async def stream_text_agent(
         self,
         *,

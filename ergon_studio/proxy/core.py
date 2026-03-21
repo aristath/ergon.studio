@@ -118,7 +118,7 @@ class ProxyOrchestrationCore:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: ProxyTurnResult(
+            finalizer=lambda: ProxyTurnResult(
                 finish_reason=state.finish_reason,
                 content=state.content,
                 reasoning=state.reasoning,
@@ -236,7 +236,7 @@ class ProxyOrchestrationCore:
             state.content = error_text
             return ResponseStream(
                 _single_event_stream(ProxyContentDeltaEvent(error_text)),
-                finalizer=lambda _updates: (),
+                finalizer=lambda: (),
             )
         if continuation is not None:
             assert continuation.workroom_name is not None
@@ -259,7 +259,7 @@ class ProxyOrchestrationCore:
                 state.content = error_text
                 return ResponseStream(
                     _single_event_stream(ProxyContentDeltaEvent(error_text)),
-                    finalizer=lambda _updates: (),
+                    finalizer=lambda: (),
                 )
             workroom_name, participants = resolved
             intro = _workroom_notice(_workroom_intro(workroom_name))
@@ -285,7 +285,7 @@ class ProxyOrchestrationCore:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: workroom_result,
+            finalizer=lambda: workroom_result,
         )
 
 

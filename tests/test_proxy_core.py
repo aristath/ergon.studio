@@ -74,7 +74,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
             return ResponseStream(
                 _events(),
-                finalizer=lambda _updates: AgentRunResult(
+                finalizer=lambda: AgentRunResult(
                     text="Hello world",
                     tool_calls=(),
                 ),
@@ -1099,7 +1099,7 @@ def _fake_agent_invoker(
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: AgentRunResult(
+            finalizer=lambda: AgentRunResult(
                 text=text,
                 tool_calls=tool_calls,
             ),

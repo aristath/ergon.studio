@@ -268,7 +268,7 @@ class _FakeCore:
 
         return ResponseStream(
             _event_iter(),
-            finalizer=lambda _updates: ProxyTurnResult(
+            finalizer=lambda: ProxyTurnResult(
                 finish_reason=finish_reason,
                 content=content,
                 reasoning="",

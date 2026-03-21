@@ -264,7 +264,7 @@ class ProxyAgentRunner:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: AgentRunResult(
+            finalizer=lambda: AgentRunResult(
                 text=accumulator.text,
                 tool_calls=accumulator.tool_calls(),
             ),

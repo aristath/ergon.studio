@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from typing import cast
 
 
@@ -10,13 +10,12 @@ class ResponseStream[UpdateT, FinalT](AsyncIterable[UpdateT]):
         self,
         stream: AsyncIterable[UpdateT] | Awaitable[AsyncIterable[UpdateT]],
         *,
-        finalizer: Callable[[Sequence[UpdateT]], FinalT],
+        finalizer: Callable[[], FinalT],
     ) -> None:
         self._source: AsyncIterable[UpdateT] | Awaitable[AsyncIterable[UpdateT]] = (
             stream
         )
         self._iterator: AsyncIterator[UpdateT] | None = None
-        self._updates: list[UpdateT] = []
         self._finalizer = finalizer
         self._finalized = False
         self._final_result: FinalT | None = None
@@ -30,7 +29,6 @@ class ResponseStream[UpdateT, FinalT](AsyncIterable[UpdateT]):
             update = await iterator.__anext__()
         except StopAsyncIteration:
             raise
-        self._updates.append(update)
         return update
 
     async def get_final_response(self) -> FinalT:
@@ -38,7 +36,7 @@ class ResponseStream[UpdateT, FinalT](AsyncIterable[UpdateT]):
             return cast(FinalT, self._final_result)
         async for _ in self:
             pass
-        self._final_result = self._finalizer(tuple(self._updates))
+        self._final_result = self._finalizer()
         self._finalized = True
         return self._final_result
 

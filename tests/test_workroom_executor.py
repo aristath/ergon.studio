@@ -357,4 +357,4 @@ def _response_stream(
             yield text
 
     final = response or AgentRunResult(text=text, tool_calls=())
-    return ResponseStream(_events(), finalizer=lambda _updates: final)
+    return ResponseStream(_events(), finalizer=lambda: final)

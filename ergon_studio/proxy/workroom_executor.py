@@ -218,7 +218,7 @@ class ProxyWorkroomExecutor:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: tuple(room_lines),
+            finalizer=lambda: tuple(room_lines),
         )
 
     def _should_try_parallel_round(

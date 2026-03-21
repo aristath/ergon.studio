@@ -1123,7 +1123,7 @@ class _FakeCore:
 
         return ResponseStream(
             _event_iter(),
-            finalizer=lambda _updates: ProxyTurnResult(
+            finalizer=lambda: ProxyTurnResult(
                 finish_reason=finish_reason,
                 content=content,
                 reasoning="",
@@ -1155,7 +1155,7 @@ class _FailingCore:
 
         return ResponseStream(
             _event_iter(),
-            finalizer=lambda _updates: ProxyTurnResult(
+            finalizer=lambda: ProxyTurnResult(
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
@@ -1188,7 +1188,7 @@ class _LateFailingCore:
 
         return ResponseStream(
             _event_iter(),
-            finalizer=lambda _updates: ProxyTurnResult(
+            finalizer=lambda: ProxyTurnResult(
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
@@ -1228,7 +1228,7 @@ def _proxy_agent_invoker(mapping: dict[str, list[object]]):
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: AgentRunResult(
+            finalizer=lambda: AgentRunResult(
                 text=text,
                 tool_calls=tool_calls,
             ),

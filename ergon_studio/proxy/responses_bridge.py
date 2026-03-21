@@ -5,6 +5,7 @@ from typing import Any
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
 from ergon_studio.proxy.parse_utils import (
     normalize_message_content,
+    normalize_message_role,
     optional_non_empty_text,
     parse_function_tool,
     parse_function_tool_call,
@@ -104,17 +105,10 @@ def _parse_input_item(payload: Any) -> ProxyInputMessage:
     if not isinstance(role, str) or not role.strip():
         raise ValueError("responses message items must include a non-empty role")
     return ProxyInputMessage(
-        role=_normalize_message_role(role),
+        role=normalize_message_role(role),
         content=normalize_message_content(payload.get("content")),
         name=optional_non_empty_text(payload.get("name")),
     )
-
-
-def _normalize_message_role(role: str) -> str:
-    stripped = role.strip()
-    if stripped.casefold() == "developer":
-        return "system"
-    return stripped
 
 
 def _parse_function_call_output_id(payload: dict[str, Any]) -> str:

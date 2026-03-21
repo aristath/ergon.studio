@@ -9,6 +9,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.parse_utils import (
     normalize_message_content,
+    normalize_message_role,
     optional_non_empty_text,
     parse_function_tool,
     parse_function_tool_call,
@@ -77,7 +78,7 @@ def _parse_message(
     role = payload.get("role")
     if not isinstance(role, str) or not role.strip():
         raise ValueError("message role must be a non-empty string")
-    normalized_role = _normalize_message_role(role)
+    normalized_role = normalize_message_role(role)
 
     tool_calls = payload.get("tool_calls")
     parsed_tool_calls: tuple[ProxyToolCall, ...] = ()
@@ -108,13 +109,6 @@ def _parse_message(
         tool_call_id=tool_call_id,
         tool_calls=parsed_tool_calls,
     )
-
-
-def _normalize_message_role(role: str) -> str:
-    stripped = role.strip()
-    if stripped.casefold() == "developer":
-        return "system"
-    return stripped
 
 
 def _parse_legacy_function_call(payload: Any, *, index: int) -> ProxyToolCall:

@@ -81,6 +81,13 @@ def normalize_message_content(value: Any) -> str:
     raise ValueError("message content must be a string, content-part list, or null")
 
 
+def normalize_message_role(role: str) -> str:
+    stripped = role.strip()
+    if stripped.casefold() == "developer":
+        return "system"
+    return stripped
+
+
 def optional_non_empty_text(value: Any) -> str | None:
     if value is None:
         return None

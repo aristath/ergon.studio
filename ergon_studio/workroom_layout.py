@@ -9,11 +9,11 @@ def workroom_participants_for_definition(
     configured_participants = definition.metadata.get("participants")
     if configured_participants is None:
         raise ValueError(
-            f"workroom template '{definition.id}' must declare `participants`"
+            f"workroom preset '{definition.id}' must declare `participants`"
         )
     if not isinstance(configured_participants, list):
         raise ValueError(
-            f"workroom template '{definition.id}' participants must be a list"
+            f"workroom preset '{definition.id}' participants must be a list"
         )
     return _validate_member_sequence(
         definition.id,
@@ -32,13 +32,13 @@ def _validate_member_sequence(
     for item in values:
         if not isinstance(item, str):
             raise ValueError(
-                "workroom template "
+                "workroom preset "
                 f"'{workroom_id}' {field_name} must be non-empty strings"
             )
         stripped = item.strip()
         if not stripped:
             raise ValueError(
-                "workroom template "
+                "workroom preset "
                 f"'{workroom_id}' {field_name} must be non-empty strings"
             )
         validated.append(stripped)

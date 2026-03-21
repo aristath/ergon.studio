@@ -56,5 +56,5 @@ def _validate_workroom_references(
         if missing_agents:
             joined = ", ".join(missing_agents)
             raise ValueError(
-                f"workroom template '{workroom_id}' references unknown agents: {joined}"
+                f"workroom preset '{workroom_id}' references unknown agents: {joined}"
             )

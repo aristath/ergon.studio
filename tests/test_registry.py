@@ -177,7 +177,7 @@ class RegistryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "workroom template 'standard-build' references unknown agents: coder",
+                "workroom preset 'standard-build' references unknown agents: coder",
             ):
                 load_registry(
                     root_dir,

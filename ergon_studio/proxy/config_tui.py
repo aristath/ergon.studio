@@ -365,9 +365,9 @@ class ProxyConfigApp(App[None]):
                     directory=self.definitions_dir / "agents",
                     apply_mutation=self._apply_definition_mutation,
                 )
-            with TabPane("Workroom Templates", id="workrooms-tab"):
+            with TabPane("Workroom Presets", id="workrooms-tab"):
                 yield DefinitionEditor(
-                    title="Workroom Templates",
+                    title="Workroom Presets",
                     definition_kind="workroom",
                     directory=self.definitions_dir / "workrooms",
                     apply_mutation=self._apply_definition_mutation,
@@ -709,11 +709,11 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         "  - coder\n"
         "---\n\n"
         "## Purpose\n"
-        "Describe what this workroom template is for.\n\n"
+        "Describe what this workroom preset is for.\n\n"
         "## Use When\n"
         "Describe when the lead developer should reach for it.\n\n"
         "## Notes\n"
-        "Workroom templates are tactics for the orchestrator, not rigid scripts.\n"
+        "Workroom presets are tactics for the orchestrator, not rigid scripts.\n"
     )
 
 

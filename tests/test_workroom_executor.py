@@ -6,9 +6,11 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
+    ProxyToolCall,
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.turn_state import ProxyMoveResult, ProxyTurnState
@@ -295,23 +297,16 @@ def _host_tool(name: str):
 
 
 def _fake_response_with_tool_call(agent_id: str, call_index: int):
-    class _FakeContent:
-        def __init__(self) -> None:
-            self.type = "function_call"
-            self.call_id = f"call_{call_index}"
-            self.name = "read_file"
-            self.arguments = '{"path":"main.py"}'
-
-    class _FakeMessage:
-        def __init__(self) -> None:
-            self.contents = [_FakeContent()]
-            self.author_name = agent_id
-
-    class _FakeResponse:
-        def __init__(self) -> None:
-            self.messages = [_FakeMessage()]
-
-    return _FakeResponse()
+    return AgentRunResult(
+        text="",
+        tool_calls=(
+            ProxyToolCall(
+                id=f"call_{call_index}",
+                name="read_file",
+                arguments_json='{"path":"main.py"}',
+            ),
+        ),
+    )
 
 
 def _no_tool_calls(**_kwargs):

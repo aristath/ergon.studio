@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from agent_framework import ResponseStream
-
-from ergon_studio.agent_factory import build_agent
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.agent_runner import ProxyAgentRunner
+from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     PendingContinuation,
@@ -32,7 +29,6 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_internal_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
-from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
     ActiveWorkroom,
     ProxyDecisionLoopState,
@@ -41,6 +37,7 @@ from ergon_studio.proxy.turn_state import (
 )
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -57,12 +54,12 @@ class ProxyOrchestrationCore:
         self,
         registry: RuntimeRegistry,
         *,
-        agent_builder: Any = build_agent,
+        agent_invoker: AgentInvoker | None = None,
     ) -> None:
         self.registry = registry
         self._agent_runner = ProxyAgentRunner(
             registry,
-            agent_builder=agent_builder,
+            invoker=agent_invoker,
         )
         workroom_executor = ProxyWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
@@ -191,11 +188,7 @@ class ProxyOrchestrationCore:
                 buffered_deltas.append(delta)
             pending = None
             response = response_holder.get("response")
-            tool_calls = (
-                extract_tool_calls(response)
-                if response is not None
-                else ()
-            )
+            tool_calls = response.tool_calls if response is not None else ()
             internal_tool_calls = tuple(
                 tool_call
                 for tool_call in tool_calls

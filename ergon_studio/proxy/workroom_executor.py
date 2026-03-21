@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -17,7 +18,6 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
-from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ActiveWorkroom,
@@ -43,7 +43,7 @@ ProxyEvent = (
 class _AgentAttemptResult:
     participant: StaffedParticipant
     text: str
-    response: Any
+    response: AgentRunResult
 
 
 class ProxyWorkroomExecutor:
@@ -105,9 +105,8 @@ class ProxyWorkroomExecutor:
                 workroom_message=workroom_message,
             )
             if any(
-                extract_tool_calls(result.response)
+                result.response.tool_calls
                 for result in parallel_results
-                if result.response is not None
             ):
                 fallback_notice = (
                     "Orchestrator: parallel room round requested tool use; "
@@ -283,7 +282,8 @@ class ProxyWorkroomExecutor:
         return _AgentAttemptResult(
             participant=participant,
             text=text.strip(),
-            response=response_holder.get("response"),
+            response=response_holder.get("response")
+            or AgentRunResult(text=text.strip(), tool_calls=()),
         )
 
 

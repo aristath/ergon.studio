@@ -7,9 +7,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from agent_framework import ResponseStream
-
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     encode_continuation_tool_call,
@@ -25,13 +24,34 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.server import (
     MAX_REQUEST_BODY_BYTES,
+    serve_proxy,
     start_proxy_server_in_thread,
 )
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.response_stream import ResponseStream
 from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyServerTests(unittest.TestCase):
+    def test_serve_proxy_exits_cleanly_on_keyboard_interrupt(self) -> None:
+        closed = False
+
+        class _FakeServer:
+            def serve_forever(self) -> None:
+                raise KeyboardInterrupt
+
+            def server_close(self) -> None:
+                nonlocal closed
+                closed = True
+
+        with patch(
+            "ergon_studio.proxy.server.ProxyHTTPServer",
+            return_value=_FakeServer(),
+        ):
+            serve_proxy(host="127.0.0.1", port=0, core=_FakeCore([]))
+
+        self.assertTrue(closed)
+
     def test_models_endpoint_proxies_upstream_models(self) -> None:
         with patch(
             "ergon_studio.proxy.server.probe_upstream_models",
@@ -580,7 +600,7 @@ class ProxyServerTests(unittest.TestCase):
     def test_chat_completions_resume_full_tool_loop(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
-            agent_builder=_proxy_agent_builder(
+            agent_invoker=_proxy_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -688,7 +708,7 @@ class ProxyServerTests(unittest.TestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
-            agent_builder=_proxy_agent_builder(
+            agent_invoker=_proxy_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -749,7 +769,7 @@ class ProxyServerTests(unittest.TestCase):
     def test_responses_resume_full_tool_loop(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
-            agent_builder=_proxy_agent_builder(
+            agent_invoker=_proxy_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -840,7 +860,7 @@ class ProxyServerTests(unittest.TestCase):
     def test_responses_accepts_function_call_history_on_resume(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
-            agent_builder=_proxy_agent_builder(
+            agent_invoker=_proxy_agent_invoker(
                 {
                     "orchestrator": [
                         "Final answer",
@@ -907,7 +927,7 @@ class ProxyServerTests(unittest.TestCase):
     def test_responses_stream_tool_calls_do_not_emit_empty_output_done(self) -> None:
         core = ProxyOrchestrationCore(
             _proxy_registry(),
-            agent_builder=_proxy_agent_builder(
+            agent_invoker=_proxy_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -1171,46 +1191,43 @@ class _LateFailingCore:
         )
 
 
-class _FakeAgent:
-    def __init__(self, responses) -> None:
-        self._responses = list(responses)
+def _proxy_agent_invoker(mapping: dict[str, list[object]]):
+    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
 
-    def create_session(self, *, session_id: str):
-        return object()
-
-    def run(self, _messages, *, session, stream: bool = False, tools=None, **_kwargs):
-        raw = self._responses.pop(0)
+    def _invoke(invocation: AgentInvocation):
+        queue = remaining[invocation.agent.id]
+        if not queue:
+            raise AssertionError(f"no fake responses left for {invocation.agent.id}")
+        raw = queue.pop(0)
         if isinstance(raw, str):
             payload = {"text": raw, "tool_calls": []}
         else:
             payload = raw
         text = payload.get("text", "")
-        tool_calls = payload.get("tool_calls", [])
-        if not stream:
-            return _immediate_response(text, tool_calls=tool_calls)
+        tool_calls = tuple(
+            ProxyToolCall(
+                id=tool_call["id"],
+                name=tool_call["name"],
+                arguments_json=tool_call["arguments"],
+            )
+            for tool_call in payload.get("tool_calls", [])
+        )
         parts = [piece for piece in text.split(" ") if piece]
 
         async def _events():
             for index, part in enumerate(parts):
                 suffix = " " if index < len(parts) - 1 else ""
-                yield type("Update", (), {"text": part + suffix})()
+                yield part + suffix
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: _response_object(text, tool_calls=tool_calls),
+            finalizer=lambda _updates: AgentRunResult(
+                text=text,
+                tool_calls=tool_calls,
+            ),
         )
 
-
-def _proxy_agent_builder(mapping: dict[str, list[object]]):
-    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
-
-    def _build(_registry, agent_id: str, **_kwargs):
-        queue = remaining[agent_id]
-        if not queue:
-            raise AssertionError(f"no fake responses left for {agent_id}")
-        return _FakeAgent([queue.pop(0)])
-
-    return _build
+    return _invoke
 
 
 def _internal_action(name: str, **payload: object) -> dict[str, object]:
@@ -1265,26 +1282,3 @@ def _proxy_registry() -> RuntimeRegistry:
             )
         },
     )
-
-
-def _response_object(text: str, *, tool_calls: list[dict[str, str]]):
-    contents = [type("Content", (), {"type": "text", "text": text})()] if text else []
-    for tool_call in tool_calls:
-        contents.append(
-            type(
-                "Content",
-                (),
-                {
-                    "type": "function_call",
-                    "call_id": tool_call["id"],
-                    "name": tool_call["name"],
-                    "arguments": tool_call["arguments"],
-                },
-            )()
-        )
-    message = type("Message", (), {"contents": contents})()
-    return type("Response", (), {"text": text, "messages": [message]})()
-
-
-async def _immediate_response(text: str, *, tool_calls: list[dict[str, str]]):
-    return _response_object(text, tool_calls=tool_calls)

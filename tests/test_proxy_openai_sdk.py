@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from agent_framework import ResponseStream
 from openai import OpenAI
 
 from ergon_studio.proxy.models import (
@@ -14,6 +13,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnResult,
 )
 from ergon_studio.proxy.server import start_proxy_server_in_thread
+from ergon_studio.response_stream import ResponseStream
 from ergon_studio.upstream import UpstreamSettings
 
 

@@ -463,7 +463,10 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 def serve_proxy(*, host: str, port: int, core: ProxyOrchestrationCore) -> None:
     server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     try:
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            return
     finally:
         server.server_close()
 

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
-from agent_framework import ResponseStream
-
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     decode_continuation_from_tool_call_id,
@@ -22,6 +22,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.response_stream import ResponseStream
 from ergon_studio.upstream import UpstreamSettings
 
 
@@ -31,7 +32,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": ["Hello world"],
                 }
@@ -63,10 +64,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_converts_unexpected_exceptions_to_error_results(
         self,
     ) -> None:
-        def _builder(_registry, _agent_id: str, **_kwargs):
+        def _invoker(_invocation: AgentInvocation):
             raise RuntimeError("core exploded")
 
-        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Hi"),),
@@ -87,15 +88,20 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             "RuntimeError: core exploded",
         )
 
-    async def test_stream_turn_passes_requested_model_to_agent_builder(self) -> None:
+    async def test_stream_turn_passes_requested_model_to_agent_invoker(self) -> None:
         captured: dict[str, object] = {}
 
-        def _builder(_registry, agent_id: str, **kwargs):
-            captured["agent_id"] = agent_id
-            captured["model_id_override"] = kwargs.get("model_id_override")
-            return _FakeAgent(["Hello world"])
+        def _capture(invocation: AgentInvocation) -> None:
+            captured["agent_id"] = invocation.agent.id
+            captured["model_id_override"] = invocation.model
 
-        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {"orchestrator": ["Hello world"]},
+                capture=_capture,
+            ),
+        )
         request = ProxyTurnRequest(
             model="gpt-oss-20b",
             messages=(ProxyInputMessage(role="user", content="Hi"),),
@@ -113,7 +119,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -149,7 +155,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_handles_workroom_rounds(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -192,7 +198,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_workroom_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -228,7 +234,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -269,7 +275,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_resumes_workroom_from_tool_result(self) -> None:
         first_core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -309,7 +315,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         resumed_core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
@@ -368,7 +374,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": ["Fresh reply"],
                 }
@@ -407,7 +413,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         registry = _multi_participant_workroom_registry()
         first_core = ProxyOrchestrationCore(
             registry,
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -446,7 +452,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         resumed_core = ProxyOrchestrationCore(
             registry,
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": ["Workroom final summary"],
                     "architect": ["Architecture plan"],
@@ -489,7 +495,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -529,7 +535,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
@@ -572,24 +578,19 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
-        remaining = {
-            "orchestrator": [{"text": "", "tool_calls": []}],
-        }
+        
+        def _capture(invocation: AgentInvocation) -> None:
+            captured["tools"] = invocation.tools
+            captured["tool_choice"] = invocation.tool_choice
+            captured["parallel_tool_calls"] = invocation.parallel_tool_calls
 
-        class _CaptureAgent(_FakeAgent):
-            def run(
-                self, _messages, *, session, stream: bool = False, tools=None, **kwargs
-            ):
-                captured["tools"] = tools
-                captured["kwargs"] = kwargs
-                return super().run(
-                    _messages, session=session, stream=stream, tools=tools, **kwargs
-                )
-
-        def _builder(_registry, agent_id: str, **_kwargs):
-            return _CaptureAgent([remaining[agent_id].pop(0)])
-
-        core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {"orchestrator": [{"text": "", "tool_calls": []}]},
+                capture=_capture,
+            ),
+        )
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
@@ -603,40 +604,34 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         await stream.get_final_response()
 
         tools = captured["tools"]
-        kwargs = captured["kwargs"]
+        tool_choice = captured["tool_choice"]
         self.assertEqual(
             [tool.name for tool in tools],
             ["write_file", "message_workroom"],
         )
         self.assertEqual(
-            kwargs["tool_choice"],
-            {"mode": "required", "required_function_name": "write_file"},
+            tool_choice,
+            {"type": "function", "function": {"name": "write_file"}},
         )
-        self.assertFalse(kwargs["allow_multiple_tool_calls"])
+        self.assertFalse(captured["parallel_tool_calls"])
 
     async def test_stream_turn_strips_optional_tools_when_provider_cannot_call_tools(
         self,
     ) -> None:
         captured: dict[str, object] = {}
-        remaining = {
-            "orchestrator": ["Done"],
-        }
-
-        class _CaptureAgent(_FakeAgent):
-            def run(
-                self, _messages, *, session, stream: bool = False, tools=None, **kwargs
-            ):
-                captured["tools"] = tools
-                captured["kwargs"] = kwargs
-                return super().run(
-                    _messages, session=session, stream=stream, tools=tools, **kwargs
-                )
-
-        def _builder(_registry, agent_id: str, **_kwargs):
-            return _CaptureAgent([remaining[agent_id].pop(0)])
+        
+        def _capture(invocation: AgentInvocation) -> None:
+            captured["tools"] = invocation.tools
+            captured["tool_choice"] = invocation.tool_choice
 
         registry = _provider_registry(tool_calling=False)
-        core = ProxyOrchestrationCore(registry, agent_builder=_builder)
+        core = ProxyOrchestrationCore(
+            registry,
+            agent_invoker=_fake_agent_invoker(
+                {"orchestrator": ["Done"]},
+                capture=_capture,
+            ),
+        )
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
@@ -648,8 +643,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         [event async for event in stream]
         await stream.get_final_response()
 
-        self.assertIsNone(captured["tools"])
-        self.assertNotIn("tool_choice", captured["kwargs"])
+        self.assertEqual(captured["tools"], ())
+        self.assertIsNone(captured["tool_choice"])
 
     async def test_stream_turn_errors_when_required_tool_choice_hits_toolless_provider(
         self,
@@ -657,7 +652,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         registry = _provider_registry(tool_calling=False)
         core = ProxyOrchestrationCore(
             registry,
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": ["unused"],
                 }
@@ -685,7 +680,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -724,7 +719,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_builder=_fake_agent_builder(
+            agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         {
@@ -775,22 +770,15 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             name="read_file",
         )
 
-        class _CaptureAgent(_FakeAgent):
-            def run(
-                self, messages, *, session, stream: bool = False, tools=None, **kwargs
-            ):
-                captured["messages"] = messages
-                return super().run(
-                    messages, session=session, stream=stream, tools=tools, **kwargs
-                )
-
-        def _builder(_registry, agent_id: str, **_kwargs):
-            if agent_id != "orchestrator":
-                raise AssertionError(f"unexpected agent: {agent_id}")
-            return _CaptureAgent(["Final answer"])
+        def _capture(invocation: AgentInvocation) -> None:
+            captured["messages"] = invocation.messages
 
         core = ProxyOrchestrationCore(
-            _provider_registry(tool_calling=True), agent_builder=_builder
+            _provider_registry(tool_calling=True),
+            agent_invoker=_fake_agent_invoker(
+                {"orchestrator": ["Final answer"]},
+                capture=_capture,
+            ),
         )
         request = ProxyTurnRequest(
             model="ergon",
@@ -814,10 +802,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         messages = captured["messages"]
         self.assertEqual(
-            [message.role for message in messages], ["user", "assistant", "tool"]
+            [message["role"] for message in messages],
+            ["system", "assistant", "tool", "user"],
         )
-        self.assertEqual(messages[1].contents[0].type, "function_call")
-        self.assertEqual(messages[2].contents[0].type, "function_result")
+        self.assertEqual(messages[1]["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(messages[2]["tool_call_id"], tool_call.id)
 
     async def test_stream_turn_rebuilds_tool_result_without_assistant_call_history(
         self,
@@ -829,22 +818,15 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             name="read_file",
         )
 
-        class _CaptureAgent(_FakeAgent):
-            def run(
-                self, messages, *, session, stream: bool = False, tools=None, **kwargs
-            ):
-                captured["messages"] = messages
-                return super().run(
-                    messages, session=session, stream=stream, tools=tools, **kwargs
-                )
-
-        def _builder(_registry, agent_id: str, **_kwargs):
-            if agent_id != "orchestrator":
-                raise AssertionError(f"unexpected agent: {agent_id}")
-            return _CaptureAgent(["Final answer"])
+        def _capture(invocation: AgentInvocation) -> None:
+            captured["messages"] = invocation.messages
 
         core = ProxyOrchestrationCore(
-            _provider_registry(tool_calling=True), agent_builder=_builder
+            _provider_registry(tool_calling=True),
+            agent_invoker=_fake_agent_invoker(
+                {"orchestrator": ["Final answer"]},
+                capture=_capture,
+            ),
         )
         request = ProxyTurnRequest(
             model="ergon",
@@ -865,13 +847,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         messages = captured["messages"]
         self.assertEqual(
-            [message.role for message in messages], ["user", "assistant", "tool"]
+            [message["role"] for message in messages],
+            ["system", "assistant", "tool", "user"],
         )
-        self.assertEqual(messages[1].contents[0].type, "function_call")
-        self.assertEqual(messages[1].contents[0].call_id, tool_call.id)
-        self.assertEqual(messages[1].contents[0].name, "read_file")
-        self.assertEqual(messages[2].contents[0].type, "function_result")
-        self.assertEqual(messages[2].contents[0].call_id, "call_1")
+        self.assertEqual(messages[1]["tool_calls"][0]["id"], tool_call.id)
+        self.assertEqual(messages[1]["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(messages[2]["tool_call_id"], "call_1")
 
 
 class _FakeRegistry:
@@ -900,6 +881,13 @@ class _FakeRegistry:
                     body="## Identity\nCoder.",
                     sections={"Identity": "Coder."},
                 ),
+                "reviewer": DefinitionDocument(
+                    id="reviewer",
+                    path=Path("reviewer.md"),
+                    metadata={"id": "reviewer", "role": "reviewer"},
+                    body="## Identity\nReviewer.",
+                    sections={"Identity": "Reviewer."},
+                ),
             },
             workroom_definitions={
                 "standard-build": DefinitionDocument(
@@ -919,46 +907,49 @@ class _FakeRegistry:
         return getattr(self.inner, name)
 
 
-class _FakeAgent:
-    def __init__(self, responses) -> None:
-        self._responses = list(responses)
+def _fake_agent_invoker(
+    mapping: dict[str, list[object]],
+    *,
+    capture: Callable[[AgentInvocation], None] | None = None,
+):
+    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
 
-    def create_session(self, *, session_id: str):
-        return object()
-
-    def run(self, _messages, *, session, stream: bool = False, tools=None, **_kwargs):
-        raw = self._responses.pop(0)
+    def _invoke(invocation: AgentInvocation):
+        if capture is not None:
+            capture(invocation)
+        queue = remaining[invocation.agent.id]
+        if not queue:
+            raise AssertionError(f"no fake responses left for {invocation.agent.id}")
+        raw = queue.pop(0)
         if isinstance(raw, str):
             payload = {"text": raw, "tool_calls": []}
         else:
             payload = raw
         text = payload.get("text", "")
-        tool_calls = payload.get("tool_calls", [])
-        if not stream:
-            return _immediate_response(text, tool_calls=tool_calls)
+        tool_calls = tuple(
+            ProxyToolCall(
+                id=tool_call["id"],
+                name=tool_call["name"],
+                arguments_json=tool_call["arguments"],
+            )
+            for tool_call in payload.get("tool_calls", [])
+        )
         parts = [piece for piece in text.split(" ") if piece]
 
         async def _events():
             for index, part in enumerate(parts):
                 suffix = " " if index < len(parts) - 1 else ""
-                yield type("Update", (), {"text": part + suffix})()
+                yield part + suffix
 
         return ResponseStream(
             _events(),
-            finalizer=lambda _updates: _response_object(text, tool_calls=tool_calls),
+            finalizer=lambda _updates: AgentRunResult(
+                text=text,
+                tool_calls=tool_calls,
+            ),
         )
 
-
-def _fake_agent_builder(mapping: dict[str, list[object]]):
-    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
-
-    def _build(_registry, agent_id: str, **_kwargs):
-        queue = remaining[agent_id]
-        if not queue:
-            raise AssertionError(f"no fake responses left for {agent_id}")
-        return _FakeAgent([queue.pop(0)])
-
-    return _build
+    return _invoke
 
 
 def _fake_registry():
@@ -1057,28 +1048,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
         },
     )
 
-
-def _response_object(text: str, *, tool_calls: list[dict[str, str]]):
-    contents = [type("Content", (), {"type": "text", "text": text})()] if text else []
-    for tool_call in tool_calls:
-        contents.append(
-            type(
-                "Content",
-                (),
-                {
-                    "type": "function_call",
-                    "call_id": tool_call["id"],
-                    "name": tool_call["name"],
-                    "arguments": tool_call["arguments"],
-                },
-            )()
-        )
-    message = type("Message", (), {"contents": contents})()
-    return type("Response", (), {"text": text, "messages": [message]})()
-
-
-async def _immediate_response(text: str, *, tool_calls: list[dict[str, str]]):
-    return _response_object(text, tool_calls=tool_calls)
 
 
 def _host_tool(name: str):

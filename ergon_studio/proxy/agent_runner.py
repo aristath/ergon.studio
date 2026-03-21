@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 
-from agent_framework import Content, Message
+from openai import AsyncOpenAI
 
-from ergon_studio.agent_factory import build_agent, provider_supports_tool_calling
+from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     PendingContinuation,
@@ -21,15 +22,44 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.tool_passthrough import (
-    build_declaration_tools,
-    extract_tool_calls,
-)
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.response_stream import ResponseStream
+from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 ProxyToolChoice = str | dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class RuntimeAgent:
+    id: str
+    name: str
+    role: str
+    instructions: str
+    temperature: float | int | None = None
+    max_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class AgentInvocation:
+    agent: RuntimeAgent
+    model: str
+    session_id: str
+    prompt: str
+    messages: tuple[dict[str, Any], ...]
+    tools: tuple[ProxyFunctionTool, ...]
+    tool_choice: str | dict[str, Any] | None
+    parallel_tool_calls: bool | None
+
+
+@dataclass(frozen=True)
+class AgentRunResult:
+    text: str
+    tool_calls: tuple[ProxyToolCall, ...]
+
+
+AgentInvoker = Callable[[AgentInvocation], ResponseStream[str, AgentRunResult]]
 
 
 class ProxyAgentRunner:
@@ -37,10 +67,15 @@ class ProxyAgentRunner:
         self,
         registry: RuntimeRegistry,
         *,
-        agent_builder: Callable[..., Any] = build_agent,
+        invoker: AgentInvoker | None = None,
     ) -> None:
         self.registry = registry
-        self._agent_builder = agent_builder
+        self._invoker = invoker or self._invoke_upstream
+        api_key = registry.upstream.api_key or "not-needed"
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=registry.upstream.base_url,
+        )
 
     async def stream_text_agent(
         self,
@@ -55,54 +90,41 @@ class ProxyAgentRunner:
         tool_choice: ProxyToolChoice = None,
         parallel_tool_calls: bool | None = None,
         pending_continuation: PendingContinuation | None = None,
-        final_response_sink: Callable[[Any], None] | None = None,
+        final_response_sink: Callable[[AgentRunResult], None] | None = None,
     ) -> AsyncIterator[str]:
-        full_prompt = _merge_preamble(preamble, prompt)
-        run_result = self._run_agent(
+        invocation = self._build_invocation(
             agent_id=agent_id,
-            prompt=full_prompt,
+            prompt=_merge_preamble(preamble, prompt),
             session_id=session_id,
             model_id_override=model_id_override,
-            stream=True,
             host_tools=host_tools,
             extra_tools=extra_tools,
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
             pending_continuation=pending_continuation,
         )
-        if hasattr(run_result, "__aiter__") and hasattr(
-            run_result, "get_final_response"
-        ):
-            emitted = False
-            async for update in run_result:
-                delta = getattr(update, "text", "")
-                if not delta:
-                    continue
-                emitted = True
-                yield delta
-            response = await run_result.get_final_response()
-            if final_response_sink is not None:
-                final_response_sink(response)
-            final_text = getattr(response, "text", "")
-            if final_text and not emitted:
-                yield final_text
-            return
-        response = await run_result
+        stream = self._invoker(invocation)
+        emitted = False
+        async for delta in stream:
+            if not delta:
+                continue
+            emitted = True
+            yield delta
+        response = await stream.get_final_response()
         if final_response_sink is not None:
             final_response_sink(response)
-        final_text = getattr(response, "text", "")
-        if final_text:
-            yield final_text
+        if response.text and not emitted:
+            yield response.text
 
     def emit_tool_calls(
         self,
         *,
-        response: Any,
+        response: AgentRunResult,
         request: ProxyTurnRequest,
         continuation: ContinuationState,
     ) -> tuple[tuple[ProxyToolCall, ...], list[ProxyToolCallEvent]]:
         tool_calls = self.validate_host_tool_calls(
-            extract_tool_calls(response),
+            response.tool_calls,
             request=request,
         )
         if not tool_calls:
@@ -119,7 +141,7 @@ class ProxyAgentRunner:
     def emit_tool_call_events(
         self,
         *,
-        response: Any | None = None,
+        response: AgentRunResult | None = None,
         tool_calls: tuple[ProxyToolCall, ...] | None = None,
         request: ProxyTurnRequest,
         continuation: ContinuationState,
@@ -155,56 +177,6 @@ class ProxyAgentRunner:
         for call in encoded_calls:
             state.record_output_item("tool_call", call_id=call.id)
         return events
-
-    def _run_agent(
-        self,
-        *,
-        agent_id: str,
-        prompt: str,
-        session_id: str,
-        model_id_override: str,
-        stream: bool,
-        host_tools: tuple[ProxyFunctionTool, ...] = (),
-        extra_tools: tuple[ProxyFunctionTool, ...] = (),
-        tool_choice: ProxyToolChoice = None,
-        parallel_tool_calls: bool | None = None,
-        pending_continuation: PendingContinuation | None = None,
-    ) -> Any:
-        agent = self._agent_builder(
-            self.registry,
-            agent_id,
-            model_id_override=model_id_override,
-        )
-        allowed_tools, tool_options = resolve_agent_tool_policy(
-            tools=tuple(host_tools),
-            tool_choice=tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-        )
-        declared_tools = tuple(allowed_tools) + tuple(extra_tools)
-        if declared_tools and not provider_supports_tool_calling(self.registry):
-            if tool_options.get("tool_choice") not in (None, "auto", "none"):
-                raise ValueError(
-                    f"provider for agent '{agent_id}' does not support tool calling"
-                )
-            allowed_tools = ()
-            declared_tools = ()
-            tool_options.pop("tool_choice", None)
-            tool_options.pop("allow_multiple_tool_calls", None)
-        run_kwargs = {
-            "session": agent.create_session(session_id=session_id),
-            "stream": stream,
-        }
-        declaration_tools = build_declaration_tools(declared_tools)
-        if declaration_tools:
-            run_kwargs["tools"] = declaration_tools
-        run_kwargs.update(tool_options)
-        return agent.run(
-            _build_agent_messages(
-                prompt=prompt,
-                pending_continuation=pending_continuation,
-            ),
-            **run_kwargs,
-        )
 
     def validate_host_tool_calls(
         self,
@@ -250,6 +222,311 @@ class ProxyAgentRunner:
             )
         return tool_calls
 
+    def _build_invocation(
+        self,
+        *,
+        agent_id: str,
+        prompt: str,
+        session_id: str,
+        model_id_override: str,
+        host_tools: tuple[ProxyFunctionTool, ...],
+        extra_tools: tuple[ProxyFunctionTool, ...],
+        tool_choice: ProxyToolChoice,
+        parallel_tool_calls: bool | None,
+        pending_continuation: PendingContinuation | None,
+    ) -> AgentInvocation:
+        agent = build_runtime_agent(self.registry, agent_id)
+        allowed_tools, tool_options = resolve_agent_tool_policy(
+            tools=tuple(host_tools),
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+        )
+        declared_tools = tuple(allowed_tools) + tuple(extra_tools)
+        if declared_tools and not provider_supports_tool_calling(self.registry):
+            if tool_options.get("tool_choice") not in (None, "auto", "none"):
+                raise ValueError(
+                    f"provider for agent '{agent_id}' does not support tool calling"
+                )
+            declared_tools = ()
+            tool_options = {}
+        translated_tool_choice = _translate_tool_choice(tool_options.get("tool_choice"))
+        translated_parallel = _translate_parallel_tool_calls(tool_options)
+        messages = tuple(
+            build_agent_messages(
+                registry=self.registry,
+                agent=agent,
+                prompt=prompt,
+                pending_continuation=pending_continuation,
+            )
+        )
+        return AgentInvocation(
+            agent=agent,
+            model=model_id_override,
+            session_id=session_id,
+            prompt=prompt,
+            messages=messages,
+            tools=declared_tools,
+            tool_choice=translated_tool_choice,
+            parallel_tool_calls=translated_parallel,
+        )
+
+    def _invoke_upstream(
+        self,
+        invocation: AgentInvocation,
+    ) -> ResponseStream[str, AgentRunResult]:
+        accumulator = _StreamAccumulator()
+
+        async def _events():
+            create_kwargs: dict[str, Any] = {
+                "model": invocation.model,
+                "messages": list(invocation.messages),
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
+            if invocation.agent.temperature is not None:
+                create_kwargs["temperature"] = invocation.agent.temperature
+            if invocation.agent.max_tokens is not None:
+                create_kwargs["max_tokens"] = invocation.agent.max_tokens
+            if invocation.tools:
+                create_kwargs["tools"] = [
+                    _tool_to_openai(tool) for tool in invocation.tools
+                ]
+                if invocation.tool_choice is not None:
+                    create_kwargs["tool_choice"] = invocation.tool_choice
+                if invocation.parallel_tool_calls is not None:
+                    create_kwargs["parallel_tool_calls"] = (
+                        invocation.parallel_tool_calls
+                    )
+
+            async for chunk in await self._client.chat.completions.create(
+                **create_kwargs
+            ):
+                choices = getattr(chunk, "choices", None)
+                if not isinstance(choices, list):
+                    continue
+                for choice in choices:
+                    delta = getattr(choice, "delta", None)
+                    if delta is None:
+                        continue
+                    content = getattr(delta, "content", None)
+                    if isinstance(content, str) and content:
+                        accumulator.text += content
+                        yield content
+                    tool_deltas = getattr(delta, "tool_calls", None)
+                    if isinstance(tool_deltas, list):
+                        accumulator.append_tool_deltas(tool_deltas)
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: AgentRunResult(
+                text=accumulator.text,
+                tool_calls=accumulator.tool_calls(),
+            ),
+        )
+
+
+def build_runtime_agent(
+    registry: RuntimeRegistry,
+    agent_id: str,
+) -> RuntimeAgent:
+    definition = registry.agent_definitions[agent_id]
+    role = str(definition.metadata.get("role", definition.id))
+    return RuntimeAgent(
+        id=definition.id,
+        name=str(definition.metadata.get("name", definition.id)),
+        role=role,
+        instructions=compose_instructions(definition, registry=registry),
+        temperature=_metadata_number(definition.metadata.get("temperature")),
+        max_tokens=_metadata_int(definition.metadata.get("max_tokens")),
+    )
+
+
+def compose_instructions(
+    definition: DefinitionDocument,
+    *,
+    registry: RuntimeRegistry | None = None,
+) -> str:
+    if definition.sections:
+        parts: list[str] = []
+        for title, content in definition.sections.items():
+            parts.append(f"## {title}")
+            if content:
+                parts.append(content)
+        base = "\n\n".join(parts).strip()
+    else:
+        base = definition.body.strip()
+    context = _agent_profile_context(definition, registry=registry)
+    if not context:
+        return base
+    if not base:
+        return context
+    return f"{base}\n\n{context}"
+
+
+def provider_supports_tool_calling(registry: RuntimeRegistry) -> bool:
+    return registry.upstream.tool_calling
+
+
+def build_agent_messages(
+    *,
+    registry: RuntimeRegistry,
+    agent: RuntimeAgent,
+    prompt: str,
+    pending_continuation: PendingContinuation | None,
+) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    instruction_role = registry.upstream.instruction_role or "system"
+    messages.append(
+        {
+            "role": instruction_role,
+            "content": agent.instructions,
+        }
+    )
+
+    assistant_message = _pending_assistant_message(pending_continuation)
+    if assistant_message is not None:
+        messages.append(assistant_message)
+    messages.extend(_pending_tool_messages(pending_continuation))
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def _pending_assistant_message(
+    pending_continuation: PendingContinuation | None,
+) -> dict[str, Any] | None:
+    if pending_continuation is None:
+        return None
+
+    assistant_content = ""
+    assistant_message = pending_continuation.assistant_message
+    if assistant_message is not None and assistant_message.content:
+        assistant_content = assistant_message.content
+
+    tool_calls = [
+        _tool_call_message(tool_call)
+        for tool_call in continuation_tool_calls(pending_continuation)
+    ]
+    if not tool_calls and assistant_message is None:
+        tool_calls = [
+            _tool_call_message(tool_call)
+            for tool_call in _synthetic_tool_calls_from_results(pending_continuation)
+        ]
+    if not assistant_content and not tool_calls:
+        return None
+    payload: dict[str, Any] = {
+        "role": "assistant",
+        "content": assistant_content,
+    }
+    if tool_calls:
+        payload["tool_calls"] = tool_calls
+    return payload
+
+
+def _pending_tool_messages(
+    pending_continuation: PendingContinuation | None,
+) -> list[dict[str, Any]]:
+    if pending_continuation is None:
+        return []
+
+    messages: list[dict[str, Any]] = []
+    for tool_call in continuation_tool_calls(pending_continuation):
+        result_text = continuation_result_map(pending_continuation).get(
+            tool_call.id,
+            "",
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_text,
+            }
+        )
+    if pending_continuation.assistant_message is None:
+        for tool_result in pending_continuation.tool_results:
+            original_call_id = (
+                original_tool_call_id(tool_result.tool_call_id or "")
+                or tool_result.tool_call_id
+                or ""
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": original_call_id,
+                    "content": tool_result.content,
+                }
+            )
+    return messages
+
+
+def _tool_call_message(tool_call: ProxyToolCall) -> dict[str, Any]:
+    return {
+        "id": tool_call.id,
+        "type": "function",
+        "function": {
+            "name": tool_call.name,
+            "arguments": tool_call.arguments_json,
+        },
+    }
+
+
+def _tool_to_openai(tool: ProxyFunctionTool) -> dict[str, Any]:
+    function: dict[str, Any] = {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+    }
+    if tool.strict:
+        function["strict"] = True
+    return {
+        "type": "function",
+        "function": function,
+    }
+
+
+def _translate_tool_choice(
+    tool_choice: object,
+) -> str | dict[str, Any] | None:
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str) and tool_choice in {
+        "auto",
+        "required",
+        "none",
+    }:
+        return tool_choice
+    if not isinstance(tool_choice, dict):
+        return None
+    if tool_choice.get("mode") != "required":
+        return None
+    function_name = tool_choice.get("required_function_name")
+    if not isinstance(function_name, str) or not function_name:
+        return None
+    return {
+        "type": "function",
+        "function": {"name": function_name},
+    }
+
+
+def _translate_parallel_tool_calls(tool_options: dict[str, Any]) -> bool | None:
+    value = tool_options.get("allow_multiple_tool_calls")
+    if type(value) is bool:
+        return value
+    return None
+
+
+def _metadata_number(value: object) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
+def _metadata_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
 
 def _merge_preamble(preamble: str, prompt: str) -> str:
     preamble = preamble.strip()
@@ -257,105 +534,6 @@ def _merge_preamble(preamble: str, prompt: str) -> str:
     if preamble and prompt:
         return f"{preamble}\n\n{prompt}"
     return preamble or prompt
-
-
-def _build_agent_messages(
-    *, prompt: str, pending_continuation: PendingContinuation | None
-) -> list[Message]:
-    messages = [
-        Message(
-            role="user",
-            text=prompt,
-            author_name="proxy",
-        )
-    ]
-    if pending_continuation is None:
-        return messages
-
-    assistant_contents: list[Content | str] = []
-    assistant_message = pending_continuation.assistant_message
-    if assistant_message is not None and assistant_message.content:
-        assistant_contents.append(assistant_message.content)
-    for tool_call in continuation_tool_calls(pending_continuation):
-        assistant_contents.append(
-            Content.from_function_call(
-                call_id=tool_call.id,
-                name=tool_call.name,
-                arguments=tool_call.arguments_json,
-            )
-        )
-    if assistant_contents:
-        messages.append(
-            Message(
-                role="assistant",
-                contents=assistant_contents,
-                author_name=pending_continuation.state.agent_id,
-            )
-        )
-    elif pending_continuation.assistant_message is None:
-        synthetic_tool_calls = _synthetic_tool_calls_from_results(pending_continuation)
-        if synthetic_tool_calls:
-            messages.append(
-                Message(
-                    role="assistant",
-                    contents=[
-                        Content.from_function_call(
-                            call_id=tool_call.id,
-                            name=tool_call.name,
-                            arguments=tool_call.arguments_json,
-                        )
-                        for tool_call in synthetic_tool_calls
-                    ],
-                    author_name=pending_continuation.state.agent_id,
-                )
-            )
-
-    for tool_call in continuation_tool_calls(pending_continuation):
-        result_text = continuation_result_map(pending_continuation).get(
-            tool_call.id,
-            "",
-        )
-        messages.append(
-            Message(
-                role="tool",
-                contents=[
-                    Content.from_function_result(
-                        call_id=tool_call.id,
-                        result=result_text,
-                    )
-                ],
-                author_name=tool_call.name,
-            )
-        )
-    if pending_continuation.assistant_message is None:
-        synthetic_tool_calls_by_id = {
-            tool_call.id: tool_call
-            for tool_call in _synthetic_tool_calls_from_results(pending_continuation)
-        }
-        for tool_result in pending_continuation.tool_results:
-            original_call_id = (
-                original_tool_call_id(tool_result.tool_call_id or "")
-                or tool_result.tool_call_id
-                or ""
-            )
-            synthetic_tool_call = synthetic_tool_calls_by_id.get(
-                tool_result.tool_call_id or ""
-            )
-            messages.append(
-                Message(
-                    role="tool",
-                    contents=[
-                        Content.from_function_result(
-                            call_id=original_call_id,
-                            result=tool_result.content,
-                        )
-                    ],
-                    author_name=synthetic_tool_call.name
-                    if synthetic_tool_call is not None
-                    else "host_tool",
-                )
-            )
-    return messages
 
 
 def _synthetic_tool_calls_from_results(
@@ -367,3 +545,95 @@ def _synthetic_tool_calls_from_results(
         if (tool_call := decode_original_tool_call(tool_result.tool_call_id or ""))
         is not None
     ]
+
+
+def _agent_profile_context(
+    definition: DefinitionDocument,
+    *,
+    registry: RuntimeRegistry | None,
+) -> str:
+    role = str(definition.metadata.get("role", definition.id))
+    tools = definition.metadata.get("tools", [])
+    tool_summary = (
+        ", ".join(str(tool) for tool in tools)
+        if isinstance(tools, list) and tools
+        else "none"
+    )
+    lines = [
+        f"Agent profile: {definition.id}",
+        f"Role: {role}",
+        f"Tools: {tool_summary}",
+    ]
+    if role == "orchestrator" and registry is not None:
+        agent_summaries = []
+        for agent_id, candidate in sorted(registry.agent_definitions.items()):
+            if agent_id == definition.id:
+                continue
+            agent_role = str(candidate.metadata.get("role", agent_id))
+            agent_summaries.append(f"{agent_id}({agent_role})")
+        workroom_summaries = []
+        for workroom_id, candidate in sorted(
+            registry.workroom_definitions.items()
+        ):
+            participants = ", ".join(workroom_participants_for_definition(candidate))
+            workroom_summaries.append(f"{workroom_id}({participants})")
+        lines.append(
+            "Available specialists: "
+            + (", ".join(agent_summaries) if agent_summaries else "none")
+        )
+        lines.append(
+            "Available workroom presets: "
+            + (", ".join(workroom_summaries) if workroom_summaries else "none")
+        )
+    return "\n".join(lines)
+
+
+@dataclass
+class _ToolAccumulator:
+    index: int
+    call_id: str = ""
+    name: str = ""
+    arguments: str = ""
+
+
+@dataclass
+class _StreamAccumulator:
+    text: str = ""
+    _tool_calls: dict[int, _ToolAccumulator] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        self._tool_calls = {}
+
+    def append_tool_deltas(self, tool_deltas: list[Any]) -> None:
+        for tool_delta in tool_deltas:
+            index = getattr(tool_delta, "index", None)
+            if not isinstance(index, int):
+                continue
+            accumulator = self._tool_calls.setdefault(index, _ToolAccumulator(index))
+            tool_id = getattr(tool_delta, "id", None)
+            if isinstance(tool_id, str) and tool_id:
+                accumulator.call_id = tool_id
+            function = getattr(tool_delta, "function", None)
+            if function is None:
+                continue
+            name = getattr(function, "name", None)
+            if isinstance(name, str) and name:
+                accumulator.name = name
+            arguments = getattr(function, "arguments", None)
+            if isinstance(arguments, str) and arguments:
+                accumulator.arguments += arguments
+
+    def tool_calls(self) -> tuple[ProxyToolCall, ...]:
+        tool_calls: list[ProxyToolCall] = []
+        for index in sorted(self._tool_calls):
+            accumulator = self._tool_calls[index]
+            if not accumulator.call_id or not accumulator.name:
+                continue
+            tool_calls.append(
+                ProxyToolCall(
+                    id=accumulator.call_id,
+                    name=accumulator.name,
+                    arguments_json=accumulator.arguments,
+                )
+            )
+        return tuple(tool_calls)

@@ -391,7 +391,7 @@ class ProxyConfigApp(App[None]):
                 "Proxy port must be between 1 and 65535"
             )
             return
-        self.config = ProxyAppConfig(
+        candidate = ProxyAppConfig(
             upstream_base_url=self.query_one("#endpoint-url", Input).value.strip(),
             upstream_api_key=self.query_one("#endpoint-key", Input).value,
             host=host,
@@ -399,9 +399,23 @@ class ProxyConfigApp(App[None]):
             instruction_role=self.config.instruction_role,
             disable_tool_calling=self.config.disable_tool_calling,
         )
+        try:
+            status = self.server_controller.start(
+                config=candidate,
+                definitions_dir=self.definitions_dir,
+            )
+        except Exception as exc:
+            self.query_one("#endpoint-message", Static).update(
+                f"Could not apply endpoint settings: {exc}"
+            )
+            self._show_server_status(reason="Endpoint settings unchanged")
+            return
+        self.config = candidate
         save_app_config(self.config_path, self.config)
         self.query_one("#endpoint-message", Static).update("Saved endpoint settings")
-        self._restart_server("Endpoint settings saved")
+        self.query_one("#server-status", Static).update(
+            _status_text(status.message, status.url, "Endpoint settings saved")
+        )
 
     def _apply_definition_mutation(self, mutation: DefinitionMutation) -> str:
         self._validate_definition_mutation(mutation)
@@ -419,14 +433,18 @@ class ProxyConfigApp(App[None]):
                 config=self.config,
                 definitions_dir=self.definitions_dir,
             )
-            self.query_one("#server-status", Static).update(
-                _status_text(status.message, status.url, reason)
-            )
         except Exception as exc:
-            self.server_controller.stop()
-            self.query_one("#server-status", Static).update(
-                f"Server error: {exc} | {reason}"
-            )
+            self._show_server_status(reason=f"{reason} | Server error: {exc}")
+            return
+        self.query_one("#server-status", Static).update(
+            _status_text(status.message, status.url, reason)
+        )
+
+    def _show_server_status(self, *, reason: str) -> None:
+        status = self.server_controller.status
+        self.query_one("#server-status", Static).update(
+            _status_text(status.message, status.url, reason)
+        )
 
     def _validate_definition_mutation(self, mutation: DefinitionMutation) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

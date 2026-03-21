@@ -97,6 +97,47 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(controller.start_calls), 1)
 
+    async def test_tui_does_not_persist_endpoint_changes_when_restart_fails(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            controller = _FakeController(fail_on_start=1)
+            app = ProxyConfigApp(
+                app_dir=workspace.app_dir,
+                definitions_dir=workspace.definitions_dir,
+                initial_config=ProxyAppConfig(
+                    upstream_base_url="http://localhost:8080/v1"
+                ),
+                server_controller=controller,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.query_one("#endpoint-url", Input).value = (
+                    "http://localhost:9999/v1"
+                )
+                app.query_one("#proxy-port", Input).value = "4310"
+                app._save_endpoint()
+                await pilot.pause()
+
+                self.assertEqual(app.config.upstream_base_url, "http://localhost:8080/v1")
+                self.assertEqual(app.config.port, 4000)
+                self.assertIn(
+                    "Could not apply endpoint settings",
+                    str(app.query_one("#endpoint-message", Static).render()),
+                )
+                self.assertIn(
+                    "server running at http://127.0.0.1:4000/v1",
+                    str(app.query_one("#server-status", Static).render()),
+                )
+
+            saved_config = Path(temp_dir) / "config.json"
+            if saved_config.exists():
+                saved_text = saved_config.read_text(encoding="utf-8")
+                self.assertNotIn("localhost:9999", saved_text)
+            self.assertEqual(len(controller.start_calls), 2)
+
     async def test_navigation_does_not_discard_unsaved_definition_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
@@ -176,8 +217,18 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _FakeController:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_on_start: int | None = None) -> None:
         self.start_calls: list[tuple[ProxyAppConfig, Path]] = []
+        self.fail_on_start = fail_on_start
+        self._status = ProxyServerStatus(
+            running=False,
+            message="server stopped",
+            url=None,
+        )
+
+    @property
+    def status(self) -> ProxyServerStatus:
+        return self._status
 
     def start(
         self,
@@ -186,11 +237,22 @@ class _FakeController:
         definitions_dir: Path,
     ) -> ProxyServerStatus:
         self.start_calls.append((config, definitions_dir))
-        return ProxyServerStatus(
+        if (
+            self.fail_on_start is not None
+            and len(self.start_calls) > self.fail_on_start
+        ):
+            raise OSError("address already in use")
+        self._status = ProxyServerStatus(
             running=True,
             message="server running",
             url="http://127.0.0.1:4000/v1",
         )
+        return self._status
 
     def stop(self) -> None:
+        self._status = ProxyServerStatus(
+            running=False,
+            message="server stopped",
+            url=None,
+        )
         return None

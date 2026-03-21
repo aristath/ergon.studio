@@ -4,6 +4,7 @@ import json
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,16 @@ class UpstreamSettings:
     api_key: str | None = None
     instruction_role: str | None = None
     tool_calling: bool = True
+
+
+def validate_upstream_base_url(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("missing upstream base URL")
+    parsed = urlparse(stripped)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("upstream base URL must be a valid http(s) URL")
+    return stripped
 
 
 def probe_upstream_models(

@@ -5,22 +5,17 @@ from dataclasses import dataclass, field
 from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 
 
-@dataclass(frozen=True)
-class ProxyMoveResult:
-    worklog_lines: tuple[str, ...]
-
-
 @dataclass
 class ProxyDecisionLoopState:
     worklog: tuple[str, ...] = field(default_factory=tuple)
 
-    def absorb_result(
+    def extend_worklog(
         self,
         *,
-        result: ProxyMoveResult,
+        worklog_lines: tuple[str, ...],
     ) -> None:
-        if result.worklog_lines:
-            self.worklog = (*self.worklog, *result.worklog_lines)
+        if worklog_lines:
+            self.worklog = (*self.worklog, *worklog_lines)
 
 
 @dataclass

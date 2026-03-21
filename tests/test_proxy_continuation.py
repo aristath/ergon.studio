@@ -23,7 +23,6 @@ class ProxyContinuationTests(unittest.TestCase):
                 arguments_json='{"path":"main.py"}',
             ),
             state=ContinuationState(
-                mode="workroom",
                 agent_id="architect",
                 workroom_name="standard-build",
             ),
@@ -32,7 +31,6 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.mode, "workroom")
         self.assertEqual(decoded.agent_id, "architect")
         self.assertEqual(decoded.workroom_name, "standard-build")
         self.assertEqual(decoded.workroom_participants, ())
@@ -47,7 +45,6 @@ class ProxyContinuationTests(unittest.TestCase):
                 arguments_json='{"path":"main.py"}',
             ),
             state=ContinuationState(
-                mode="workroom",
                 agent_id="coder",
                 workroom_name="standard-build",
                 workroom_participants=("coder", "coder", "coder", "reviewer"),
@@ -72,14 +69,14 @@ class ProxyContinuationTests(unittest.TestCase):
         first_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
             state=ContinuationState(
-                mode="workroom",
                 agent_id="coder",
+                workroom_name="ad hoc",
                 workroom_participants=("coder",),
             ),
         )
         second_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
-            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
+            state=ContinuationState(agent_id="orchestrator"),
         )
         messages = (
             ProxyInputMessage(role="user", content="Build it"),
@@ -100,15 +97,15 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = latest_continuation(messages)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.mode, "orchestrator")
         self.assertEqual(decoded.agent_id, "orchestrator")
+        self.assertIsNone(decoded.workroom_name)
 
     def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
             state=ContinuationState(
-                mode="workroom",
                 agent_id="coder",
+                workroom_name="ad hoc",
                 workroom_participants=("coder",),
             ),
         )
@@ -131,8 +128,8 @@ class ProxyContinuationTests(unittest.TestCase):
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
             state=ContinuationState(
-                mode="workroom",
                 agent_id="coder",
+                workroom_name="ad hoc",
                 workroom_participants=("coder",),
             ),
         )
@@ -148,14 +145,14 @@ class ProxyContinuationTests(unittest.TestCase):
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.state.mode, "workroom")
+        self.assertEqual(pending.state.workroom_name, "ad hoc")
         self.assertEqual(pending.assistant_message.tool_calls[0].id, tool_call.id)
         self.assertEqual(pending.tool_results[0].content, "file contents")
 
     def test_original_tool_call_id_extracts_wrapped_id(self) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_123", name="read_file", arguments_json="{}"),
-            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
+            state=ContinuationState(agent_id="orchestrator"),
         )
 
         self.assertEqual(original_tool_call_id(tool_call.id), "call_123")
@@ -167,7 +164,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
+            state=ContinuationState(agent_id="orchestrator"),
         )
 
         original = decode_original_tool_call(tool_call.id)

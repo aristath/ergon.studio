@@ -24,12 +24,11 @@ from ergon_studio.proxy.orchestrator_tools import (
     MessageWorkroomAction,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
-    parse_internal_action,
+    parse_message_workroom_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
-    ProxyMoveResult,
     ProxyTurnState,
 )
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
@@ -80,7 +79,7 @@ class ProxyOrchestrationCore:
                 pending = latest_pending_continuation(request.messages)
                 loop_state = self._initial_loop_state(pending=pending)
                 if pending is not None:
-                    if pending.state.mode == "workroom":
+                    if pending.state.workroom_name is not None:
                         result_holder: dict[str, object] = {}
                         async for event in self._resume_subtask(
                             request=request,
@@ -93,8 +92,8 @@ class ProxyOrchestrationCore:
                         if state.finish_reason == "tool_calls":
                             return
                         if result_holder:
-                            loop_state.absorb_result(
-                                result=_result(result_holder, loop_state)
+                            loop_state.extend_worklog(
+                                worklog_lines=_result(result_holder)
                             )
                         async for event in self._run_orchestrator_loop(
                             request=request,
@@ -202,7 +201,7 @@ class ProxyOrchestrationCore:
                     yield tool_event
                 return
             if internal_tool_calls:
-                action = parse_internal_action(
+                action = parse_message_workroom_action(
                     internal_tool_calls[0],
                     registry=self.registry,
                 )
@@ -218,8 +217,7 @@ class ProxyOrchestrationCore:
                 if state.finish_reason == "tool_calls":
                     return
                 if result_holder:
-                    result = _result(result_holder, loop_state)
-                    loop_state.absorb_result(result=result)
+                    loop_state.extend_worklog(worklog_lines=_result(result_holder))
                 else:
                     return
                 continue
@@ -271,7 +269,7 @@ class ProxyOrchestrationCore:
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
-        if continuation.mode == "workroom":
+        if continuation.workroom_name is not None:
             state.mode = "workroom"
             async for event in self._message_workroom(
                 request=request,
@@ -283,7 +281,7 @@ class ProxyOrchestrationCore:
             ):
                 yield event
             return
-        raise ValueError(f"unsupported continuation mode: {continuation.mode}")
+        raise ValueError("unsupported continuation state")
 
     async def _message_workroom(
         self,
@@ -351,7 +349,6 @@ def _orchestrator_continuation_state(
     loop_state: ProxyDecisionLoopState,
 ) -> ContinuationState:
     return ContinuationState(
-        mode="orchestrator",
         agent_id="orchestrator",
         worklog=loop_state.worklog,
     )
@@ -364,21 +361,18 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
     return isinstance(tool_choice, dict)
 
 
-def _result(
-    holder: dict[str, object],
-    _loop_state: ProxyDecisionLoopState,
-) -> ProxyMoveResult:
+def _result(holder: dict[str, object]) -> tuple[str, ...]:
     value = holder.get("result")
-    if isinstance(value, ProxyMoveResult):
+    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
         return value
-    return ProxyMoveResult(worklog_lines=())
+    return ()
 
 
 def _store_response(holder: dict[str, Any], value: object) -> None:
     holder["response"] = value
 
 
-def _store_result(holder: dict[str, object], result: ProxyMoveResult) -> None:
+def _store_result(holder: dict[str, object], result: tuple[str, ...]) -> None:
     holder["result"] = result
 
 

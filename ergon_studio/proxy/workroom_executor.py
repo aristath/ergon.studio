@@ -20,14 +20,11 @@ from ergon_studio.proxy.orchestrator_tools import (
     ReplyLeadDevAction,
     build_workroom_internal_tools,
     is_internal_tool_name,
-    parse_internal_action,
+    parse_reply_lead_dev_action,
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.transcript import summarize_conversation
-from ergon_studio.proxy.turn_state import (
-    ProxyMoveResult,
-    ProxyTurnState,
-)
+from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_staffing import (
     StaffedParticipant,
     expand_staffed_participants,
@@ -71,7 +68,7 @@ class ProxyWorkroomExecutor:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[ProxyMoveResult], None],
+        result_sink: Callable[[tuple[str, ...]], None],
         worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
         workroom_key = _workroom_key(workroom_name)
@@ -127,11 +124,7 @@ class ProxyWorkroomExecutor:
                     state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                     room_lines.append(reasoning_delta)
-                result_sink(
-                    ProxyMoveResult(
-                        worklog_lines=tuple(room_lines),
-                    )
-                )
+                result_sink(tuple(room_lines))
                 return
 
         for member_index in range(start_index, len(staffed_members)):
@@ -209,7 +202,6 @@ class ProxyWorkroomExecutor:
                         tool_calls=host_tool_calls,
                         request=request,
                         continuation=ContinuationState(
-                            mode="workroom",
                             workroom_name=workroom_name,
                             workroom_participants=round_participants,
                             workroom_message=workroom_message,
@@ -224,10 +216,7 @@ class ProxyWorkroomExecutor:
                             yield event
                         return
                 if internal_tool_calls:
-                    action = parse_internal_action(
-                        internal_tool_calls[0],
-                        registry=None,
-                    )
+                    action = parse_reply_lead_dev_action(internal_tool_calls[0])
                     if isinstance(action, ReplyLeadDevAction):
                         reasoning_delta = (
                             f"{participant.label}: {action.message.strip()}"
@@ -250,11 +239,7 @@ class ProxyWorkroomExecutor:
                     participant_move_count += 1
                     continue
                 break
-        result_sink(
-            ProxyMoveResult(
-                worklog_lines=tuple(room_lines),
-            )
-        )
+        result_sink(tuple(room_lines))
 
     def _should_try_parallel_round(
         self,

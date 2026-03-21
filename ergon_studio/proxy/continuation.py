@@ -13,7 +13,6 @@ _TOKEN_VERSION = 1
 
 @dataclass(frozen=True)
 class ContinuationState:
-    mode: str
     agent_id: str
     workroom_name: str | None = None
     workroom_participants: tuple[str, ...] = ()
@@ -34,7 +33,6 @@ def encode_continuation_tool_call(
 ) -> ProxyToolCall:
     payload = {
         "v": _TOKEN_VERSION,
-        "m": state.mode,
         "a": state.agent_id,
         "tn": tool_call.name,
         "ta": tool_call.arguments_json,
@@ -71,14 +69,13 @@ def decode_continuation_from_tool_call_id(
         return None
     if payload.get("v") != _TOKEN_VERSION:
         return None
-    mode = payload.get("m")
     agent_id = payload.get("a")
     workroom_name = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
     participant_label = payload.get("pl")
     worklog = payload.get("h", [])
-    if not isinstance(mode, str) or not isinstance(agent_id, str):
+    if not isinstance(agent_id, str):
         return None
     if workroom_name is not None and not isinstance(workroom_name, str):
         return None
@@ -95,7 +92,6 @@ def decode_continuation_from_tool_call_id(
     ):
         return None
     return ContinuationState(
-        mode=mode,
         agent_id=agent_id,
         workroom_name=workroom_name,
         workroom_participants=tuple(workroom_participants),

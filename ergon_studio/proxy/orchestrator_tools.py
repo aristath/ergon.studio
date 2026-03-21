@@ -21,9 +21,6 @@ class ReplyLeadDevAction:
     message: str
 
 
-InternalAction = MessageWorkroomAction | ReplyLeadDevAction
-
-
 def build_orchestrator_internal_tools(
     registry: RuntimeRegistry,
 ) -> tuple[ProxyFunctionTool, ...]:
@@ -82,38 +79,47 @@ def build_workroom_internal_tools() -> tuple[ProxyFunctionTool, ...]:
     )
 
 
-def parse_internal_action(
+def parse_message_workroom_action(
     tool_call: ProxyToolCall,
     *,
-    registry: RuntimeRegistry | None,
-) -> InternalAction:
+    registry: RuntimeRegistry,
+) -> MessageWorkroomAction:
+    if tool_call.name != "message_workroom":
+        raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
+    payload = _parse_tool_payload(tool_call)
+    return MessageWorkroomAction(
+        preset=_optional_preset(payload.get("preset"), registry),
+        participants=_normalize_staffing_list(
+            payload.get("participants"),
+            registry=registry,
+        ),
+        message=_required_text(payload.get("message"), field="message"),
+    )
+
+
+def parse_reply_lead_dev_action(
+    tool_call: ProxyToolCall,
+) -> ReplyLeadDevAction:
+    if tool_call.name != "reply_lead_dev":
+        raise ValueError(f"unsupported workroom tool: {tool_call.name}")
+    payload = _parse_tool_payload(tool_call)
+    return ReplyLeadDevAction(
+        message=_required_text(payload.get("message"), field="message"),
+    )
+
+
+def is_internal_tool_name(name: str) -> bool:
+    return name in INTERNAL_TOOL_NAMES
+
+
+def _parse_tool_payload(tool_call: ProxyToolCall) -> dict[str, object]:
     try:
         payload = json.loads(tool_call.arguments_json or "{}")
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid arguments for {tool_call.name}: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{tool_call.name} arguments must be an object")
-
-    if tool_call.name == "message_workroom":
-        if registry is None:
-            raise ValueError("message_workroom requires a registry context")
-        return MessageWorkroomAction(
-            preset=_optional_preset(payload.get("preset"), registry),
-            participants=_normalize_staffing_list(
-                payload.get("participants"),
-                registry=registry,
-            ),
-            message=_required_text(payload.get("message"), field="message"),
-        )
-    if tool_call.name == "reply_lead_dev":
-        return ReplyLeadDevAction(
-            message=_required_text(payload.get("message"), field="message"),
-        )
-    raise ValueError(f"unsupported internal tool: {tool_call.name}")
-
-
-def is_internal_tool_name(name: str) -> bool:
-    return name in INTERNAL_TOOL_NAMES
+    return payload
 
 
 def _required_text(value: object, *, field: str) -> str:

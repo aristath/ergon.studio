@@ -12,7 +12,7 @@ from ergon_studio.proxy.models import (
     ProxyToolCall,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.turn_state import ProxyMoveResult, ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 
 
@@ -33,7 +33,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Discuss it"),),
         )
         state = ProxyTurnState()
-        captured: list[ProxyMoveResult] = []
+        captured: list[tuple[str, ...]] = []
 
         events = [
             event
@@ -48,7 +48,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(streamed_agents, ["architect", "reviewer"])
         self.assertEqual(
-            captured[0].worklog_lines,
+            captured[0],
             ("architect: Idea", "reviewer: Refine"),
         )
         reasoning = "".join(
@@ -80,7 +80,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Debate it"),),
         )
         state = ProxyTurnState()
-        captured: list[ProxyMoveResult] = []
+        captured: list[tuple[str, ...]] = []
 
         events = [
             event
@@ -98,7 +98,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("instance 1 of 2 staffed reviewers", streamed_prompts[1])
         self.assertIn("Current staffed instance: reviewer[2]", streamed_prompts[2])
         self.assertEqual(
-            captured[0].worklog_lines,
+            captured[0],
             (
                 "architect: Idea",
                 "reviewer[1]: Challenge",
@@ -130,7 +130,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
         )
         state = ProxyTurnState()
-        captured: list[ProxyMoveResult] = []
+        captured: list[tuple[str, ...]] = []
 
         started_at = time.perf_counter()
         [
@@ -147,7 +147,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLess(elapsed, 0.12)
         self.assertEqual(
-            captured[0].worklog_lines,
+            captured[0],
             ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
         )
 
@@ -177,7 +177,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"),),
         )
         state = ProxyTurnState()
-        captured: list[ProxyMoveResult] = []
+        captured: list[tuple[str, ...]] = []
 
         events = [
             event
@@ -198,7 +198,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rerunning this staffed group sequentially", reasoning)
         self.assertEqual(call_count, 6)
         self.assertEqual(
-            captured[0].worklog_lines,
+            captured[0],
             ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
         )
 
@@ -240,7 +240,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"), _host_tool("write_file")),
         )
         state = ProxyTurnState()
-        captured: list[ProxyMoveResult] = []
+        captured: list[tuple[str, ...]] = []
 
         events = [
             event
@@ -255,7 +255,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count, 2)
         self.assertEqual(
-            captured[0].worklog_lines,
+            captured[0],
             (
                 "coder: Checked README.md and found the current intro.",
                 "coder: Updated the README intro and added setup notes.",
@@ -311,7 +311,6 @@ def _continuation_state():
     from ergon_studio.proxy.continuation import ContinuationState
 
     return ContinuationState(
-        mode="workroom",
         workroom_name="debate",
         workroom_participants=("reviewer",),
         agent_id="reviewer",

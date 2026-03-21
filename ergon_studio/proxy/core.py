@@ -369,7 +369,6 @@ class ProxyOrchestrationCore:
             current_brief=current_brief,
             worklog=continuation.worklog,
             workroom_progress=workroom_progress,
-            current_workroom_request=continuation.workroom_request,
         )
 
 
@@ -391,7 +390,7 @@ def _orchestrator_continuation_state(
         workroom_request=(
             workroom_progress.workroom_request
             if workroom_progress is not None
-            else loop_state.current_workroom_request
+            else None
         ),
         goal=loop_state.goal,
         current_brief=loop_state.current_brief,

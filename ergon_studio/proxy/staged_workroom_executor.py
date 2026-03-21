@@ -63,11 +63,9 @@ class ProxyStagedWorkroomExecutor:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[ProxyMoveResult], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        if result_sink is None:
-            raise ValueError("staged workroom execution requires a result sink")
         staffed_participants = (
             continuation.workroom_participants
             if continuation is not None
@@ -107,11 +105,7 @@ class ProxyStagedWorkroomExecutor:
             if continuation is not None and continuation.workroom_request is not None
             else workroom_request
             if workroom_request is not None
-            else (
-                loop_state.current_workroom_request
-                if loop_state is not None
-                else None
-            )
+            else None
         )
         workroom_outputs: list[str] = (
             list(continuation.workroom_outputs) if continuation is not None else []

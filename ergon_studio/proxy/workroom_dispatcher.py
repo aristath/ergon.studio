@@ -57,7 +57,7 @@ class ProxyWorkroomDispatcher:
         workroom_request: str | None = None,
         goal: str,
         state: ProxyTurnState,
-        result_sink: Callable[[ProxyMoveResult], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         definition = self._resolve_workroom_definition(
@@ -94,7 +94,7 @@ class ProxyWorkroomDispatcher:
         continuation: ContinuationState,
         pending: PendingContinuation | None,
         state: ProxyTurnState,
-        result_sink: Callable[[ProxyMoveResult], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         definition = self._resolve_workroom_definition(
@@ -143,7 +143,7 @@ class ProxyWorkroomDispatcher:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[ProxyMoveResult], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         shape = workroom_shape_for_definition(definition)

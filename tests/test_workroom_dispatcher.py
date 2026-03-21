@@ -36,6 +36,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 workroom_id="missing",
                 goal="Build it",
                 state=state,
+                result_sink=lambda _result: None,
             )
         ]
 
@@ -71,6 +72,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 workroom_id="standard-build",
                 goal="Build it",
                 state=state,
+                result_sink=lambda _result: None,
             )
         ]
 
@@ -114,6 +116,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 participants=("architect", "coder", "critic"),
                 goal="Brainstorm it",
                 state=state,
+                result_sink=lambda _result: None,
             )
         ]
 
@@ -165,6 +168,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 participants=("coder", "coder", "coder"),
                 goal="Try three implementations",
                 state=state,
+                result_sink=lambda _result: None,
             )
         ]
 

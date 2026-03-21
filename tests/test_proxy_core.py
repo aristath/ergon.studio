@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from collections.abc import Callable
@@ -61,6 +62,50 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             any(isinstance(event, ProxyReasoningDeltaEvent) for event in events)
         )
 
+    async def test_stream_turn_emits_direct_reply_deltas_before_turn_finishes(
+        self,
+    ) -> None:
+        gate = asyncio.Event()
+
+        def _invoker(_invocation: AgentInvocation):
+            async def _events():
+                yield "Hello"
+                await gate.wait()
+                yield " world"
+
+            return ResponseStream(
+                _events(),
+                finalizer=lambda _updates: AgentRunResult(
+                    text="Hello world",
+                    tool_calls=(),
+                ),
+            )
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Hi"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        first_event = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+        self.assertIsInstance(first_event, ProxyContentDeltaEvent)
+        self.assertEqual(first_event.delta, "Hello")
+
+        gate.set()
+        events = [first_event, *[event async for event in stream]]
+        result = await stream.get_final_response()
+
+        self.assertEqual(
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
+            ),
+            "Hello world",
+        )
+        self.assertEqual(result.content, "Hello world")
+
     async def test_stream_turn_converts_unexpected_exceptions_to_error_results(
         self,
     ) -> None:
@@ -113,6 +158,51 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
+
+    async def test_stream_turn_errors_when_orchestrator_mixes_text_and_workroom_action(
+        self,
+    ) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {
+                            "text": "Starting now",
+                            "tool_calls": [
+                                {
+                                    "id": "internal_message_workroom",
+                                    "name": "message_workroom",
+                                    "arguments": json.dumps(
+                                        {
+                                            "participants": ["coder"],
+                                            "message": "Implement it",
+                                        }
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Implement it"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        content = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyContentDeltaEvent)
+        )
+        self.assertIn("Starting now", content)
+        self.assertEqual(result.finish_reason, "error")
+        self.assertIn("message a workroom in the same move", result.content)
 
     async def test_stream_turn_opens_single_person_workroom_and_then_replies(
         self,

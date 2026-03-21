@@ -27,6 +27,10 @@ def orchestrator_turn_prompt(
             "Do not send a product-manager-facing answer while you are still "
             "gathering internal help."
         ),
+        (
+            "If you are going to message a workroom or use a tool in this move, "
+            "emit only the tool call and no assistant text."
+        ),
         "",
         "Conversation summary:",
         summarize_conversation(request.messages, limit=12) or "(none)",

@@ -153,7 +153,7 @@ class ProxyOrchestrationCore:
         pending = pending_orchestrator
         for _ in range(self._MAX_INTERNAL_MOVES):
             response_holder: dict[str, Any] = {}
-            buffered_deltas: list[str] = []
+            emitted_content = False
             internal_tools = build_orchestrator_internal_tools(self.registry)
             async for delta in self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
@@ -185,7 +185,10 @@ class ProxyOrchestrationCore:
                 pending_continuation=pending,
                 final_response_sink=partial(_store_response, response_holder),
             ):
-                buffered_deltas.append(delta)
+                emitted_content = True
+                state.mode = "orchestrator"
+                state.append_content(delta)
+                yield ProxyContentDeltaEvent(delta)
             pending = None
             response = response_holder.get("response")
             tool_calls = response.tool_calls if response is not None else ()
@@ -208,6 +211,11 @@ class ProxyOrchestrationCore:
                     "orchestrator must use at most one internal action at a time"
                 )
             if host_tool_calls:
+                if emitted_content:
+                    raise ValueError(
+                        "orchestrator cannot stream a product-manager reply and "
+                        "request host tools in the same move"
+                    )
                 state.mode = "orchestrator"
                 for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
@@ -218,6 +226,11 @@ class ProxyOrchestrationCore:
                     yield tool_event
                 return
             if internal_tool_calls:
+                if emitted_content:
+                    raise ValueError(
+                        "orchestrator cannot stream a product-manager reply and "
+                        "message a workroom in the same move"
+                    )
                 action = parse_internal_action(
                     internal_tool_calls[0],
                     registry=self.registry,
@@ -243,13 +256,6 @@ class ProxyOrchestrationCore:
             if _requires_host_tool_result(request):
                 raise ValueError("model ignored required host tool choice")
             state.mode = "orchestrator"
-            if not buffered_deltas and response is not None:
-                final_text = getattr(response, "text", "")
-                if final_text:
-                    buffered_deltas.append(final_text)
-            for delta in buffered_deltas:
-                state.append_content(delta)
-                yield ProxyContentDeltaEvent(delta)
             return
 
         raise ValueError("orchestrator exceeded internal move limit")

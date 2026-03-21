@@ -36,6 +36,7 @@ from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
+from ergon_studio.proxy.turn_router import ProxyTurnRouter
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
@@ -81,6 +82,12 @@ class ProxyOrchestrationCore:
             registry,
             run_text_agent=self._agent_runner.run_text_agent,
         )
+        self._turn_router = ProxyTurnRouter(
+            execute_direct=self._execute_direct,
+            execute_delegation=self._execute_delegation,
+            execute_workflow=self._execute_workflow,
+            execute_workflow_continuation=self._execute_workflow_continuation,
+        )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
@@ -119,20 +126,18 @@ class ProxyOrchestrationCore:
                 pending = latest_pending_continuation(request.messages)
                 if pending is not None:
                     state.mode = pending.state.mode
-                    async for event in self._execute_continuation(
+                    async for event in self._turn_router.execute_continuation(
                         request=request,
                         pending=pending,
-                        created_at=created_at,
                         state=state,
                     ):
                         yield event
                 else:
                     plan = await self._turn_planner.plan_turn(request)
                     state.mode = plan.mode
-                    async for event in self._execute_plan(
+                    async for event in self._turn_router.execute_plan(
                         request=request,
                         plan=plan,
-                        created_at=created_at,
                         state=state,
                     ):
                         yield event
@@ -158,80 +163,13 @@ class ProxyOrchestrationCore:
             ),
         )
 
-    async def _execute_plan(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        plan: ProxyTurnPlan,
-        created_at: int,
-        state: ProxyTurnState,
-    ) -> AsyncIterator[ProxyEvent]:
-        if plan.mode == "delegate" and plan.agent_id is not None:
-            async for event in self._execute_delegation(
-                request=request, plan=plan, created_at=created_at, state=state
-            ):
-                yield event
-            return
-        if plan.mode == "workflow" and plan.workflow_id is not None:
-            async for event in self._execute_workflow(
-                request=request, plan=plan, created_at=created_at, state=state
-            ):
-                yield event
-            return
-        async for event in self._execute_direct(
-            request=request, created_at=created_at, state=state
-        ):
-            yield event
-
-    async def _execute_continuation(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        pending: PendingContinuation,
-        created_at: int,
-        state: ProxyTurnState,
-    ) -> AsyncIterator[ProxyEvent]:
-        continuation = pending.state
-        if continuation.mode == "workflow" and continuation.workflow_id is not None:
-            async for event in self._execute_workflow_continuation(
-                request=request,
-                continuation=continuation,
-                pending=pending,
-                created_at=created_at,
-                state=state,
-            ):
-                yield event
-            return
-        if continuation.mode == "delegate":
-            plan = ProxyTurnPlan(
-                mode="delegate",
-                agent_id=continuation.agent_id,
-                request=continuation.request_text or request.latest_user_text(),
-            )
-            async for event in self._execute_delegation(
-                request=request,
-                plan=plan,
-                created_at=created_at,
-                state=state,
-                current_brief=continuation.current_brief,
-                pending=pending,
-            ):
-                yield event
-            return
-        async for event in self._execute_direct(
-            request=request, created_at=created_at, state=state, pending=pending
-        ):
-            yield event
-
     async def _execute_direct(
         self,
         *,
         request: ProxyTurnRequest,
-        created_at: int,
         state: ProxyTurnState,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        del created_at
         async for event in self._turn_executor.execute_direct(
             request=request,
             state=state,
@@ -244,12 +182,10 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
-        created_at: int,
         state: ProxyTurnState,
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        del created_at
         async for event in self._turn_executor.execute_delegation(
             request=request,
             plan=plan,
@@ -264,10 +200,8 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
-        created_at: int,
         state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
-        del created_at
         async for event in self._workflow_dispatcher.execute_workflow(
             request=request,
             workflow_id=plan.workflow_id,
@@ -282,10 +216,8 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         continuation: ContinuationState,
         pending: PendingContinuation,
-        created_at: int,
         state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
-        del created_at
         async for event in self._workflow_dispatcher.execute_workflow_continuation(
             request=request,
             continuation=continuation,

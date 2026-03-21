@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -21,9 +24,18 @@ from textual.widgets import (
 )
 
 from ergon_studio.app_config import ProxyAppConfig, save_app_config
+from ergon_studio.registry import load_registry
 from ergon_studio.server_control import ProxyServerController
+from ergon_studio.upstream import UpstreamSettings
 
 _VALID_DEFINITION_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+@dataclass(frozen=True)
+class DefinitionMutation:
+    action: str
+    path: Path
+    content: str | None = None
 
 
 class DefinitionListItem(ListItem):
@@ -39,14 +51,16 @@ class DefinitionEditor(Static):
         title: str,
         definition_kind: str,
         directory: Path,
-        on_changed: Callable[[str], None],
+        apply_mutation: Callable[[DefinitionMutation], str],
     ) -> None:
         super().__init__()
         self.title = title
         self.definition_kind = definition_kind
         self.directory = directory
-        self._on_changed = on_changed
+        self._apply_mutation = apply_mutation
         self._selected_path: Path | None = None
+        self._loaded_text = ""
+        self._suspend_list_events = False
 
     def compose(self) -> ComposeResult:
         kind = self.definition_kind
@@ -58,6 +72,7 @@ class DefinitionEditor(Static):
                 Horizontal(
                     Button("Add", id=f"{kind}-add"),
                     Button("Delete", id=f"{kind}-delete"),
+                    Button("Revert", id=f"{kind}-revert"),
                     Button("Save", id=f"{kind}-save"),
                 ),
                 Static("", id=f"{kind}-message"),
@@ -74,14 +89,18 @@ class DefinitionEditor(Static):
         self.refresh_list(select_first=True)
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if self._suspend_list_events:
+            return
         item = event.item
         if isinstance(item, DefinitionListItem):
-            self._load_path(item.path)
+            self._handle_list_navigation(item.path)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if self._suspend_list_events:
+            return
         item = event.item
         if isinstance(item, DefinitionListItem):
-            self._load_path(item.path)
+            self._handle_list_navigation(item.path)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
@@ -90,6 +109,9 @@ class DefinitionEditor(Static):
             return
         if button_id == f"{self.definition_kind}-delete":
             self._delete_definition()
+            return
+        if button_id == f"{self.definition_kind}-revert":
+            self._revert_definition()
             return
         if button_id == f"{self.definition_kind}-save":
             self._save_definition()
@@ -107,6 +129,7 @@ class DefinitionEditor(Static):
             list_view.append(DefinitionListItem(path))
         if not paths:
             self._selected_path = None
+            self._loaded_text = ""
             self.query_one(f"#{self.definition_kind}-editor", TextArea).load_text("")
             return
         target_name = selected_filename
@@ -126,10 +149,24 @@ class DefinitionEditor(Static):
     def _load_path(self, path: Path) -> None:
         self._selected_path = path
         editor = self.query_one(f"#{self.definition_kind}-editor", TextArea)
-        editor.load_text(path.read_text(encoding="utf-8"))
+        loaded_text = path.read_text(encoding="utf-8")
+        editor.load_text(loaded_text)
+        self._loaded_text = loaded_text
         self._set_message(f"Loaded {path.name}")
 
+    def _handle_list_navigation(self, path: Path) -> None:
+        if path == self._selected_path:
+            return
+        if self._has_unsaved_changes():
+            self._set_message("Unsaved changes. Save or Revert before switching.")
+            self._restore_current_selection()
+            return
+        self._load_path(path)
+
     def _add_definition(self) -> None:
+        if self._has_unsaved_changes():
+            self._set_message("Unsaved changes. Save or Revert before creating.")
+            return
         new_name_input = self.query_one(f"#{self.definition_kind}-new-name", Input)
         raw_name = new_name_input.value.strip()
         if not raw_name:
@@ -144,28 +181,41 @@ class DefinitionEditor(Static):
         if path.exists():
             self._set_message(f"{path.name} already exists")
             return
-        path.write_text(
-            _new_definition_template(self.definition_kind, raw_name),
-            encoding="utf-8",
-        )
+        try:
+            message = self._apply_mutation(
+                DefinitionMutation(
+                    action="create",
+                    path=path,
+                    content=_new_definition_template(self.definition_kind, raw_name),
+                )
+            )
+        except ValueError as exc:
+            self._set_message(str(exc))
+            return
         new_name_input.value = ""
         self.refresh_list(selected_filename=path.name)
-        self._set_message(f"Created {path.name}")
-        self._on_changed(f"Created {path.name}")
+        self._set_message(message)
 
     def _delete_definition(self) -> None:
         path = self._selected_path
         if path is None:
             self._set_message(f"No {self.definition_kind} selected")
             return
+        if self._has_unsaved_changes():
+            self._set_message("Unsaved changes. Save or Revert before deleting.")
+            return
         if self.definition_kind == "agent" and path.stem == "orchestrator":
             self._set_message("The orchestrator definition is required")
             return
-        deleted_name = path.name
-        path.unlink()
+        try:
+            message = self._apply_mutation(
+                DefinitionMutation(action="delete", path=path)
+            )
+        except ValueError as exc:
+            self._set_message(str(exc))
+            return
         self.refresh_list(select_first=True)
-        self._set_message(f"Deleted {deleted_name}")
-        self._on_changed(f"Deleted {deleted_name}")
+        self._set_message(message)
 
     def _save_definition(self) -> None:
         path = self._selected_path
@@ -173,12 +223,47 @@ class DefinitionEditor(Static):
             self._set_message(f"No {self.definition_kind} selected")
             return
         editor = self.query_one(f"#{self.definition_kind}-editor", TextArea)
-        path.write_text(editor.text, encoding="utf-8")
-        self._set_message(f"Saved {path.name}")
-        self._on_changed(f"Saved {path.name}")
+        try:
+            message = self._apply_mutation(
+                DefinitionMutation(action="save", path=path, content=editor.text)
+            )
+        except ValueError as exc:
+            self._set_message(str(exc))
+            return
+        self._loaded_text = editor.text
+        self._set_message(message)
+
+    def _revert_definition(self) -> None:
+        path = self._selected_path
+        if path is None:
+            self._set_message(f"No {self.definition_kind} selected")
+            return
+        self._load_path(path)
+        self._set_message(f"Reverted {path.name}")
 
     def _set_message(self, message: str) -> None:
         self.query_one(f"#{self.definition_kind}-message", Static).update(message)
+
+    def _has_unsaved_changes(self) -> bool:
+        path = self._selected_path
+        if path is None:
+            return False
+        editor = self.query_one(f"#{self.definition_kind}-editor", TextArea)
+        return editor.text != self._loaded_text
+
+    def _restore_current_selection(self) -> None:
+        path = self._selected_path
+        if path is None:
+            return
+        paths = sorted(self.directory.glob("*.md"))
+        for index, candidate in enumerate(paths):
+            if candidate != path:
+                continue
+            list_view = self.query_one(f"#{self.definition_kind}-list", ListView)
+            self._suspend_list_events = True
+            list_view.index = index
+            self._suspend_list_events = False
+            return
 
 
 class ProxyConfigApp(App[None]):
@@ -248,14 +333,14 @@ class ProxyConfigApp(App[None]):
                     title="Agent Roles",
                     definition_kind="agent",
                     directory=self.definitions_dir / "agents",
-                    on_changed=self._handle_definition_change,
+                    apply_mutation=self._apply_definition_mutation,
                 )
             with TabPane("Workflows", id="workflows-tab"):
                 yield DefinitionEditor(
                     title="Workflows",
                     definition_kind="workflow",
                     directory=self.definitions_dir / "workflows",
-                    on_changed=self._handle_definition_change,
+                    apply_mutation=self._apply_definition_mutation,
                 )
         yield Footer()
 
@@ -295,8 +380,15 @@ class ProxyConfigApp(App[None]):
         self.query_one("#endpoint-message", Static).update("Saved endpoint settings")
         self._restart_server("Endpoint settings saved")
 
-    def _handle_definition_change(self, message: str) -> None:
+    def _apply_definition_mutation(self, mutation: DefinitionMutation) -> str:
+        self._validate_definition_mutation(mutation)
+        if mutation.action == "delete":
+            mutation.path.unlink()
+        else:
+            mutation.path.write_text(mutation.content or "", encoding="utf-8")
+        message = _mutation_message(mutation)
         self._restart_server(message)
+        return message
 
     def _restart_server(self, reason: str) -> None:
         try:
@@ -312,6 +404,33 @@ class ProxyConfigApp(App[None]):
             self.query_one("#server-status", Static).update(
                 f"Server error: {exc} | {reason}"
             )
+
+    def _validate_definition_mutation(self, mutation: DefinitionMutation) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_definitions_dir = Path(temp_dir) / "definitions"
+            shutil.copytree(self.definitions_dir, temp_definitions_dir)
+            candidate_path = temp_definitions_dir / mutation.path.relative_to(
+                self.definitions_dir
+            )
+            if mutation.action == "delete":
+                candidate_path.unlink()
+            else:
+                candidate_path.write_text(mutation.content or "", encoding="utf-8")
+            try:
+                load_registry(
+                    temp_definitions_dir,
+                    upstream=UpstreamSettings(
+                        base_url=self.config.upstream_base_url or "http://unused",
+                        api_key=self.config.upstream_api_key.strip() or None,
+                        instruction_role=self.config.instruction_role.strip() or None,
+                        tool_calling=not self.config.disable_tool_calling,
+                    ),
+                )
+            except ValueError as exc:
+                rendered = str(exc).replace(
+                    str(temp_definitions_dir), str(self.definitions_dir)
+                )
+                raise ValueError(rendered) from exc
 
 
 def run_config_tui(
@@ -359,3 +478,12 @@ def _status_text(message: str, url: str | None, reason: str) -> str:
     if url:
         return f"{message} at {url} | {reason}"
     return f"{message} | {reason}"
+
+
+def _mutation_message(mutation: DefinitionMutation) -> str:
+    action_map = {
+        "create": "Created",
+        "save": "Saved",
+        "delete": "Deleted",
+    }
+    return f"{action_map[mutation.action]} {mutation.path.name}"

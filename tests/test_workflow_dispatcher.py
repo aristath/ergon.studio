@@ -11,14 +11,14 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
-from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
+from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
 
 class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workflow_reports_unknown_workflow(self) -> None:
-        dispatcher = ProxyWorkflowDispatcher(
+        dispatcher = ProxyWorkroomDispatcher(
             _registry(),
             execute_grouped_workflow=_empty_handler,
             execute_group_chat_workflow=_empty_handler,
@@ -55,7 +55,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
             calls.append((kwargs["definition"].id, kwargs["goal"]))
             yield ProxyContentDeltaEvent("done")
 
-        dispatcher = ProxyWorkflowDispatcher(
+        dispatcher = ProxyWorkroomDispatcher(
             _registry(),
             execute_grouped_workflow=_grouped_handler,
             execute_group_chat_workflow=_empty_handler,
@@ -99,7 +99,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
             )
             yield ProxyContentDeltaEvent("done")
 
-        dispatcher = ProxyWorkflowDispatcher(
+        dispatcher = ProxyWorkroomDispatcher(
             _registry(),
             execute_grouped_workflow=_empty_handler,
             execute_group_chat_workflow=_group_chat_handler,
@@ -147,7 +147,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
             )
             yield ProxyContentDeltaEvent("done")
 
-        dispatcher = ProxyWorkflowDispatcher(
+        dispatcher = ProxyWorkroomDispatcher(
             _registry(),
             execute_grouped_workflow=_grouped_handler,
             execute_group_chat_workflow=_empty_handler,

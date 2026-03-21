@@ -31,7 +31,7 @@ ProxyEvent = (
 )
 
 
-class ProxyWorkflowSupport:
+class ProxyWorkroomSupport:
     def __init__(
         self,
         *,

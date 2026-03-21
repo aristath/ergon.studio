@@ -36,7 +36,7 @@ WorkflowHandler = Callable[
 ]
 
 
-class ProxyWorkflowDispatcher:
+class ProxyWorkroomDispatcher:
     def __init__(
         self,
         registry: RuntimeRegistry,

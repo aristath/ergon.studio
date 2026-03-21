@@ -41,9 +41,9 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
-from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
+from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
 from ergon_studio.proxy.workroom_request_executor import ProxyWorkroomRequestExecutor
+from ergon_studio.proxy.workroom_support import ProxyWorkroomSupport
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -69,7 +69,7 @@ class ProxyOrchestrationCore:
             agent_builder=agent_builder,
         )
         tool_call_emitter = ProxyToolCallEmitter(agent_runner)
-        workflow_support = ProxyWorkflowSupport(
+        workroom_support = ProxyWorkroomSupport(
             run_text_agent=agent_runner.run_text_agent,
         )
         turn_executor = ProxyTurnExecutor(
@@ -84,26 +84,26 @@ class ProxyOrchestrationCore:
         grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=workflow_support.emit_summary,
+            emit_workflow_summary=workroom_support.emit_summary,
         )
         group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=workflow_support.emit_summary,
+            emit_workflow_summary=workroom_support.emit_summary,
         )
         magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=workflow_support.emit_summary,
-            select_manager_agent=workflow_support.select_manager_agent,
+            emit_workflow_summary=workroom_support.emit_summary,
+            select_manager_agent=workroom_support.select_manager_agent,
         )
         handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
-            emit_workflow_summary=workflow_support.emit_summary,
-            select_handoff_target=workflow_support.select_handoff_target,
+            emit_workflow_summary=workroom_support.emit_summary,
+            select_handoff_target=workroom_support.select_handoff_target,
         )
-        workroom_dispatcher = ProxyWorkflowDispatcher(
+        workroom_dispatcher = ProxyWorkroomDispatcher(
             registry,
             execute_grouped_workflow=grouped_workflow_executor.execute,
             execute_group_chat_workflow=group_chat_workflow_executor.execute,

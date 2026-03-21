@@ -12,7 +12,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
-from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
+from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
 from ergon_studio.proxy.workroom_request_executor import (
     ProxyWorkroomRequestExecutor,
 )
@@ -31,7 +31,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -74,7 +74,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -112,7 +112,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -153,7 +153,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -204,7 +204,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -257,7 +257,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -309,7 +309,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
@@ -351,7 +351,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_active_workroom_errors_without_progress(self) -> None:
         executor = ProxyWorkroomRequestExecutor(
             cast(
-                ProxyWorkflowDispatcher,
+                ProxyWorkroomDispatcher,
                 _FakeWorkflowDispatcher(
                     execute_workroom=_unexpected_workroom,
                     execute_workroom_continuation=_unexpected_workroom,

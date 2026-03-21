@@ -10,7 +10,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
-from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
+from ergon_studio.proxy.workroom_support import ProxyWorkroomSupport
 
 
 class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
@@ -23,7 +23,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
             captured.update(kwargs)
             return "Final workflow answer"
 
-        support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
+        support = ProxyWorkroomSupport(run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Build it"),),
@@ -52,7 +52,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
         async def _run_text_agent(**_kwargs):
             return '{"agent_id":"coder"}'
 
-        support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
+        support = ProxyWorkroomSupport(run_text_agent=_run_text_agent)
 
         selected = await support.select_manager_agent(
             workroom_id="dynamic-open-ended",
@@ -72,7 +72,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
         async def _run_text_agent(**_kwargs):
             raise AssertionError("should not be called")
 
-        support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
+        support = ProxyWorkroomSupport(run_text_agent=_run_text_agent)
 
         selected = await support.select_handoff_target(
             workroom_id="specialist-handoff",

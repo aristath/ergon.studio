@@ -17,7 +17,7 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
+from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -28,8 +28,8 @@ ProxyEvent = (
 
 
 class ProxyWorkroomRequestExecutor:
-    def __init__(self, workflow_dispatcher: ProxyWorkflowDispatcher) -> None:
-        self._workflow_dispatcher = workflow_dispatcher
+    def __init__(self, workroom_dispatcher: ProxyWorkroomDispatcher) -> None:
+        self._workroom_dispatcher = workroom_dispatcher
 
     async def execute_active_workroom(
         self,
@@ -55,7 +55,7 @@ class ProxyWorkroomRequestExecutor:
             workroom_progress,
             plan=plan,
         )
-        async for event in self._workflow_dispatcher.execute_workroom_continuation(
+        async for event in self._workroom_dispatcher.execute_workroom_continuation(
             request=request,
             continuation=active_continuation,
             pending=None,
@@ -74,7 +74,7 @@ class ProxyWorkroomRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workroom(
+        async for event in self._workroom_dispatcher.execute_workroom(
             request=request,
             workroom_id=plan.workroom_id,
             specialists=plan.specialists,
@@ -101,7 +101,7 @@ class ProxyWorkroomRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workroom_continuation(
+        async for event in self._workroom_dispatcher.execute_workroom_continuation(
             request=request,
             continuation=continuation,
             pending=pending,

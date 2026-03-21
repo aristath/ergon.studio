@@ -36,22 +36,19 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Discuss it"),),
         )
         state = ProxyTurnState()
-        captured: list[tuple[str, ...]] = []
+        stream = executor.execute(
+            request=request,
+            workroom_name="debate",
+            participants=("architect", "reviewer"),
+            state=state,
+        )
 
-        events = [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="debate",
-                participants=("architect", "reviewer"),
-                state=state,
-                result_sink=captured.append,
-            )
-        ]
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
 
         self.assertEqual(streamed_agents, ["architect", "reviewer"])
         self.assertEqual(
-            captured[0],
+            result,
             ("architect: Idea", "reviewer: Refine"),
         )
         reasoning = "".join(
@@ -85,25 +82,22 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Debate it"),),
         )
         state = ProxyTurnState()
-        captured: list[tuple[str, ...]] = []
+        stream = executor.execute(
+            request=request,
+            workroom_name="debate",
+            participants=("architect", "reviewer", "reviewer"),
+            state=state,
+        )
 
-        events = [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="debate",
-                participants=("architect", "reviewer", "reviewer"),
-                state=state,
-                result_sink=captured.append,
-            )
-        ]
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
 
         self.assertEqual(streamed_agents, ["architect", "reviewer", "reviewer"])
         self.assertIn("Current staffed instance: reviewer[1]", streamed_prompts[1])
         self.assertIn("instance 1 of 2 staffed reviewers", streamed_prompts[1])
         self.assertIn("Current staffed instance: reviewer[2]", streamed_prompts[2])
         self.assertEqual(
-            captured[0],
+            result,
             (
                 "architect: Idea",
                 "reviewer[1]: Challenge",
@@ -134,24 +128,21 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
         )
         state = ProxyTurnState()
-        captured: list[tuple[str, ...]] = []
+        stream = executor.execute(
+            request=request,
+            workroom_name="best-of-n",
+            participants=("coder", "coder", "coder"),
+            state=state,
+        )
 
         started_at = time.perf_counter()
-        [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="best-of-n",
-                participants=("coder", "coder", "coder"),
-                state=state,
-                result_sink=captured.append,
-            )
-        ]
+        [event async for event in stream]
         elapsed = time.perf_counter() - started_at
+        result = await stream.get_final_response()
 
         self.assertLess(elapsed, 0.12)
         self.assertEqual(
-            captured[0],
+            result,
             ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
         )
 
@@ -182,18 +173,15 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"),),
         )
         state = ProxyTurnState()
-        captured: list[tuple[str, ...]] = []
+        stream = executor.execute(
+            request=request,
+            workroom_name="best-of-n",
+            participants=("coder", "coder", "coder"),
+            state=state,
+        )
 
-        events = [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="best-of-n",
-                participants=("coder", "coder", "coder"),
-                state=state,
-                result_sink=captured.append,
-            )
-        ]
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
 
         reasoning = "".join(
             event.delta
@@ -203,7 +191,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rerunning this staffed group sequentially", reasoning)
         self.assertEqual(call_count, 6)
         self.assertEqual(
-            captured[0],
+            result,
             ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
         )
 
@@ -245,22 +233,19 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"), _host_tool("write_file")),
         )
         state = ProxyTurnState()
-        captured: list[tuple[str, ...]] = []
+        stream = executor.execute(
+            request=request,
+            workroom_name="ad hoc",
+            participants=("coder",),
+            state=state,
+        )
 
-        events = [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="ad hoc",
-                participants=("coder",),
-                state=state,
-                result_sink=captured.append,
-            )
-        ]
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
 
         self.assertEqual(call_count, 2)
         self.assertEqual(
-            captured[0],
+            result,
             (
                 "coder: Checked README.md and found the current intro.",
                 "coder: Updated the README intro and added setup notes.",
@@ -291,19 +276,16 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Pick the best one"),),
         )
         state = ProxyTurnState()
+        stream = executor.execute(
+            request=request,
+            workroom_name="debate",
+            workroom_message="Choose one clear direction.",
+            participants=("reviewer",),
+            state=state,
+            continuation=_continuation_state(),
+        )
 
-        [
-            event
-            async for event in executor.execute(
-                request=request,
-                workroom_name="debate",
-                workroom_message="Choose one clear direction.",
-                participants=("reviewer",),
-                state=state,
-                result_sink=lambda _result: None,
-                continuation=_continuation_state(),
-            )
-        ]
+        [event async for event in stream]
 
         reviewer_prompt = streamed_prompts[0]
         self.assertIn("Latest lead-dev message to this workroom:", reviewer_prompt)

@@ -29,6 +29,7 @@ from ergon_studio.proxy.workroom_staffing import (
     expand_staffed_participants,
     participant_context,
 )
+from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -57,7 +58,7 @@ class ProxyWorkroomExecutor:
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
 
-    async def execute(
+    def execute(
         self,
         *,
         request: ProxyTurnRequest,
@@ -67,9 +68,8 @@ class ProxyWorkroomExecutor:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[tuple[str, ...]], None],
         worklog: tuple[str, ...] = (),
-    ) -> AsyncIterator[ProxyEvent]:
+    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
         workroom_key = _workroom_key(workroom_name)
         round_participants = _round_participants(
             participants=participants,
@@ -93,148 +93,151 @@ class ProxyWorkroomExecutor:
         )
         room_lines: list[str] = []
 
-        if self._should_try_parallel_round(
-            staffed_members=staffed_members,
-            pending=pending,
-            start_index=start_index,
-        ):
-            parallel_results = await self._run_parallel_round(
-                request=request,
-                workroom_name=workroom_name,
-                workroom_key=workroom_key,
+        async def _events() -> AsyncIterator[ProxyEvent]:
+            if self._should_try_parallel_round(
                 staffed_members=staffed_members,
-                user_request=user_request,
-                workroom_message=workroom_message,
-            )
-            if any(
-                result.response.tool_calls
-                for result in parallel_results
+                pending=pending,
+                start_index=start_index,
             ):
-                fallback_notice = (
-                    "Orchestrator: parallel room round requested tool use; "
-                    "rerunning this staffed group sequentially for safe "
-                    "continuation.\n"
-                )
-                state.append_reasoning(fallback_notice)
-                yield ProxyReasoningDeltaEvent(fallback_notice)
-            else:
-                for result in parallel_results:
-                    reasoning_delta = f"{result.participant.label}: {result.text}"
-                    state.append_reasoning(reasoning_delta)
-                    yield ProxyReasoningDeltaEvent(reasoning_delta)
-                    room_lines.append(reasoning_delta)
-                result_sink(tuple(room_lines))
-                return
-
-        for member_index in range(start_index, len(staffed_members)):
-            participant = staffed_members[member_index]
-            participant_pending = pending if member_index == start_index else None
-            participant_move_count = 0
-            while True:
-                prompt = workroom_round_prompt(
+                parallel_results = await self._run_parallel_round(
+                    request=request,
                     workroom_name=workroom_name,
-                    agent_id=participant.agent_id,
-                    role_instance_label=(
-                        participant.label
-                        if participant.label != participant.agent_id
-                        else None
-                    ),
-                    role_instance_context=participant_context(participant),
+                    workroom_key=workroom_key,
+                    staffed_members=staffed_members,
                     user_request=user_request,
                     workroom_message=workroom_message,
-                    transcript_summary=summarize_conversation(request.messages),
-                    prior_work=_prior_work(
-                        worklog=persisted_worklog,
-                        room_lines=room_lines,
-                    ),
                 )
-                agent_text = ""
-                first = True
-                stream = self._stream_text_agent(
-                    agent_id=participant.agent_id,
-                    prompt=prompt,
-                    session_id=(
-                        f"proxy-workroom-{workroom_key}-{participant.label}-{uuid4().hex}"
-                    ),
-                    model_id_override=request.model,
-                    host_tools=request.tools,
-                    extra_tools=build_workroom_internal_tools(),
-                    tool_choice=request.tool_choice,
-                    parallel_tool_calls=request.parallel_tool_calls,
-                    pending_continuation=participant_pending,
-                )
-                async for delta in stream:
-                    agent_text += delta
-                    reasoning_delta = (
-                        f"{participant.label}: {delta}" if first else delta
+                if any(result.response.tool_calls for result in parallel_results):
+                    fallback_notice = (
+                        "Orchestrator: parallel room round requested tool use; "
+                        "rerunning this staffed group sequentially for safe "
+                        "continuation.\n"
                     )
-                    first = False
-                    state.append_reasoning(reasoning_delta)
-                    yield ProxyReasoningDeltaEvent(reasoning_delta)
-                participant_pending = None
-                response = await stream.get_final_response()
-                internal_tool_calls = tuple(
-                    tool_call
-                    for tool_call in response.tool_calls
-                    if is_internal_tool_name(tool_call.name)
-                )
-                host_tool_calls = tuple(
-                    tool_call
-                    for tool_call in response.tool_calls
-                    if not is_internal_tool_name(tool_call.name)
-                )
-                if internal_tool_calls and host_tool_calls:
-                    raise ValueError(
-                        "workroom participants cannot mix internal actions with host "
-                        "tool calls"
-                    )
-                if len(internal_tool_calls) > 1:
-                    raise ValueError(
-                        "workroom participants must use at most one internal action "
-                        "at a time"
-                    )
-                if host_tool_calls:
-                    emitted = self._emit_tool_calls(
-                        tool_calls=host_tool_calls,
-                        request=request,
-                        continuation=ContinuationState(
-                            workroom_name=workroom_name,
-                            workroom_participants=round_participants,
-                            workroom_message=workroom_message,
-                            actor=participant.label,
-                            worklog=(*persisted_worklog, *room_lines),
-                        ),
-                        state=state,
-                    )
-                    if emitted:
-                        for event in emitted:
-                            yield event
-                        return
-                if internal_tool_calls:
-                    action = parse_reply_lead_dev_action(internal_tool_calls[0])
-                    if isinstance(action, ReplyLeadDevAction):
-                        reasoning_delta = (
-                            f"{participant.label}: {action.message.strip()}"
-                        )
+                    state.append_reasoning(fallback_notice)
+                    yield ProxyReasoningDeltaEvent(fallback_notice)
+                else:
+                    for result in parallel_results:
+                        reasoning_delta = f"{result.participant.label}: {result.text}"
                         state.append_reasoning(reasoning_delta)
                         yield ProxyReasoningDeltaEvent(reasoning_delta)
                         room_lines.append(reasoning_delta)
-                        break
-                    raise ValueError(
-                        f"unsupported workroom internal action: {type(action).__name__}"
+                    return
+
+            for member_index in range(start_index, len(staffed_members)):
+                participant = staffed_members[member_index]
+                participant_pending = pending if member_index == start_index else None
+                participant_move_count = 0
+                while True:
+                    prompt = workroom_round_prompt(
+                        workroom_name=workroom_name,
+                        agent_id=participant.agent_id,
+                        role_instance_label=(
+                            participant.label
+                            if participant.label != participant.agent_id
+                            else None
+                        ),
+                        role_instance_context=participant_context(participant),
+                        user_request=user_request,
+                        workroom_message=workroom_message,
+                        transcript_summary=summarize_conversation(request.messages),
+                        prior_work=_prior_work(
+                            worklog=persisted_worklog,
+                            room_lines=room_lines,
+                        ),
                     )
-                text_summary = agent_text.strip()
-                if text_summary:
-                    room_lines.append(f"{participant.label}: {text_summary}")
-                if (
-                    len(staffed_members) == 1
-                    and request.tools
-                    and participant_move_count + 1 < self._MAX_PARTICIPANT_MOVES
-                ):
-                    participant_move_count += 1
-                    continue
-                break
-        result_sink(tuple(room_lines))
+                    agent_text = ""
+                    first = True
+                    stream = self._stream_text_agent(
+                        agent_id=participant.agent_id,
+                        prompt=prompt,
+                        session_id=(
+                            f"proxy-workroom-{workroom_key}-{participant.label}-"
+                            f"{uuid4().hex}"
+                        ),
+                        model_id_override=request.model,
+                        host_tools=request.tools,
+                        extra_tools=build_workroom_internal_tools(),
+                        tool_choice=request.tool_choice,
+                        parallel_tool_calls=request.parallel_tool_calls,
+                        pending_continuation=participant_pending,
+                    )
+                    async for delta in stream:
+                        agent_text += delta
+                        reasoning_delta = (
+                            f"{participant.label}: {delta}" if first else delta
+                        )
+                        first = False
+                        state.append_reasoning(reasoning_delta)
+                        yield ProxyReasoningDeltaEvent(reasoning_delta)
+                    participant_pending = None
+                    response = await stream.get_final_response()
+                    internal_tool_calls = tuple(
+                        tool_call
+                        for tool_call in response.tool_calls
+                        if is_internal_tool_name(tool_call.name)
+                    )
+                    host_tool_calls = tuple(
+                        tool_call
+                        for tool_call in response.tool_calls
+                        if not is_internal_tool_name(tool_call.name)
+                    )
+                    if internal_tool_calls and host_tool_calls:
+                        raise ValueError(
+                            "workroom participants cannot mix internal actions with "
+                            "host tool calls"
+                        )
+                    if len(internal_tool_calls) > 1:
+                        raise ValueError(
+                            "workroom participants must use at most one internal "
+                            "action at a time"
+                        )
+                    if host_tool_calls:
+                        emitted = self._emit_tool_calls(
+                            tool_calls=host_tool_calls,
+                            request=request,
+                            continuation=ContinuationState(
+                                workroom_name=workroom_name,
+                                workroom_participants=round_participants,
+                                workroom_message=workroom_message,
+                                actor=participant.label,
+                                worklog=(*persisted_worklog, *room_lines),
+                            ),
+                            state=state,
+                        )
+                        if emitted:
+                            for event in emitted:
+                                yield event
+                            return
+                    if internal_tool_calls:
+                        action = parse_reply_lead_dev_action(internal_tool_calls[0])
+                        if isinstance(action, ReplyLeadDevAction):
+                            reasoning_delta = (
+                                f"{participant.label}: {action.message.strip()}"
+                            )
+                            state.append_reasoning(reasoning_delta)
+                            yield ProxyReasoningDeltaEvent(reasoning_delta)
+                            room_lines.append(reasoning_delta)
+                            break
+                        raise ValueError(
+                            "unsupported workroom internal action: "
+                            f"{type(action).__name__}"
+                        )
+                    text_summary = agent_text.strip()
+                    if text_summary:
+                        room_lines.append(f"{participant.label}: {text_summary}")
+                    if (
+                        len(staffed_members) == 1
+                        and request.tools
+                        and participant_move_count + 1 < self._MAX_PARTICIPANT_MOVES
+                    ):
+                        participant_move_count += 1
+                        continue
+                    break
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: tuple(room_lines),
+        )
 
     def _should_try_parallel_round(
         self,

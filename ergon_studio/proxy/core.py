@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
-from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -76,19 +75,17 @@ class ProxyOrchestrationCore:
                 worklog = list(pending.state.worklog if pending is not None else ())
                 if pending is not None:
                     if pending.state.workroom_name is not None:
-                        result_holder: dict[str, object] = {}
-                        async for event in self._resume_subtask(
+                        stream = self._resume_subtask(
                             request=request,
                             pending=pending,
                             state=state,
                             worklog=tuple(worklog),
-                            result_holder=result_holder,
-                        ):
+                        )
+                        async for event in stream:
                             yield event
                         if state.finish_reason == "tool_calls":
                             return
-                        if result_holder:
-                            worklog.extend(_result(result_holder))
+                        worklog.extend(await stream.get_final_response())
                         async for event in self._run_orchestrator_loop(
                             request=request,
                             state=state,
@@ -143,7 +140,7 @@ class ProxyOrchestrationCore:
         pending = pending_orchestrator
         for _ in range(self._MAX_INTERNAL_MOVES):
             internal_tools = build_orchestrator_internal_tools(self.registry)
-            stream = self._agent_runner.stream_text_agent(
+            orchestrator_stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
@@ -157,11 +154,11 @@ class ProxyOrchestrationCore:
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending,
             )
-            async for delta in stream:
+            async for delta in orchestrator_stream:
                 state.append_content(delta)
                 yield ProxyContentDeltaEvent(delta)
             pending = None
-            response = await stream.get_final_response()
+            response = await orchestrator_stream.get_final_response()
             tool_calls = response.tool_calls
             internal_tool_calls = tuple(
                 tool_call
@@ -195,19 +192,19 @@ class ProxyOrchestrationCore:
                     internal_tool_calls[0],
                     registry=self.registry,
                 )
-                result_holder: dict[str, object] = {}
-                async for internal_event in self._execute_internal_action(
+                workroom_stream = self._execute_internal_action(
                     request=request,
                     action=action,
                     state=state,
                     worklog=tuple(worklog),
-                    result_holder=result_holder,
-                ):
+                )
+                async for internal_event in workroom_stream:
                     yield internal_event
                 if state.finish_reason == "tool_calls":
                     return
-                if result_holder:
-                    worklog.extend(_result(result_holder))
+                result = await workroom_stream.get_final_response()
+                if result:
+                    worklog.extend(result)
                 else:
                     return
                 continue
@@ -218,59 +215,53 @@ class ProxyOrchestrationCore:
 
         raise ValueError("orchestrator exceeded internal move limit")
 
-    async def _execute_internal_action(
+    def _execute_internal_action(
         self,
         *,
         request: ProxyTurnRequest,
         action: Any,
         state: ProxyTurnState,
         worklog: tuple[str, ...],
-        result_holder: dict[str, object],
-    ) -> AsyncIterator[ProxyEvent]:
+    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
         if isinstance(action, MessageWorkroomAction):
             if action.preset is None and not action.participants:
                 state.finish_reason = "error"
                 error_text = "message_workroom needs a preset or participants target."
                 state.content = error_text
-                yield ProxyContentDeltaEvent(error_text)
-                return
-            async for event in self._message_workroom(
+                return ResponseStream(
+                    _single_event_stream(ProxyContentDeltaEvent(error_text)),
+                    finalizer=lambda _updates: (),
+                )
+            return self._message_workroom(
                 request=request,
                 workroom_name=action.preset,
                 participants=action.participants,
                 workroom_message=action.message,
                 state=state,
-                result_sink=partial(_store_result, result_holder),
                 worklog=worklog,
-            ):
-                yield event
-            return
+            )
         raise ValueError(f"unsupported internal action: {action}")
 
-    async def _resume_subtask(
+    def _resume_subtask(
         self,
         *,
         request: ProxyTurnRequest,
         pending: PendingContinuation,
         state: ProxyTurnState,
         worklog: tuple[str, ...],
-        result_holder: dict[str, object],
-    ) -> AsyncIterator[ProxyEvent]:
+    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
         continuation = pending.state
         if continuation.workroom_name is not None:
-            async for event in self._message_workroom(
+            return self._message_workroom(
                 request=request,
                 continuation=continuation,
                 pending=pending,
                 state=state,
-                result_sink=partial(_store_result, result_holder),
                 worklog=worklog,
-            ):
-                yield event
-            return
+            )
         raise ValueError("unsupported continuation state")
 
-    async def _message_workroom(
+    def _message_workroom(
         self,
         *,
         request: ProxyTurnRequest,
@@ -278,11 +269,10 @@ class ProxyOrchestrationCore:
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
         state: ProxyTurnState,
-        result_sink: Any,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
-    ) -> AsyncIterator[ProxyEvent]:
+    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
         if continuation is not None:
             assert continuation.workroom_name is not None
             workroom_name = continuation.workroom_name
@@ -302,13 +292,13 @@ class ProxyOrchestrationCore:
                 error_text = f"Unknown workroom: {workroom_name or '(none)'}"
                 state.finish_reason = "error"
                 state.content = error_text
-                yield ProxyContentDeltaEvent(error_text)
-                return
+                return ResponseStream(
+                    _single_event_stream(ProxyContentDeltaEvent(error_text)),
+                    finalizer=lambda _updates: (),
+                )
             workroom_name, participants = resolved
             intro = _workroom_notice(_workroom_intro(workroom_name))
-        state.append_reasoning(intro)
-        yield ProxyReasoningDeltaEvent(intro)
-        async for event in self._workroom_executor.execute(
+        workroom_stream = self._workroom_executor.execute(
             request=request,
             workroom_name=workroom_name,
             participants=participants,
@@ -316,10 +306,22 @@ class ProxyOrchestrationCore:
             state=state,
             continuation=continuation,
             pending=pending,
-            result_sink=result_sink,
             worklog=worklog,
-        ):
-            yield event
+        )
+        workroom_result: tuple[str, ...] = ()
+
+        async def _events() -> AsyncIterator[ProxyEvent]:
+            nonlocal workroom_result
+            state.append_reasoning(intro)
+            yield ProxyReasoningDeltaEvent(intro)
+            async for event in workroom_stream:
+                yield event
+            workroom_result = await workroom_stream.get_final_response()
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda _updates: workroom_result,
+        )
 
 
 def _orchestrator_continuation_state(
@@ -338,13 +340,8 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
     return isinstance(tool_choice, dict)
 
 
-def _result(holder: dict[str, object]) -> tuple[str, ...]:
-    value = holder.get("result")
-    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
-        return value
-    return ()
-def _store_result(holder: dict[str, object], result: tuple[str, ...]) -> None:
-    holder["result"] = result
+async def _single_event_stream(event: ProxyEvent) -> AsyncIterator[ProxyEvent]:
+    yield event
 
 
 def _resolve_workroom_target(

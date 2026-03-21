@@ -9,7 +9,8 @@ from ergon_studio.proxy.planner import summarize_conversation
 def direct_reply_prompt(request: ProxyTurnRequest) -> str:
     return "\n".join(
         [
-            "You are responding to the host user in proxy mode.",
+            "You are the lead developer replying to the product manager.",
+            "Be practical, collaborative, and decisive.",
             "Use the full conversation transcript below as context.",
             "",
             summarize_conversation(request.messages, limit=12),
@@ -28,8 +29,9 @@ def specialist_prompt(
     current_brief: str | None = None,
 ) -> str:
     lines = [
-        f"You are the {specialist_id} working inside the orchestration proxy.",
-        "The orchestrator distilled the host conversation for you.",
+        f"You are the {specialist_id} working for the lead developer.",
+        "You were brought in for a focused assignment inside a software team.",
+        "Solve the assigned slice well instead of re-litigating the whole project.",
         "",
         "Conversation summary:",
         transcript_summary or "(none)",
@@ -58,7 +60,8 @@ def workflow_step_prompt(
     prior_outputs: tuple[str, ...],
 ) -> str:
     lines = [
-        f"You are {agent_id} working inside workflow {workflow_id}.",
+        f"You are {agent_id} working inside playbook {workflow_id}.",
+        "The lead developer is using this playbook as a tactic, not as a rigid script.",
         "",
         "Conversation summary:",
         transcript_summary or "(none)",
@@ -90,8 +93,9 @@ def group_chat_turn_prompt(
     prior_outputs: tuple[str, ...],
 ) -> str:
     lines = [
-        f"You are {agent_id} speaking in group chat workflow {workflow_id}.",
+        f"You are {agent_id} speaking in playbook {workflow_id}.",
         "Respond to the current discussion and move the decision forward.",
+        "Add real value from your role instead of repeating the room.",
         "",
         "Conversation summary:",
         transcript_summary or "(none)",
@@ -116,7 +120,10 @@ def group_chat_turn_prompt(
 def workflow_manager_instructions(participants: tuple[str, ...]) -> str:
     return "\n".join(
         [
-            "You are selecting the next specialist for an adaptive workflow.",
+            (
+                "You are helping the lead developer choose the next specialist "
+                "for an adaptive playbook."
+            ),
             "Return JSON only.",
             f"Allowed agents: {', '.join(participants) or '(none)'}",
             (
@@ -151,7 +158,7 @@ def workflow_manager_prompt(
 def handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
     return "\n".join(
         [
-            "You are choosing the next specialist handoff.",
+            "You are choosing the next specialist handoff in a collaborative playbook.",
             "Return JSON only.",
             f"Allowed next agents: {', '.join(allowed) or '(none)'}",
             (
@@ -214,7 +221,7 @@ def parse_agent_selection(
 def summary_instructions() -> str:
     return "\n".join(
         [
-            "Summarize the completed work for the host user.",
+            "Summarize the completed work for the product manager.",
             "Be concise and concrete.",
             "State what was decided or produced.",
             "Do not mention hidden chain-of-thought.",
@@ -230,7 +237,10 @@ def delegation_summary_prompt(
 ) -> str:
     return "\n".join(
         [
-            f"The specialist {specialist_id} completed delegated work.",
+            (
+                f"The specialist {specialist_id} completed delegated work for "
+                "the lead developer."
+            ),
             "",
             "Original request:",
             request_text or "(none)",
@@ -251,7 +261,7 @@ def workflow_summary_prompt(
 ) -> str:
     return "\n".join(
         [
-            f"The workflow {workflow_id} completed.",
+            f"The playbook {workflow_id} completed.",
             "",
             "Goal:",
             goal or "(none)",

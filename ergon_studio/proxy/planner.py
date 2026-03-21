@@ -46,27 +46,46 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
 
     return "\n".join(
         [
-            "You are the internal planning layer for an orchestration proxy.",
-            "Choose the single best next action for the current host turn.",
+            (
+                "You are the internal execution planner for the lead developer "
+                "in an AI software firm."
+            ),
+            (
+                "The user is the product manager. The orchestrator is the lead "
+                "developer."
+            ),
+            (
+                "Choose the single best immediate move that helps the lead "
+                "developer move the work forward."
+            ),
             "Output JSON only.",
             "",
             "Allowed modes:",
-            '- "act": let the orchestrator answer directly.',
-            '- "delegate": hand the work to one specialist.',
-            '- "workflow": run a named workflow end to end.',
+            '- "act": the lead developer handles the next move directly.',
+            '- "delegate": assign one specialist a focused task.',
+            '- "workflow": invoke a named playbook involving one or more specialists.',
             "",
             "Rules:",
             (
-                "- Prefer workflow for non-trivial implementation, debugging, "
-                "review, or delivery work."
-            ),
-            "- Prefer delegate only for narrow specialist work.",
-            (
-                "- Use act for discussion, clarification, or direct orchestrator "
-                "answers."
+                "- Think like a pragmatic lead developer, not a classifier."
             ),
             (
-                "- Preserve the full delivery goal when the user expects "
+                "- Prefer act for discussion, clarification, planning with the product "
+                "manager, and small direct actions."
+            ),
+            (
+                "- Prefer delegate for narrow, well-bounded specialist work."
+            ),
+            (
+                "- Prefer workflow when the work would benefit from multiple steps, "
+                "comparison, review, repair, debate, or adaptive staffing."
+            ),
+            (
+                "- Workflows are playbooks, not rigid laws. Choose one when it is a "
+                "good tactic, not because keywords happen to match."
+            ),
+            (
+                "- Preserve the full delivery goal when the product manager expects "
                 "implemented output."
             ),
             (

@@ -7,11 +7,6 @@ steps:
   - coder
   - tester
   - reviewer
-selection_hints:
-  - repair
-  - revise
-  - fix_review_findings
-  - stabilize
 ---
 
 ## Purpose

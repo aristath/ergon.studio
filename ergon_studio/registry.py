@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument, load_definitions_from_dir
-from ergon_studio.proxy.workroom_metadata import (
-    workroom_selection_sequence_for_definition,
-)
 from ergon_studio.upstream import UpstreamSettings
 from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
@@ -56,7 +53,6 @@ def _validate_workroom_references(
 
         for group in workroom_step_groups_for_definition(definition):
             referenced_agents.update(group)
-        referenced_agents.update(workroom_selection_sequence_for_definition(definition))
 
         missing_agents = sorted(
             agent_id for agent_id in referenced_agents if agent_id not in known_agents

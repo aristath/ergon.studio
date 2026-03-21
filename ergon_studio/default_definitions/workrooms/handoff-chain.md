@@ -10,11 +10,6 @@ steps:
   - critic
   - reviewer
 max_rounds: 6
-selection_hints:
-  - handoff
-  - relay
-  - staged_handoff
-  - long_chain
 ---
 
 ## Purpose

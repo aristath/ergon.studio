@@ -396,7 +396,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_workroom_continuation_keeps_remaining_agents_in_same_group(
         self,
     ) -> None:
-        registry = _grouped_workflow_registry()
+        registry = _grouped_workroom_registry()
         first_core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -477,8 +477,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Reviewed", reasoning)
         self.assertEqual(resumed_result.content, "Workroom final summary")
 
-    async def test_group_chat_workroom_uses_selection_sequence(self) -> None:
-        registry = _advanced_workflow_registry()
+    async def test_group_chat_workroom_uses_steps_as_turn_order(self) -> None:
+        registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -532,7 +532,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Debate final summary")
 
     async def test_dynamic_workroom_runs_as_discussion_room(self) -> None:
-        registry = _advanced_workflow_registry()
+        registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -576,7 +576,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Dynamic final summary")
 
     async def test_handoff_chain_runs_as_staged_room(self) -> None:
-        registry = _advanced_workflow_registry()
+        registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -1015,14 +1015,14 @@ def _fake_registry():
     return _FakeRegistry()
 
 
-def _grouped_workflow_registry():
+def _grouped_workroom_registry():
     registry = _FakeRegistry()
     registry.workroom_definitions["grouped-build"] = DefinitionDocument(
         id="grouped-build",
         path=Path("grouped-build.md"),
         metadata={
             "id": "grouped-build",
-            "shape": "concurrent",
+            "shape": "grouped",
             "step_groups": [["architect", "coder", "reviewer"]],
         },
         body="## Purpose\nGrouped build.",
@@ -1049,7 +1049,7 @@ def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
     )
 
 
-def _advanced_workflow_registry() -> RuntimeRegistry:
+def _advanced_workroom_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
@@ -1096,8 +1096,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "debate",
                     "shape": "group_chat",
-                    "step_groups": [["architect", "brainstormer", "reviewer"]],
-                    "selection_sequence": [
+                    "steps": [
                         "architect",
                         "brainstormer",
                         "architect",
@@ -1114,8 +1113,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "dynamic-open-ended",
                     "shape": "group_chat",
-                    "step_groups": [["architect", "reviewer"]],
-                    "selection_sequence": ["architect", "reviewer"],
+                    "steps": ["architect", "reviewer"],
                     "max_rounds": 3,
                 },
                 body="## Purpose\nAdaptive.",

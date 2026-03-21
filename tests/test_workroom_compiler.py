@@ -16,7 +16,7 @@ class WorkroomCompilerTests(unittest.TestCase):
                 """---
 id: best-of-n
 name: Best of N
-shape: concurrent
+shape: grouped
 step_groups:
   - [coder, coder, coder]
   - [reviewer]

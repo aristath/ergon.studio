@@ -6,9 +6,6 @@ steps:
   - architect
   - coder
   - reviewer
-selection_hints:
-  - build
-  - implementation
 ---
 
 ## Purpose

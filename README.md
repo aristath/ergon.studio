@@ -2,9 +2,9 @@
 
 `ergon.studio` is an OpenAI-compatible orchestration proxy for local coding models.
 
-It sits in front of an existing host client and turns one model request into an orchestrated multi-agent turn:
+It sits in front of an existing host client and turns one model request into a coordinated multi-agent turn:
 
-- the orchestrator plans the turn
+- the orchestrator acts as the lead developer and coordinates the team
 - specialists handle focused sub-work
 - host-provided tools are passed through unchanged
 - the proxy streams orchestration worklog plus final assistant output
@@ -16,7 +16,7 @@ The host keeps the UI, sessions, tools, MCPs, and approvals.
 The proxy uses:
 - one upstream OpenAI-compatible endpoint for all internal orchestration turns
 - markdown-defined agents
-- markdown-defined workflows
+- markdown-defined workrooms
 
 ## Running ergon
 
@@ -50,7 +50,7 @@ requires the `tui` extra. `ergon --serve` does not need it.
 The configuration TUI has separate tabs for:
 - upstream endpoint settings
 - agent definitions
-- workflow definitions
+- workroom definitions
 
 The UI uses standard navigation:
 - `Tab` / `Shift+Tab` to move focus
@@ -67,7 +67,7 @@ The first TUI launch creates a local workspace under:
 That workspace contains:
 - `config.json`
 - `definitions/agents/*.md`
-- `definitions/workflows/*.md`
+- `definitions/workrooms/*.md`
 
 The upstream API key may be left blank. In that case, ergon uses `not-needed` for the upstream client.
 

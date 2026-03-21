@@ -144,8 +144,6 @@ def _definition() -> DefinitionDocument:
             "id": "debate",
             "shape": "group_chat",
             "steps": ["architect", "reviewer"],
-            "participants": ["architect", "reviewer"],
-            "selection_sequence": ["architect", "reviewer"],
         },
         body="## Purpose\nDebate.",
         sections={"Purpose": "Debate."},

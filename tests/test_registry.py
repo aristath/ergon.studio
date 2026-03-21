@@ -146,7 +146,7 @@ class RegistryTests(unittest.TestCase):
                     upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
                 )
 
-    def test_load_registry_rejects_workflows_with_unknown_agents(self) -> None:
+    def test_load_registry_rejects_workrooms_with_unknown_agents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"

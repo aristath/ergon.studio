@@ -7,9 +7,8 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.workroom_metadata import (
     workroom_max_rounds_for_definition,
     workroom_participants_for_definition,
-    workroom_selection_hints_for_definition,
-    workroom_selection_sequence_for_definition,
     workroom_shape_for_definition,
+    workroom_turn_sequence_for_definition,
 )
 
 
@@ -26,7 +25,6 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
                     ["reviewer", "brainstormer"],
                 ],
                 "max_rounds": 6,
-                "selection_sequence": ["architect", "reviewer"],
             },
             body="## Purpose\nDiscussion.",
             sections={"Purpose": "Discussion."},
@@ -39,29 +37,6 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
         )
         self.assertEqual(workroom_max_rounds_for_definition(definition), 6)
         self.assertEqual(
-            workroom_selection_sequence_for_definition(definition),
-            ("architect", "reviewer"),
-        )
-        self.assertEqual(workroom_selection_hints_for_definition(definition), ())
-
-    def test_workroom_selection_hints_normalize_and_deduplicate(self) -> None:
-        definition = DefinitionDocument(
-            id="standard-build",
-            path=Path("standard-build.md"),
-            metadata={
-                "id": "standard-build",
-                "selection_hints": [
-                    "staged_delivery",
-                    " staged_delivery ",
-                    "",
-                    "ship_it",
-                ],
-            },
-            body="## Purpose\nBuild.",
-            sections={"Purpose": "Build."},
-        )
-
-        self.assertEqual(
-            workroom_selection_hints_for_definition(definition),
-            ("staged_delivery", "ship_it"),
+            workroom_turn_sequence_for_definition(definition),
+            ("architect", "reviewer", "reviewer", "brainstormer"),
         )

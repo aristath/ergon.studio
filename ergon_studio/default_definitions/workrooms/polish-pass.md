@@ -6,11 +6,6 @@ steps:
   - reviewer
   - coder
   - reviewer
-selection_hints:
-  - polish
-  - refine
-  - final_pass
-  - cleanup
 ---
 
 ## Purpose

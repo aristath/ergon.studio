@@ -7,12 +7,6 @@ steps:
   - coder
   - tester
   - reviewer
-selection_hints:
-  - build
-  - implementation
-  - feature
-  - staged_delivery
-  - ship_it
 ---
 
 ## Purpose

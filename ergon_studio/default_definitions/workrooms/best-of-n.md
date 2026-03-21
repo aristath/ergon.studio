@@ -7,11 +7,6 @@ step_groups:
   - [reviewer]
   - [coder]
   - [reviewer]
-selection_hints:
-  - best_of_n
-  - multiple_attempts
-  - compare_implementations
-  - hard_build
 ---
 
 ## Purpose

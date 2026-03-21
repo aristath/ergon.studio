@@ -30,7 +30,7 @@ from ergon_studio.proxy.turn_state import (
 from ergon_studio.proxy.workroom_metadata import (
     workroom_max_rounds_for_definition,
     workroom_participants_for_definition,
-    workroom_selection_sequence_for_definition,
+    workroom_turn_sequence_for_definition,
 )
 
 ProxyEvent = (
@@ -84,7 +84,7 @@ class ProxyGroupChatWorkroomExecutor:
             specialist_counts=staffed_specialist_counts,
         )
         sequence = expand_staffed_sequence(
-            workroom_selection_sequence_for_definition(definition),
+            workroom_turn_sequence_for_definition(definition),
             participants=participants,
         )
         max_rounds = workroom_max_rounds_for_definition(

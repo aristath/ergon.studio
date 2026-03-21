@@ -22,20 +22,14 @@ def workroom_participants_for_definition(
     return tuple(participants)
 
 
-def workroom_selection_hints_for_definition(
+def workroom_turn_sequence_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
-    configured = definition.metadata.get("selection_hints")
-    if not isinstance(configured, list):
-        return ()
-    hints: list[str] = []
-    for item in configured:
-        if not isinstance(item, str):
-            continue
-        stripped = item.strip()
-        if stripped and stripped not in hints:
-            hints.append(stripped)
-    return tuple(hints)
+    return tuple(
+        agent_id
+        for group in workroom_step_groups_for_definition(definition)
+        for agent_id in group
+    )
 
 
 def workroom_max_rounds_for_definition(
@@ -45,19 +39,3 @@ def workroom_max_rounds_for_definition(
     if isinstance(value, int) and value > 0:
         return value
     return default
-
-
-def workroom_selection_sequence_for_definition(
-    definition: DefinitionDocument,
-) -> tuple[str, ...]:
-    configured = definition.metadata.get("selection_sequence")
-    if not isinstance(configured, list):
-        return ()
-    sequence: list[str] = []
-    for item in configured:
-        if not isinstance(item, str):
-            continue
-        stripped = item.strip()
-        if stripped:
-            sequence.append(stripped)
-    return tuple(sequence)

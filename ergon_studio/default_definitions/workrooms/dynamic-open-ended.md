@@ -10,19 +10,6 @@ steps:
   - reviewer
   - critic
 max_rounds: 6
-selection_sequence:
-  - researcher
-  - architect
-  - coder
-  - tester
-  - reviewer
-  - critic
-selection_hints:
-  - adaptive
-  - figure_it_out
-  - exploratory_build
-  - complex_problem
-  - open_ended
 ---
 
 ## Purpose

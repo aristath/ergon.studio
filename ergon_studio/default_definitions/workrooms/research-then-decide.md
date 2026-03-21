@@ -6,12 +6,6 @@ steps:
   - researcher
   - architect
   - critic
-selection_hints:
-  - research
-  - investigate
-  - evaluate
-  - compare
-  - recommendation
 ---
 
 ## Purpose

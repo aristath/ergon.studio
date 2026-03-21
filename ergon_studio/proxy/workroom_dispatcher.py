@@ -155,7 +155,7 @@ class ProxyWorkroomDispatcher:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         shape = workroom_shape_for_definition(definition)
-        if shape in {"sequential", "grouped", "concurrent"}:
+        if shape in {"sequential", "grouped"}:
             async for event in self._execute_grouped_workroom(
                 request=request,
                 definition=definition,

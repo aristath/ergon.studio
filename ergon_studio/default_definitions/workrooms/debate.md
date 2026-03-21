@@ -7,17 +7,7 @@ steps:
   - coder
   - critic
   - reviewer
-selection_sequence:
-  - architect
-  - coder
-  - critic
-  - reviewer
 max_rounds: 4
-selection_hints:
-  - debate
-  - brainstorm
-  - challenge_plan
-  - tradeoffs
 ---
 
 ## Purpose

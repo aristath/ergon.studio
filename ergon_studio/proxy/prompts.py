@@ -79,6 +79,8 @@ def finish_reply_prompt(
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
+    delivery_requirements: tuple[str, ...] = (),
+    delivery_evidence: tuple[str, ...] = (),
     move_rationale: str | None = None,
     success_criteria: str | None = None,
 ) -> str:
@@ -109,6 +111,21 @@ def finish_reply_prompt(
                 current_brief,
             ]
         )
+    if delivery_requirements:
+        lines.extend(
+            [
+                "",
+                "Delivery requirements already satisfied:",
+                ", ".join(delivery_requirements),
+            ]
+        )
+        if delivery_evidence:
+            lines.extend(
+                [
+                    "Supporting evidence gathered:",
+                    ", ".join(delivery_evidence),
+                ]
+            )
     if move_rationale:
         lines.extend(
             [

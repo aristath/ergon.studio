@@ -71,6 +71,16 @@ class ProxyTurnPlanner:
                     and loop_state.workflow_progress is not None
                     else None
                 ),
+                active_delivery_requirements=(
+                    loop_state.delivery_requirements
+                    if loop_state is not None
+                    else ()
+                ),
+                satisfied_delivery_evidence=(
+                    loop_state.delivery_evidence
+                    if loop_state is not None
+                    else ()
+                ),
                 selection_outcome=(
                     loop_state.latest_selection_outcome
                     if loop_state is not None

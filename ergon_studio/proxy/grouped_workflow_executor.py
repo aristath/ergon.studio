@@ -8,6 +8,10 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
+from ergon_studio.proxy.delivery_requirements import (
+    delivery_evidence_for_agents,
+    merge_delivery_evidence,
+)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -201,10 +205,12 @@ class ProxyGroupedWorkflowExecutor:
                     last_stage_outputs = list(stage_outputs)
                     last_stage_parallel_attempts = True
                     if result_sink is not None:
+                        stage_evidence = delivery_evidence_for_agents(group)
                         result_sink(
                             ProxyMoveResult(
                                 worklog_lines=tuple(stage_outputs),
                                 current_brief=current_brief,
+                                delivery_evidence=stage_evidence,
                                 workflow_progress=self._next_workflow_progress(
                                     definition=definition,
                                     step_groups=step_groups,
@@ -214,6 +220,19 @@ class ProxyGroupedWorkflowExecutor:
                                     ),
                                     workflow_request=workflow_request,
                                     workflow_focus=workflow_focus,
+                                    delivery_requirements=(
+                                        loop_state.delivery_requirements
+                                        if loop_state is not None
+                                        else ()
+                                    ),
+                                    delivery_evidence=merge_delivery_evidence(
+                                        (
+                                            loop_state.delivery_evidence
+                                            if loop_state is not None
+                                            else ()
+                                        ),
+                                        stage_evidence,
+                                    ),
                                     step_index=step_index,
                                     goal=goal,
                                     current_brief=current_brief,
@@ -306,6 +325,17 @@ class ProxyGroupedWorkflowExecutor:
                             workflow_specialists=staffed_specialists,
                             workflow_specialist_counts=staffed_specialist_counts,
                             workflow_request=workflow_request,
+                            workflow_focus=workflow_focus,
+                            delivery_requirements=(
+                                loop_state.delivery_requirements
+                                if loop_state is not None
+                                else ()
+                            ),
+                            delivery_evidence=(
+                                loop_state.delivery_evidence
+                                if loop_state is not None
+                                else ()
+                            ),
                             last_stage_outputs=tuple(last_stage_outputs),
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
@@ -372,10 +402,12 @@ class ProxyGroupedWorkflowExecutor:
             )
             selection_outcome = next_selection_outcome
             if result_sink is not None:
+                stage_evidence = delivery_evidence_for_agents(group)
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=worklog_lines,
                         current_brief=current_brief,
+                        delivery_evidence=stage_evidence,
                         selection_outcome=selection_outcome,
                         selection_outcome_changed=selection_outcome_changed,
                         workflow_progress=self._next_workflow_progress(
@@ -385,6 +417,19 @@ class ProxyGroupedWorkflowExecutor:
                             staffed_specialist_counts=staffed_specialist_counts,
                             workflow_request=workflow_request,
                             workflow_focus=workflow_focus,
+                            delivery_requirements=(
+                                loop_state.delivery_requirements
+                                if loop_state is not None
+                                else ()
+                            ),
+                            delivery_evidence=merge_delivery_evidence(
+                                (
+                                    loop_state.delivery_evidence
+                                    if loop_state is not None
+                                    else ()
+                                ),
+                                stage_evidence,
+                            ),
                             step_index=step_index,
                             goal=goal,
                             current_brief=current_brief,
@@ -527,6 +572,8 @@ class ProxyGroupedWorkflowExecutor:
         step_groups: tuple[tuple[str, ...], ...],
         staffed_specialists: tuple[str, ...],
         staffed_specialist_counts: tuple[tuple[str, int], ...],
+        delivery_requirements: tuple[str, ...],
+        delivery_evidence: tuple[str, ...],
         step_index: int,
         goal: str,
         current_brief: str,
@@ -549,6 +596,8 @@ class ProxyGroupedWorkflowExecutor:
             workflow_specialist_counts=staffed_specialist_counts,
             workflow_request=workflow_request,
             workflow_focus=workflow_focus,
+            delivery_requirements=delivery_requirements,
+            delivery_evidence=delivery_evidence,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
             selection_outcome=selection_outcome,

@@ -180,6 +180,123 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Workflow final summary")
         self.assertEqual(result.mode, "finish")
 
+    async def test_stream_turn_blocks_finish_until_required_review_exists(self) -> None:
+        registry = _advanced_workflow_registry()
+        registry.agent_definitions["coder"] = DefinitionDocument(
+            id="coder",
+            path=Path("coder.md"),
+            metadata={"id": "coder", "role": "coder"},
+            body="## Identity\nCoder.",
+            sections={"Identity": "Coder."},
+        )
+        core = ProxyOrchestrationCore(
+            registry,
+            agent_builder=_fake_agent_builder(
+                {
+                    "orchestrator": [
+                        (
+                            '{"mode":"delegate","agent_id":"coder",'
+                            '"request":"Implement it",'
+                            '"delivery_requirements":["review"]}'
+                        ),
+                        '{"mode":"finish"}',
+                        (
+                            '{"mode":"delegate","agent_id":"reviewer",'
+                            '"request":"Review the implementation"}'
+                        ),
+                        '{"mode":"finish"}',
+                        "Reviewed delivery",
+                    ],
+                    "coder": ["Implemented the change"],
+                    "reviewer": ["Looks good after review"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn(
+            "delivery is blocked until these requirements are satisfied",
+            reasoning,
+        )
+        self.assertIn("reviewer: Looks", reasoning)
+        self.assertEqual(result.content, "Reviewed delivery")
+        self.assertEqual(result.mode, "finish")
+
+    async def test_stream_turn_allows_finish_after_workflow_satisfies_review_gate(
+        self,
+    ) -> None:
+        registry = _advanced_workflow_registry()
+        registry.workflow_definitions["reviewed-build"] = DefinitionDocument(
+            id="reviewed-build",
+            path=Path("reviewed-build.md"),
+            metadata={
+                "id": "reviewed-build",
+                "orchestration": "concurrent",
+                "step_groups": [["architect", "coder", "reviewer"]],
+            },
+            body="## Purpose\nReviewed build.",
+            sections={"Purpose": "Reviewed build."},
+        )
+        registry.agent_definitions["coder"] = DefinitionDocument(
+            id="coder",
+            path=Path("coder.md"),
+            metadata={"id": "coder", "role": "coder"},
+            body="## Identity\nCoder.",
+            sections={"Identity": "Coder."},
+        )
+        core = ProxyOrchestrationCore(
+            registry,
+            agent_builder=_fake_agent_builder(
+                {
+                    "orchestrator": [
+                        (
+                            '{"mode":"workflow","workflow_id":"reviewed-build",'
+                            '"goal":"Build calculator",'
+                            '"delivery_requirements":["review"]}'
+                        ),
+                        '{"mode":"finish"}',
+                        "Reviewed workflow delivery",
+                    ],
+                    "architect": ["Plan the build"],
+                    "coder": ["Implement the build"],
+                    "reviewer": ["Review the build"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertNotIn(
+            "delivery is blocked until these requirements are satisfied",
+            reasoning,
+        )
+        self.assertIn("reviewer: Review", reasoning)
+        self.assertEqual(result.content, "Reviewed workflow delivery")
+        self.assertEqual(result.mode, "finish")
+
     async def test_stream_turn_workflow_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),

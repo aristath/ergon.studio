@@ -57,6 +57,8 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workflow",
                 agent_id="coder",
+                delivery_requirements=("review", "verify"),
+                delivery_evidence=("review",),
                 workflow_id="standard-build",
                 workflow_specialists=("coder", "reviewer"),
                 workflow_specialist_counts=(("coder", 3),),
@@ -83,6 +85,8 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
+        self.assertEqual(decoded.delivery_requirements, ("review", "verify"))
+        self.assertEqual(decoded.delivery_evidence, ("review",))
         self.assertEqual(decoded.request_text, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")

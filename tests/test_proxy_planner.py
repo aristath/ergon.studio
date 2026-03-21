@@ -110,6 +110,24 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("Current playbook round focus:", prompt)
         self.assertIn("critique", prompt)
 
+    def test_build_turn_planner_prompt_includes_delivery_requirements(self) -> None:
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Ship it"),),
+        )
+
+        prompt = build_turn_planner_prompt(
+            request,
+            active_delivery_requirements=("review", "verify"),
+            satisfied_delivery_evidence=("review",),
+        )
+
+        self.assertIn("Current delivery requirements:", prompt)
+        self.assertIn("review, verify", prompt)
+        self.assertIn("Satisfied delivery evidence:", prompt)
+        self.assertIn("Still missing before delivery:", prompt)
+        self.assertIn("verify", prompt)
+
     def test_parse_turn_plan_resolves_known_workflow(self) -> None:
         registry = _make_registry()
 
@@ -241,6 +259,20 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.mode, "continue_playbook")
         self.assertEqual(plan.playbook_focus, "verify")
+
+    def test_parse_turn_plan_parses_delivery_requirements(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"mode":"finish","delivery_requirements":['
+                '"reviewed","verification","ghost","review"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "finish")
+        self.assertEqual(plan.delivery_requirements, ("review", "verify"))
 
     def test_parse_turn_plan_infers_compare_focus_from_comparison_mode(self) -> None:
         registry = _make_registry()

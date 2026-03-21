@@ -4,6 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from ergon_studio.proxy.delivery_requirements import (
+    DELIVERY_REQUIREMENT_VALUES,
+    normalize_delivery_requirements,
+    unmet_delivery_requirements,
+)
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
 from ergon_studio.proxy.playbook_focus import (
     PLAYBOOK_FOCUS_VALUES,
@@ -31,6 +36,7 @@ class ProxyTurnPlan:
     specialist_counts: tuple[tuple[str, int], ...] = ()
     playbook_request: str | None = None
     playbook_focus: str | None = None
+    delivery_requirements: tuple[str, ...] | None = None
     comparison_mode: str | None = None
     comparison_criteria: str | None = None
     request: str | None = None
@@ -41,6 +47,7 @@ class ProxyTurnPlan:
 
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
+    delivery_values = ", ".join(DELIVERY_REQUIREMENT_VALUES)
     focus_values = ", ".join(PLAYBOOK_FOCUS_VALUES)
     workflow_lines = []
     for workflow_id, definition in sorted(registry.workflow_definitions.items()):
@@ -92,6 +99,11 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             (
                 "- When useful, explain why this move is the right next step and "
                 "what a good outcome would look like."
+            ),
+            (
+                "- You may optionally set delivery_requirements to express the "
+                "quality bar that must be met before the lead developer delivers. "
+                f"Allowed values: {delivery_values}."
             ),
             (
                 "- You may optionally name staffed specialists for a playbook when "
@@ -165,7 +177,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"staffing_action":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"staffing_action":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"delivery_requirements":[],"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -181,6 +193,8 @@ def build_turn_planner_prompt(
     active_specialist_counts: tuple[tuple[str, int], ...] = (),
     active_playbook_request: str | None = None,
     active_playbook_focus: str | None = None,
+    active_delivery_requirements: tuple[str, ...] = (),
+    satisfied_delivery_evidence: tuple[str, ...] = (),
     selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
@@ -245,6 +259,32 @@ def build_turn_planner_prompt(
                 active_playbook_focus,
             ]
         )
+    if active_delivery_requirements:
+        lines.extend(
+            [
+                "",
+                "Current delivery requirements:",
+                ", ".join(active_delivery_requirements),
+            ]
+        )
+        if satisfied_delivery_evidence:
+            lines.extend(
+                [
+                    "Satisfied delivery evidence:",
+                    ", ".join(satisfied_delivery_evidence),
+                ]
+            )
+        unmet = unmet_delivery_requirements(
+            active_delivery_requirements,
+            satisfied_delivery_evidence,
+        )
+        if unmet:
+            lines.extend(
+                [
+                    "Still missing before delivery:",
+                    ", ".join(unmet),
+                ]
+            )
     if active_specialists:
         lines.extend(
             [
@@ -292,6 +332,9 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     )
     comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
     playbook_focus = normalize_playbook_focus(payload.get("playbook_focus"))
+    delivery_requirements = normalize_delivery_requirements(
+        payload["delivery_requirements"]
+    ) if "delivery_requirements" in payload else None
     if mode not in {"workflow", "continue_playbook"}:
         staffing_action = None
         playbook_focus = None
@@ -306,6 +349,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         specialist_counts=specialist_counts,
         playbook_request=_optional_text(payload.get("playbook_request")),
         playbook_focus=playbook_focus,
+        delivery_requirements=delivery_requirements,
         comparison_mode=comparison_mode,
         comparison_criteria=_optional_text(payload.get("comparison_criteria")),
         request=_optional_text(payload.get("request")),

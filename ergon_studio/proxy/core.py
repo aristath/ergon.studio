@@ -12,6 +12,7 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     latest_pending_continuation,
 )
+from ergon_studio.proxy.delivery_requirements import unmet_delivery_requirements
 from ergon_studio.proxy.group_chat_workflow_executor import (
     ProxyGroupChatWorkflowExecutor,
 )
@@ -209,12 +210,34 @@ class ProxyOrchestrationCore:
             state.mode = plan.mode
             if plan.goal:
                 loop_state.goal = plan.goal
+            if plan.delivery_requirements is not None:
+                loop_state.delivery_requirements = plan.delivery_requirements
             loop_state.current_move_rationale = plan.rationale
             loop_state.current_move_success_criteria = plan.success_criteria
             loop_state.current_comparison_mode = plan.comparison_mode
             loop_state.current_comparison_criteria = plan.comparison_criteria
             loop_state.current_playbook_request = plan.playbook_request
             loop_state.current_playbook_focus = plan.playbook_focus
+            if plan.mode == "finish":
+                unmet = unmet_delivery_requirements(
+                    loop_state.delivery_requirements,
+                    loop_state.delivery_evidence,
+                )
+                if unmet:
+                    note = (
+                        "Orchestrator: delivery is blocked until these requirements "
+                        f"are satisfied: {', '.join(unmet)}."
+                    )
+                    state.append_reasoning(note)
+                    loop_state.worklog = (*loop_state.worklog, note)
+                    yield ProxyReasoningDeltaEvent(note)
+                    loop_state.current_move_rationale = None
+                    loop_state.current_move_success_criteria = None
+                    loop_state.current_comparison_mode = None
+                    loop_state.current_comparison_criteria = None
+                    loop_state.current_playbook_request = None
+                    loop_state.current_playbook_focus = None
+                    continue
             result_holder: dict[str, object] = {}
             async for event in self._turn_router.execute_plan(
                 request=request,
@@ -272,6 +295,8 @@ class ProxyOrchestrationCore:
             current_brief=current_brief,
             worklog=continuation.decision_history,
             latest_selection_outcome=continuation.selection_outcome,
+            delivery_requirements=continuation.delivery_requirements,
+            delivery_evidence=continuation.delivery_evidence,
             current_playbook_request=continuation.workflow_request,
             current_playbook_focus=continuation.workflow_focus,
         )

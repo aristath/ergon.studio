@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
+from ergon_studio.proxy.delivery_requirements import delivery_evidence_for_agent
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -98,6 +99,14 @@ class ProxyTurnExecutor:
                 continuation=ContinuationState(
                     mode="act",
                     agent_id="orchestrator",
+                    delivery_requirements=(
+                        loop_state.delivery_requirements
+                        if loop_state is not None
+                        else ()
+                    ),
+                    delivery_evidence=(
+                        loop_state.delivery_evidence if loop_state is not None else ()
+                    ),
                     goal=loop_state.goal if loop_state is not None else None,
                     current_brief=(
                         loop_state.current_brief if loop_state is not None else None
@@ -129,6 +138,12 @@ class ProxyTurnExecutor:
             goal=loop_state.goal if loop_state is not None else None,
             current_brief=loop_state.current_brief if loop_state is not None else None,
             worklog=loop_state.worklog if loop_state is not None else (),
+            delivery_requirements=(
+                loop_state.delivery_requirements if loop_state is not None else ()
+            ),
+            delivery_evidence=(
+                loop_state.delivery_evidence if loop_state is not None else ()
+            ),
             move_rationale=(
                 loop_state.current_move_rationale if loop_state is not None else None
             ),
@@ -159,6 +174,14 @@ class ProxyTurnExecutor:
                 continuation=ContinuationState(
                     mode="finish",
                     agent_id="orchestrator",
+                    delivery_requirements=(
+                        loop_state.delivery_requirements
+                        if loop_state is not None
+                        else ()
+                    ),
+                    delivery_evidence=(
+                        loop_state.delivery_evidence if loop_state is not None else ()
+                    ),
                     goal=loop_state.goal if loop_state is not None else None,
                     current_brief=(
                         loop_state.current_brief if loop_state is not None else None
@@ -225,6 +248,14 @@ class ProxyTurnExecutor:
                 continuation=ContinuationState(
                     mode="delegate",
                     agent_id=agent_id,
+                    delivery_requirements=(
+                        loop_state.delivery_requirements
+                        if loop_state is not None
+                        else ()
+                    ),
+                    delivery_evidence=(
+                        loop_state.delivery_evidence if loop_state is not None else ()
+                    ),
                     request_text=plan.request or request.latest_user_text(),
                     current_brief=specialist_text.strip() or current_brief,
                     goal=(
@@ -247,6 +278,7 @@ class ProxyTurnExecutor:
                 ProxyMoveResult(
                     worklog_lines=(f"{agent_id}: {final_text}",),
                     current_brief=final_text,
+                    delivery_evidence=delivery_evidence_for_agent(agent_id),
                 )
             )
             return

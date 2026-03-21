@@ -6,6 +6,10 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
+from ergon_studio.proxy.delivery_requirements import (
+    delivery_evidence_for_agent,
+    merge_delivery_evidence,
+)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -202,6 +206,16 @@ class ProxyGroupChatWorkflowExecutor:
                         workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
+                        delivery_requirements=(
+                            loop_state.delivery_requirements
+                            if loop_state is not None
+                            else ()
+                        ),
+                        delivery_evidence=(
+                            loop_state.delivery_evidence
+                            if loop_state is not None
+                            else ()
+                        ),
                         step_index=turn_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
@@ -221,6 +235,7 @@ class ProxyGroupChatWorkflowExecutor:
             workflow_outputs.append(f"{participant.label}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             if result_sink is not None:
+                round_evidence = delivery_evidence_for_agent(participant.agent_id)
                 next_turn = turn_index + 1
                 workflow_progress = None
                 if next_turn < len(sequence):
@@ -235,6 +250,19 @@ class ProxyGroupChatWorkflowExecutor:
                         workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
+                        delivery_requirements=(
+                            loop_state.delivery_requirements
+                            if loop_state is not None
+                            else ()
+                        ),
+                        delivery_evidence=merge_delivery_evidence(
+                            (
+                                loop_state.delivery_evidence
+                                if loop_state is not None
+                                else ()
+                            ),
+                            round_evidence,
+                        ),
                         step_index=next_turn,
                         agent_id=(
                             next_participant.agent_id
@@ -257,6 +285,7 @@ class ProxyGroupChatWorkflowExecutor:
                     ProxyMoveResult(
                         worklog_lines=(workflow_outputs[-1],),
                         current_brief=current_brief,
+                        delivery_evidence=round_evidence,
                         workflow_progress=workflow_progress,
                     )
                 )

@@ -6,6 +6,10 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
+from ergon_studio.proxy.delivery_requirements import (
+    delivery_evidence_for_agent,
+    merge_delivery_evidence,
+)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -248,6 +252,16 @@ class ProxyHandoffWorkflowExecutor:
                         workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
+                        delivery_requirements=(
+                            loop_state.delivery_requirements
+                            if loop_state is not None
+                            else ()
+                        ),
+                        delivery_evidence=(
+                            loop_state.delivery_evidence
+                            if loop_state is not None
+                            else ()
+                        ),
                         step_index=round_index,
                         agent_id=current_participant.agent_id,
                         participant_label=current_participant.label,
@@ -268,12 +282,14 @@ class ProxyHandoffWorkflowExecutor:
                 f"{current_participant.label}: {agent_text.strip()}"
             )
             current_brief = agent_text.strip() or current_brief
+            round_evidence = delivery_evidence_for_agent(current_participant.agent_id)
             if current_participant.label in finalizers:
                 if result_sink is not None:
                     result_sink(
                         ProxyMoveResult(
                             worklog_lines=(workflow_outputs[-1],),
                             current_brief=current_brief,
+                            delivery_evidence=round_evidence,
                         )
                     )
                     return
@@ -284,6 +300,7 @@ class ProxyHandoffWorkflowExecutor:
                     ProxyMoveResult(
                         worklog_lines=(workflow_outputs[-1],),
                         current_brief=current_brief,
+                        delivery_evidence=round_evidence,
                         workflow_progress=ContinuationState(
                             mode="workflow",
                             workflow_id=definition.id,
@@ -291,6 +308,19 @@ class ProxyHandoffWorkflowExecutor:
                             workflow_specialist_counts=staffed_specialist_counts,
                             workflow_request=workflow_request,
                             workflow_focus=workflow_focus,
+                            delivery_requirements=(
+                                loop_state.delivery_requirements
+                                if loop_state is not None
+                                else ()
+                            ),
+                            delivery_evidence=merge_delivery_evidence(
+                                (
+                                    loop_state.delivery_evidence
+                                    if loop_state is not None
+                                    else ()
+                                ),
+                                round_evidence,
+                            ),
                             step_index=next_round,
                             agent_id=current_participant.agent_id,
                             participant_label=current_participant.label,

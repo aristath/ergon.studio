@@ -5,6 +5,7 @@ import zlib
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 
+from ergon_studio.proxy.delivery_requirements import normalize_delivery_requirements
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 from ergon_studio.proxy.playbook_focus import normalize_playbook_focus
 from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
@@ -18,6 +19,8 @@ class ContinuationState:
     mode: str
     agent_id: str
     participant_label: str | None = None
+    delivery_requirements: tuple[str, ...] = ()
+    delivery_evidence: tuple[str, ...] = ()
     workflow_id: str | None = None
     workflow_specialists: tuple[str, ...] = ()
     workflow_specialist_counts: tuple[tuple[str, int], ...] = ()
@@ -54,6 +57,10 @@ def encode_continuation_tool_call(
     }
     if state.participant_label is not None:
         payload["al"] = state.participant_label
+    if state.delivery_requirements:
+        payload["dr"] = list(state.delivery_requirements)
+    if state.delivery_evidence:
+        payload["de"] = list(state.delivery_evidence)
     if state.workflow_id is not None:
         payload["w"] = state.workflow_id
     if state.workflow_specialists:
@@ -117,6 +124,8 @@ def decode_continuation_from_tool_call_id(
     mode = payload.get("m")
     agent_id = payload.get("a")
     participant_label = payload.get("al")
+    delivery_requirements = payload.get("dr", [])
+    delivery_evidence = payload.get("de", [])
     workflow_id = payload.get("w")
     workflow_specialists = payload.get("p", [])
     workflow_specialist_counts_payload = payload.get("pc", {})
@@ -135,6 +144,14 @@ def decode_continuation_from_tool_call_id(
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
     if participant_label is not None and not isinstance(participant_label, str):
+        return None
+    normalized_delivery_requirements = normalize_delivery_requirements(
+        delivery_requirements
+    )
+    if normalized_delivery_requirements is None:
+        return None
+    normalized_delivery_evidence = normalize_delivery_requirements(delivery_evidence)
+    if normalized_delivery_evidence is None:
         return None
     if workflow_id is not None and not isinstance(workflow_id, str):
         return None
@@ -189,6 +206,8 @@ def decode_continuation_from_tool_call_id(
         mode=mode,
         agent_id=agent_id,
         participant_label=participant_label,
+        delivery_requirements=normalized_delivery_requirements,
+        delivery_evidence=normalized_delivery_evidence,
         workflow_id=workflow_id,
         workflow_specialists=tuple(workflow_specialists),
         workflow_specialist_counts=workflow_specialist_counts or (),

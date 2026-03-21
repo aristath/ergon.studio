@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ergon_studio.proxy.continuation import ContinuationState
+from ergon_studio.proxy.delivery_requirements import merge_delivery_evidence
 from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
 
@@ -14,6 +15,7 @@ class ProxyMoveResult:
     workflow_progress: ContinuationState | None = None
     selection_outcome: ProxySelectionOutcome | None = None
     selection_outcome_changed: bool = False
+    delivery_evidence: tuple[str, ...] = ()
 
 
 @dataclass
@@ -23,6 +25,8 @@ class ProxyDecisionLoopState:
     worklog: tuple[str, ...] = field(default_factory=tuple)
     workflow_progress: ContinuationState | None = None
     latest_selection_outcome: ProxySelectionOutcome | None = None
+    delivery_requirements: tuple[str, ...] = field(default_factory=tuple)
+    delivery_evidence: tuple[str, ...] = field(default_factory=tuple)
     current_playbook_request: str | None = None
     current_playbook_focus: str | None = None
     current_move_rationale: str | None = None
@@ -42,6 +46,10 @@ class ProxyDecisionLoopState:
         self.workflow_progress = result.workflow_progress
         if result.selection_outcome_changed:
             self.latest_selection_outcome = result.selection_outcome
+        self.delivery_evidence = merge_delivery_evidence(
+            self.delivery_evidence,
+            result.delivery_evidence,
+        )
         self.current_playbook_request = None
         self.current_playbook_focus = None
         self.current_move_rationale = None

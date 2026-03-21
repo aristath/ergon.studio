@@ -18,12 +18,6 @@ from ergon_studio.proxy.group_chat_workroom_executor import (
     ProxyGroupChatWorkroomExecutor,
 )
 from ergon_studio.proxy.grouped_workroom_executor import ProxyGroupedWorkroomExecutor
-from ergon_studio.proxy.handoff_workroom_executor import (
-    ProxyHandoffWorkroomExecutor,
-)
-from ergon_studio.proxy.magentic_workroom_executor import (
-    ProxyMagenticWorkroomExecutor,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -95,24 +89,10 @@ class ProxyOrchestrationCore:
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
         )
-        magentic_workroom_executor = ProxyMagenticWorkroomExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workroom_summary=workroom_support.emit_summary,
-            select_manager_agent=workroom_support.select_manager_agent,
-        )
-        handoff_workroom_executor = ProxyHandoffWorkroomExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workroom_summary=workroom_support.emit_summary,
-            select_handoff_target=workroom_support.select_handoff_target,
-        )
         workroom_dispatcher = ProxyWorkroomDispatcher(
             registry,
             execute_grouped_workroom=grouped_workroom_executor.execute,
             execute_group_chat_workroom=group_chat_workroom_executor.execute,
-            execute_magentic_workroom=magentic_workroom_executor.execute,
-            execute_handoff_workroom=handoff_workroom_executor.execute,
         )
         self._workroom_request_executor = ProxyWorkroomRequestExecutor(
             workroom_dispatcher

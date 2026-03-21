@@ -43,14 +43,10 @@ class ProxyWorkroomDispatcher:
         *,
         execute_grouped_workroom: WorkroomHandler,
         execute_group_chat_workroom: WorkroomHandler,
-        execute_magentic_workroom: WorkroomHandler,
-        execute_handoff_workroom: WorkroomHandler,
     ) -> None:
         self.registry = registry
         self._execute_grouped_workroom = execute_grouped_workroom
         self._execute_group_chat_workroom = execute_group_chat_workroom
-        self._execute_magentic_workroom = execute_magentic_workroom
-        self._execute_handoff_workroom = execute_handoff_workroom
 
     async def execute_workroom(
         self,
@@ -177,38 +173,6 @@ class ProxyWorkroomDispatcher:
             return
         if shape == "group_chat":
             async for event in self._execute_group_chat_workroom(
-                request=request,
-                definition=definition,
-                goal=goal,
-                specialists=specialists,
-                specialist_counts=specialist_counts,
-                workroom_request=workroom_request,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-                result_sink=result_sink,
-                loop_state=loop_state,
-            ):
-                yield event
-            return
-        if shape == "magentic":
-            async for event in self._execute_magentic_workroom(
-                request=request,
-                definition=definition,
-                goal=goal,
-                specialists=specialists,
-                specialist_counts=specialist_counts,
-                workroom_request=workroom_request,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-                result_sink=result_sink,
-                loop_state=loop_state,
-            ):
-                yield event
-            return
-        if shape == "handoff":
-            async for event in self._execute_handoff_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,

@@ -5,10 +5,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument, load_definitions_from_dir
 from ergon_studio.proxy.workroom_metadata import (
-    workroom_finalizers_for_definition,
-    workroom_handoffs_for_definition,
     workroom_selection_sequence_for_definition,
-    workroom_start_agent_for_definition,
 )
 from ergon_studio.upstream import UpstreamSettings
 from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
@@ -60,17 +57,6 @@ def _validate_workroom_references(
         for group in workroom_step_groups_for_definition(definition):
             referenced_agents.update(group)
         referenced_agents.update(workroom_selection_sequence_for_definition(definition))
-        referenced_agents.update(workroom_finalizers_for_definition(definition))
-
-        start_agent = workroom_start_agent_for_definition(definition)
-        if start_agent is not None:
-            referenced_agents.add(start_agent)
-
-        for source_agent, target_agents in workroom_handoffs_for_definition(
-            definition
-        ).items():
-            referenced_agents.add(source_agent)
-            referenced_agents.update(target_agents)
 
         missing_agents = sorted(
             agent_id for agent_id in referenced_agents if agent_id not in known_agents

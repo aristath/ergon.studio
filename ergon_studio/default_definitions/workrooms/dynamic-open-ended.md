@@ -1,7 +1,7 @@
 ---
 id: dynamic-open-ended
 name: Dynamic Open Ended
-shape: magentic
+shape: group_chat
 steps:
   - researcher
   - architect
@@ -10,6 +10,13 @@ steps:
   - reviewer
   - critic
 max_rounds: 6
+selection_sequence:
+  - researcher
+  - architect
+  - coder
+  - tester
+  - reviewer
+  - critic
 selection_hints:
   - adaptive
   - figure_it_out
@@ -19,8 +26,8 @@ selection_hints:
 ---
 
 ## Purpose
-Give the lead developer an adaptive staffing playbook for messy or exploratory
-work where the right next specialist may change as the situation evolves.
+Give the lead developer a flexible discussion room for messy or exploratory
+work where the team may need several rounds of back-and-forth.
 
 ## Use When
 - the task is ambiguous or evolving

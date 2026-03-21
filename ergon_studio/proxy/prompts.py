@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from ergon_studio.proxy.models import ProxyTurnRequest
 from ergon_studio.proxy.transcript import summarize_conversation
 
@@ -217,121 +215,8 @@ def group_chat_turn_prompt(
                 "Discussion so far:",
                 *prior_outputs[-8:],
             ]
-        )
-    return "\n".join(lines).strip()
-
-
-def workroom_manager_instructions(participants: tuple[str, ...]) -> str:
-    return "\n".join(
-        [
-            (
-                "You are helping the lead developer choose the next specialist "
-                "for an adaptive workroom."
-            ),
-            "Return JSON only.",
-            f"Allowed agents: {', '.join(participants) or '(none)'}",
-            (
-                'Return {"agent_id":"<agent>" } to continue or '
-                '{"agent_id":null} to finish.'
-            ),
-        ]
-    )
-
-
-def workroom_manager_prompt(
-    *,
-    workroom_id: str,
-    goal: str,
-    current_brief: str,
-    workroom_request: str | None,
-    participants: tuple[str, ...],
-    prior_outputs: tuple[str, ...],
-) -> str:
-    lines = [
-        f"Workroom: {workroom_id}",
-        f"Goal: {goal or '(none)'}",
-        f"Current brief: {current_brief or '(none)'}",
-        f"Available specialists: {', '.join(participants) or '(none)'}",
-    ]
-    if workroom_request:
-        lines.append(f"Current round assignment: {workroom_request}")
-    lines.extend(
-        [
-            "",
-            "Progress so far:",
-            *(prior_outputs[-8:] or ["(none)"]),
-        ]
     )
     return "\n".join(lines).strip()
-
-
-def handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
-    return "\n".join(
-        [
-            "You are choosing the next specialist handoff in a collaborative workroom.",
-            "Return JSON only.",
-            f"Allowed next agents: {', '.join(allowed) or '(none)'}",
-            (
-                'Return {"agent_id":"<agent>" } to continue or '
-                '{"agent_id":null} to finish.'
-            ),
-        ]
-    )
-
-
-def handoff_selection_prompt(
-    *,
-    workroom_id: str,
-    current_agent: str,
-    goal: str,
-    current_brief: str,
-    workroom_request: str | None,
-    prior_outputs: tuple[str, ...],
-    allowed: tuple[str, ...],
-) -> str:
-    lines = [
-        f"Workroom: {workroom_id}",
-        f"You are {current_agent}.",
-        f"Goal: {goal or '(none)'}",
-        f"Current brief: {current_brief or '(none)'}",
-        f"You may hand off to: {', '.join(allowed) or '(none)'}",
-    ]
-    if workroom_request:
-        lines.append(f"Current round assignment: {workroom_request}")
-    lines.extend(
-        [
-            "",
-            "Work so far:",
-            *(prior_outputs[-8:] or ["(none)"]),
-        ]
-    )
-    return "\n".join(lines).strip()
-
-
-def parse_agent_selection(
-    raw: str | None,
-    *,
-    participants: tuple[str, ...],
-) -> str | None:
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    candidate = payload.get("agent_id")
-    if candidate is None:
-        return None
-    if not isinstance(candidate, str):
-        return None
-    stripped = candidate.strip()
-    if not stripped or stripped.casefold() in {"none", "null", "finish", "done"}:
-        return None
-    if stripped not in participants:
-        return None
-    return stripped
 
 
 def summary_instructions() -> str:

@@ -22,8 +22,6 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             _registry(),
             execute_grouped_workroom=_empty_handler,
             execute_group_chat_workroom=_empty_handler,
-            execute_magentic_workroom=_empty_handler,
-            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -59,8 +57,6 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             _registry(),
             execute_grouped_workroom=_grouped_handler,
             execute_group_chat_workroom=_empty_handler,
-            execute_magentic_workroom=_empty_handler,
-            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -103,8 +99,6 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             _registry(),
             execute_grouped_workroom=_empty_handler,
             execute_group_chat_workroom=_group_chat_handler,
-            execute_magentic_workroom=_empty_handler,
-            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -151,8 +145,6 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             _registry(),
             execute_grouped_workroom=_grouped_handler,
             execute_group_chat_workroom=_empty_handler,
-            execute_magentic_workroom=_empty_handler,
-            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",

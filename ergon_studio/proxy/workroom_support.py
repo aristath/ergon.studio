@@ -13,12 +13,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.prompts import (
-    handoff_selection_instructions,
-    handoff_selection_prompt,
-    parse_agent_selection,
     summary_instructions,
-    workroom_manager_instructions,
-    workroom_manager_prompt,
     workroom_summary_prompt,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
@@ -65,61 +60,3 @@ class ProxyWorkroomSupport:
         state.set_content(final_text)
         if final_text:
             yield ProxyContentDeltaEvent(final_text)
-
-    async def select_manager_agent(
-        self,
-        *,
-        workroom_id: str,
-        goal: str,
-        current_brief: str,
-        workroom_request: str | None = None,
-        participants: tuple[str, ...],
-        prior_outputs: tuple[str, ...],
-        model_id_override: str,
-    ) -> str | None:
-        raw = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=workroom_manager_prompt(
-                workroom_id=workroom_id,
-                goal=goal,
-                current_brief=current_brief,
-                workroom_request=workroom_request,
-                participants=participants,
-                prior_outputs=prior_outputs,
-            ),
-            preamble=workroom_manager_instructions(participants),
-            session_id=f"proxy-workroom-manager-{uuid4().hex}",
-            model_id_override=model_id_override,
-        )
-        return parse_agent_selection(raw, participants=participants)
-
-    async def select_handoff_target(
-        self,
-        *,
-        workroom_id: str,
-        current_agent: str,
-        goal: str,
-        current_brief: str,
-        workroom_request: str | None = None,
-        prior_outputs: tuple[str, ...],
-        allowed: tuple[str, ...],
-        model_id_override: str,
-    ) -> str | None:
-        if not allowed:
-            return None
-        raw = await self._run_text_agent(
-            agent_id=current_agent,
-            prompt=handoff_selection_prompt(
-                workroom_id=workroom_id,
-                current_agent=current_agent,
-                goal=goal,
-                current_brief=current_brief,
-                workroom_request=workroom_request,
-                prior_outputs=prior_outputs,
-                allowed=allowed,
-            ),
-            preamble=handoff_selection_instructions(allowed),
-            session_id=f"proxy-handoff-select-{uuid4().hex}",
-            model_id_override=model_id_override,
-        )
-        return parse_agent_selection(raw, participants=allowed)

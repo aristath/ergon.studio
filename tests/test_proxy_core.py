@@ -531,7 +531,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Decision-ready", reasoning)
         self.assertEqual(result.content, "Debate final summary")
 
-    async def test_magentic_workroom_uses_manager_agent_selection(self) -> None:
+    async def test_dynamic_workroom_runs_as_discussion_room(self) -> None:
         registry = _advanced_workflow_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -543,17 +543,13 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             workroom_id="dynamic-open-ended",
                             message="Build it",
                         ),
-                        '{"agent_id":"architect"}',
                         _internal_action(
                             "continue_workroom",
-                            message="Take the next adaptive round",
+                            message=(
+                                "Continue the discussion and move toward "
+                                "a decision"
+                            ),
                         ),
-                        '{"agent_id":"reviewer"}',
-                        _internal_action(
-                            "continue_workroom",
-                            message="Take one more adaptive round",
-                        ),
-                        '{"agent_id":null}',
                         "Dynamic final summary",
                     ],
                     "architect": ["Architecture pass"],
@@ -579,7 +575,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Review", reasoning)
         self.assertEqual(result.content, "Dynamic final summary")
 
-    async def test_handoff_workroom_uses_specialist_handoff_selection(self) -> None:
+    async def test_handoff_chain_runs_as_staged_room(self) -> None:
         registry = _advanced_workflow_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -588,19 +584,19 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "open_workroom",
-                            workroom_id="specialist-handoff",
+                            workroom_id="handoff-chain",
                             message="Research and decide",
                         ),
                         _internal_action(
                             "continue_workroom",
                             message=(
-                                "Continue the handoff and finish the "
+                                "Continue the staged handoff toward a "
                                 "recommendation"
                             ),
                         ),
                         "Handoff final summary",
                     ],
-                    "architect": ["Initial direction", '{"agent_id":"reviewer"}'],
+                    "researcher": ["Initial direction"],
                     "reviewer": ["Final recommendation"],
                 }
             ),
@@ -619,7 +615,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("architect: Initial", reasoning)
+        self.assertIn("researcher: Initial", reasoning)
         self.assertIn("reviewer: Final", reasoning)
         self.assertEqual(result.content, "Handoff final summary")
 
@@ -1078,6 +1074,13 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 body="## Identity\nBrainstormer.",
                 sections={"Identity": "Brainstormer."},
             ),
+            "researcher": DefinitionDocument(
+                id="researcher",
+                path=Path("researcher.md"),
+                metadata={"id": "researcher", "role": "researcher"},
+                body="## Identity\nResearcher.",
+                sections={"Identity": "Researcher."},
+            ),
             "reviewer": DefinitionDocument(
                 id="reviewer",
                 path=Path("reviewer.md"),
@@ -1110,23 +1113,21 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 path=Path("dynamic-open-ended.md"),
                 metadata={
                     "id": "dynamic-open-ended",
-                    "shape": "magentic",
+                    "shape": "group_chat",
                     "step_groups": [["architect", "reviewer"]],
+                    "selection_sequence": ["architect", "reviewer"],
                     "max_rounds": 3,
                 },
                 body="## Purpose\nAdaptive.",
                 sections={"Purpose": "Adaptive."},
             ),
-            "specialist-handoff": DefinitionDocument(
-                id="specialist-handoff",
-                path=Path("specialist-handoff.md"),
+            "handoff-chain": DefinitionDocument(
+                id="handoff-chain",
+                path=Path("handoff-chain.md"),
                 metadata={
-                    "id": "specialist-handoff",
-                    "shape": "handoff",
-                    "step_groups": [["architect", "reviewer"]],
-                    "start_agent": "architect",
-                    "finalizers": ["reviewer"],
-                    "handoffs": {"architect": ["reviewer"]},
+                    "id": "handoff-chain",
+                    "shape": "sequential",
+                    "step_groups": [["researcher"], ["reviewer"]],
                     "max_rounds": 3,
                 },
                 body="## Purpose\nHandoff.",

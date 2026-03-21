@@ -1,7 +1,7 @@
 ---
 id: handoff-chain
 name: Handoff Chain
-shape: handoff
+shape: sequential
 steps:
   - researcher
   - architect
@@ -9,25 +9,6 @@ steps:
   - tester
   - critic
   - reviewer
-start_agent: researcher
-finalizers:
-  - reviewer
-handoffs:
-  researcher:
-    - architect
-    - coder
-  architect:
-    - coder
-    - critic
-  coder:
-    - tester
-    - reviewer
-  tester:
-    - coder
-    - reviewer
-  critic:
-    - architect
-    - coder
 max_rounds: 6
 selection_hints:
   - handoff
@@ -37,12 +18,11 @@ selection_hints:
 ---
 
 ## Purpose
-Move the work through a deliberate chain of specialists where each handoff is an
-explicit judgment about who should take over next.
+Move the work through a deliberate chain of specialists where the lead developer
+can keep handing the work forward stage by stage.
 
 ## Use When
 - ownership needs to pass from research to design to implementation to
   verification
-- the lead developer wants each specialist to decide who should receive the work
-  next
+- the lead developer wants a deliberate staged chain across several specialists
 - the task benefits from progressive refinement across several roles

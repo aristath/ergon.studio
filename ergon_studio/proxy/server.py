@@ -35,6 +35,7 @@ from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import probe_upstream_models
 
 MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
+MODEL_CACHE_TTL_SECONDS = 30.0
 
 
 class RequestBodyTooLargeError(ValueError):
@@ -51,6 +52,24 @@ class ProxyHTTPServer(ThreadingHTTPServer):
     ) -> None:
         super().__init__(server_address, RequestHandlerClass)
         self.core = core
+        self._models_cache: list[dict[str, Any]] | None = None
+        self._models_cache_expires_at = 0.0
+        self._models_cache_lock = threading.Lock()
+
+    def available_models(self) -> list[dict[str, Any]]:
+        now = time.monotonic()
+        with self._models_cache_lock:
+            if self._models_cache is not None and now < self._models_cache_expires_at:
+                return [dict(item) for item in self._models_cache]
+            try:
+                models = _available_models(self.core.registry)
+            except Exception:
+                if self._models_cache is not None:
+                    return [dict(item) for item in self._models_cache]
+                raise
+            self._models_cache = [dict(item) for item in models]
+            self._models_cache_expires_at = now + MODEL_CACHE_TTL_SECONDS
+            return [dict(item) for item in models]
 
 
 class ProxyRequestHandler(BaseHTTPRequestHandler):
@@ -64,7 +83,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/v1/models":
             try:
-                data = _available_models(self.proxy_server.core.registry)
+                data = self.proxy_server.available_models()
             except Exception as exc:
                 self._send_error_json(
                     HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}"

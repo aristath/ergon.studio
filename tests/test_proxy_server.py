@@ -50,6 +50,55 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(payload["object"], "list")
         self.assertEqual(payload["data"][0]["id"], "gpt-oss-20b")
 
+    def test_models_endpoint_reuses_cached_upstream_listing(self) -> None:
+        with patch(
+            "ergon_studio.proxy.server.probe_upstream_models",
+            return_value=[{"id": "gpt-oss-20b"}],
+        ) as probe:
+            handle = start_proxy_server_in_thread(
+                host="127.0.0.1",
+                port=0,
+                core=_FakeCore([]),
+            )
+            self.addCleanup(handle.close)
+
+            for _ in range(2):
+                with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(payload["data"][0]["id"], "gpt-oss-20b")
+
+        self.assertEqual(probe.call_count, 1)
+
+    def test_models_endpoint_uses_stale_cache_when_upstream_probe_fails(self) -> None:
+        with (
+            patch(
+                "ergon_studio.proxy.server.MODEL_CACHE_TTL_SECONDS",
+                0.0,
+            ),
+            patch(
+                "ergon_studio.proxy.server.probe_upstream_models",
+                side_effect=[
+                    [{"id": "gpt-oss-20b"}],
+                    RuntimeError("offline"),
+                ],
+            ) as probe,
+        ):
+            handle = start_proxy_server_in_thread(
+                host="127.0.0.1",
+                port=0,
+                core=_FakeCore([]),
+            )
+            self.addCleanup(handle.close)
+
+            with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
+                first_payload = json.loads(response.read().decode("utf-8"))
+            with urlopen(f"http://127.0.0.1:{handle.port}/v1/models") as response:
+                second_payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(first_payload["data"][0]["id"], "gpt-oss-20b")
+        self.assertEqual(second_payload["data"][0]["id"], "gpt-oss-20b")
+        self.assertEqual(probe.call_count, 2)
+
     def test_models_endpoint_returns_bad_gateway_when_upstream_listing_fails(
         self,
     ) -> None:

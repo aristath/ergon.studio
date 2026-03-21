@@ -26,7 +26,6 @@ from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
-from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 ProxyToolChoice = str | dict[str, Any] | None
 
@@ -572,11 +571,9 @@ def _agent_profile_context(
             agent_role = str(candidate.metadata.get("role", agent_id))
             agent_summaries.append(f"{agent_id}({agent_role})")
         workroom_summaries = []
-        for workroom_id, candidate in sorted(
-            registry.workroom_definitions.items()
-        ):
-            participants = ", ".join(workroom_participants_for_definition(candidate))
-            workroom_summaries.append(f"{workroom_id}({participants})")
+        for workroom_id, participants in sorted(registry.workroom_definitions.items()):
+            participant_summary = ", ".join(participants)
+            workroom_summaries.append(f"{workroom_id}({participant_summary})")
         lines.append(
             "Available specialists: "
             + (", ".join(agent_summaries) if agent_summaries else "none")

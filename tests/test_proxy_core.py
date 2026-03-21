@@ -1056,16 +1056,7 @@ class _FakeRegistry:
                 ),
             },
             workroom_definitions={
-                "standard-build": DefinitionDocument(
-                    id="standard-build",
-                    path=Path("standard-build.md"),
-                metadata={
-                    "id": "standard-build",
-                    "participants": ["architect"],
-                },
-                body="## Purpose\nBuild.",
-                sections={"Purpose": "Build."},
-            )
+                "standard-build": ("architect",),
             },
         )
 
@@ -1124,15 +1115,10 @@ def _fake_registry():
 
 def _multi_participant_workroom_registry():
     registry = _FakeRegistry()
-    registry.workroom_definitions["build-room"] = DefinitionDocument(
-        id="build-room",
-        path=Path("build-room.md"),
-        metadata={
-            "id": "build-room",
-            "participants": ["architect", "coder", "reviewer"],
-        },
-        body="## Purpose\nBuild room.",
-        sections={"Purpose": "Build room."},
+    registry.workroom_definitions["build-room"] = (
+        "architect",
+        "coder",
+        "reviewer",
     )
     return registry
 
@@ -1196,21 +1182,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
             ),
         },
         workroom_definitions={
-            "debate": DefinitionDocument(
-                id="debate",
-                path=Path("debate.md"),
-                metadata={
-                    "id": "debate",
-                    "participants": [
-                        "architect",
-                        "brainstormer",
-                        "architect",
-                        "reviewer",
-                    ],
-                },
-                body="## Purpose\nDebate.",
-                sections={"Purpose": "Debate."},
-            ),
+            "debate": ("architect", "brainstormer", "architect", "reviewer"),
         },
     )
 

@@ -1278,15 +1278,6 @@ def _proxy_registry() -> RuntimeRegistry:
             ),
         },
         workroom_definitions={
-            "standard-build": DefinitionDocument(
-                id="standard-build",
-                path=Path("standard-build.md"),
-                metadata={
-                    "id": "standard-build",
-                    "participants": ["architect"],
-                },
-                body="## Purpose\nBuild.",
-                sections={"Purpose": "Build."},
-            )
+            "standard-build": ("architect",),
         },
     )

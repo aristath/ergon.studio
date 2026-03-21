@@ -31,7 +31,6 @@ from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
-from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -368,13 +367,10 @@ def _resolve_workroom_target(
     participants: tuple[str, ...],
 ) -> tuple[str, tuple[str, ...]] | None:
     if preset is not None:
-        definition = registry.workroom_definitions.get(preset)
-        if definition is None:
+        resolved_participants = registry.workroom_definitions.get(preset)
+        if resolved_participants is None:
             return None
-        resolved_participants = participants or workroom_participants_for_definition(
-            definition
-        )
-        return preset, resolved_participants
+        return preset, participants or resolved_participants
     if participants:
         return "ad hoc", participants
     return None

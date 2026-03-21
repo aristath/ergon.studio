@@ -193,15 +193,6 @@ def _registry() -> RuntimeRegistry:
             ),
         },
         workroom_definitions={
-            "best-of-n": DefinitionDocument(
-                id="best-of-n",
-                path=Path("best-of-n.md"),
-                metadata={
-                    "id": "best-of-n",
-                    "participants": ["coder", "coder", "reviewer"],
-                },
-                body="## Purpose\nCompare options.",
-                sections={"Purpose": "Compare options."},
-            ),
+            "best-of-n": ("coder", "coder", "reviewer"),
         },
     )

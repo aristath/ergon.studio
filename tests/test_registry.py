@@ -119,6 +119,10 @@ class RegistryTests(unittest.TestCase):
             self.assertIn("standard-build", registry.workroom_definitions)
             self.assertIn("research-then-decide", registry.workroom_definitions)
             self.assertIn("debate", registry.workroom_definitions)
+            self.assertEqual(
+                registry.workroom_definitions["standard-build"],
+                ("architect", "coder"),
+            )
             self.assertEqual(registry.upstream.base_url, "http://localhost:8080/v1")
 
     def test_load_registry_requires_agents_directory(self) -> None:
@@ -178,6 +182,95 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "workroom preset 'standard-build' references unknown agents: coder",
+            ):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_requires_workroom_participants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workrooms_dir = root_dir / "workrooms"
+            agents_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "broken.md").write_text(
+                "---\nid: broken\n---\n## Purpose\nBroken.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must declare `participants`"):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_rejects_non_list_workroom_participants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workrooms_dir = root_dir / "workrooms"
+            agents_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "broken.md").write_text(
+                "---\nid: broken\nparticipants: coder\n---\n## Purpose\nBroken.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "participants must be a list"):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_rejects_empty_workroom_participants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workrooms_dir = root_dir / "workrooms"
+            agents_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "broken.md").write_text(
+                "---\nid: broken\nparticipants:\n  - \"\"\n---\n## Purpose\nBroken.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "participants must be non-empty strings"
             ):
                 load_registry(
                     root_dir,

@@ -37,6 +37,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnResult,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
+from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
 from ergon_studio.proxy.turn_state import ProxyTurnState
@@ -64,6 +65,7 @@ class ProxyOrchestrationCore:
             registry,
             agent_builder=agent_builder,
         )
+        self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
         self._workflow_dispatcher = ProxyWorkflowDispatcher(
             registry,
             execute_grouped_workflow=self._execute_grouped_workflow,
@@ -77,7 +79,7 @@ class ProxyOrchestrationCore:
         self._turn_executor = ProxyTurnExecutor(
             stream_text_agent=self._stream_text_agent,
             run_text_agent=self._run_text_agent,
-            emit_tool_calls=self._emit_tool_calls,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
         )
         self._turn_planner = ProxyTurnPlanner(
             registry,
@@ -85,23 +87,23 @@ class ProxyOrchestrationCore:
         )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
-            emit_tool_calls=self._emit_tool_calls,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
-            emit_tool_calls=self._emit_tool_calls,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
-            emit_tool_calls=self._emit_tool_calls,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
             select_manager_agent=self._workflow_support.select_manager_agent,
         )
         self._handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
-            emit_tool_calls=self._emit_tool_calls,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
             select_handoff_target=self._workflow_support.select_handoff_target,
         )
@@ -422,24 +424,3 @@ class ProxyOrchestrationCore:
             final_response_sink=final_response_sink,
         ):
             yield delta
-
-    def _emit_tool_calls(
-        self,
-        *,
-        response: Any,
-        request: ProxyTurnRequest,
-        continuation: ContinuationState,
-        state: ProxyTurnState,
-    ) -> list[ProxyToolCallEvent]:
-        encoded_calls, events = self._agent_runner.emit_tool_calls(
-            response=response,
-            request=request,
-            continuation=continuation,
-        )
-        if not events:
-            return []
-        state.tool_calls = encoded_calls
-        state.finish_reason = "tool_calls"
-        for call in encoded_calls:
-            state.record_output_item("tool_call", call_id=call.id)
-        return events

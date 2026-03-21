@@ -44,16 +44,17 @@ class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute_workroom(
                 request=request,
                 workroom_id="standard-build",
-                specialists=("coder", "reviewer"),
-                specialist_counts=(("coder", 3),),
+                participants=("coder", "coder", "coder", "reviewer"),
                 workroom_request="Build it safely",
                 state=ProxyTurnState(),
             )
         ]
 
         self.assertEqual(calls[0]["workroom_id"], "standard-build")
-        self.assertEqual(calls[0]["specialists"], ("coder", "reviewer"))
-        self.assertEqual(calls[0]["specialist_counts"], (("coder", 3),))
+        self.assertEqual(
+            calls[0]["participants"],
+            ("coder", "coder", "coder", "reviewer"),
+        )
         self.assertEqual(calls[0]["workroom_request"], "Build it safely")
         self.assertEqual(calls[0]["goal"], "Build it")
         self.assertEqual(events[0].delta, "workroom")
@@ -86,7 +87,7 @@ class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
                 agent_id="architect",
                 workroom_id="standard-build",
                 workroom_request="Old assignment",
-                workroom_specialists=("architect", "coder"),
+                workroom_participants=("architect", "coder"),
             ),
         )
 
@@ -95,8 +96,7 @@ class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute_active_workroom(
                 request=request,
                 message="Polish it",
-                specialists=("coder",),
-                specialist_counts=(("coder", 2),),
+                participants=("coder", "coder"),
                 state=ProxyTurnState(),
                 loop_state=loop_state,
             )
@@ -104,8 +104,7 @@ class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         continuation = calls[0]["continuation"]
         self.assertEqual(continuation.workroom_request, "Polish it")
-        self.assertEqual(continuation.workroom_specialists, ("coder",))
-        self.assertEqual(continuation.workroom_specialist_counts, (("coder", 2),))
+        self.assertEqual(continuation.workroom_participants, ("coder", "coder"))
         self.assertEqual(events[0].delta, "continued")
 
     async def test_execute_workroom_continuation_forwards_pending_state(self) -> None:
@@ -172,8 +171,7 @@ class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute_active_workroom(
                 request=request,
                 message="Keep going",
-                specialists=(),
-                specialist_counts=(),
+                participants=(),
                 state=state,
             )
         ]

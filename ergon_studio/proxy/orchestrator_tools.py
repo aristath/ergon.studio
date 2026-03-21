@@ -20,8 +20,7 @@ class MessageSpecialistAction:
 @dataclass(frozen=True)
 class OpenWorkroomAction:
     workroom_id: str | None
-    specialists: tuple[str, ...]
-    specialist_counts: tuple[tuple[str, int], ...]
+    participants: tuple[str, ...]
     message: str
 
 
@@ -127,19 +126,18 @@ def parse_internal_action(
 
     if tool_call.name == "open_workroom":
         workroom_id = _optional_workroom_id(payload.get("workroom_id"), registry)
-        specialists, specialist_counts = _normalize_staffing_list(
+        participants = _normalize_staffing_list(
             payload.get("participants"),
             registry=registry,
         )
-        if workroom_id is None and not specialists:
+        if workroom_id is None and not participants:
             raise ValueError(
                 "open_workroom requires either a preset workroom_id or participants"
             )
         message = _required_text(payload.get("message"), field="message")
         return OpenWorkroomAction(
             workroom_id=workroom_id,
-            specialists=specialists,
-            specialist_counts=specialist_counts,
+            participants=participants,
             message=message,
         )
 
@@ -190,11 +188,10 @@ def _normalize_staffing_list(
     value: object,
     *,
     registry: RuntimeRegistry,
-) -> tuple[tuple[str, ...], tuple[tuple[str, int], ...]]:
+) -> tuple[str, ...]:
     if not isinstance(value, list):
-        return (), ()
-    counts: dict[str, int] = {}
-    order: list[str] = []
+        return ()
+    participants: list[str] = []
     for item in value:
         if not isinstance(item, str):
             continue
@@ -205,12 +202,5 @@ def _normalize_staffing_list(
             or candidate not in registry.agent_definitions
         ):
             continue
-        if candidate not in counts:
-            counts[candidate] = 0
-            order.append(candidate)
-        counts[candidate] += 1
-    specialists = tuple(order)
-    specialist_counts = tuple(
-        (agent_id, count) for agent_id in order if (count := counts[agent_id]) > 1
-    )
-    return specialists, specialist_counts
+        participants.append(candidate)
+    return tuple(participants)

@@ -17,8 +17,7 @@ class ContinuationState:
     agent_id: str
     participant_label: str | None = None
     workroom_id: str | None = None
-    workroom_specialists: tuple[str, ...] = ()
-    workroom_specialist_counts: tuple[tuple[str, int], ...] = ()
+    workroom_participants: tuple[str, ...] = ()
     workroom_request: str | None = None
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
@@ -52,12 +51,8 @@ def encode_continuation_tool_call(
         payload["al"] = state.participant_label
     if state.workroom_id is not None:
         payload["w"] = state.workroom_id
-    if state.workroom_specialists:
-        payload["p"] = list(state.workroom_specialists)
-    if state.workroom_specialist_counts:
-        payload["pc"] = {
-            agent_id: count for agent_id, count in state.workroom_specialist_counts
-        }
+    if state.workroom_participants:
+        payload["p"] = list(state.workroom_participants)
     if state.workroom_request is not None:
         payload["pr"] = state.workroom_request
     if state.last_stage_outputs:
@@ -104,8 +99,7 @@ def decode_continuation_from_tool_call_id(
     agent_id = payload.get("a")
     participant_label = payload.get("al")
     workroom_id = payload.get("w")
-    workroom_specialists = payload.get("p", [])
-    workroom_specialist_counts_payload = payload.get("pc", {})
+    workroom_participants = payload.get("p", [])
     workroom_request = payload.get("pr")
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
@@ -122,17 +116,8 @@ def decode_continuation_from_tool_call_id(
         return None
     if workroom_id is not None and not isinstance(workroom_id, str):
         return None
-    if not isinstance(workroom_specialists, list) or not all(
-        isinstance(item, str) for item in workroom_specialists
-    ):
-        return None
-    workroom_specialist_counts = _decode_specialist_counts(
-        workroom_specialist_counts_payload
-    )
-    if (
-        workroom_specialist_counts_payload is not None
-        and workroom_specialist_counts_payload != {}
-        and workroom_specialist_counts is None
+    if not isinstance(workroom_participants, list) or not all(
+        isinstance(item, str) for item in workroom_participants
     ):
         return None
     if not isinstance(last_stage_outputs, list) or not all(
@@ -166,8 +151,7 @@ def decode_continuation_from_tool_call_id(
         agent_id=agent_id,
         participant_label=participant_label,
         workroom_id=workroom_id,
-        workroom_specialists=tuple(workroom_specialists),
-        workroom_specialist_counts=workroom_specialist_counts or (),
+        workroom_participants=tuple(workroom_participants),
         workroom_request=workroom_request,
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
@@ -228,26 +212,6 @@ def original_tool_call_id(tool_call_id: str) -> str | None:
     except ValueError:
         return None
     return original or None
-
-
-
-def _decode_specialist_counts(
-    payload: object,
-) -> tuple[tuple[str, int], ...] | None:
-    if payload is None:
-        return ()
-    if not isinstance(payload, dict):
-        return None
-    specialist_counts: list[tuple[str, int]] = []
-    for raw_agent_id, raw_count in payload.items():
-        if not isinstance(raw_agent_id, str) or not raw_agent_id:
-            return None
-        if isinstance(raw_count, bool) or not isinstance(raw_count, int):
-            return None
-        if raw_count <= 0:
-            return None
-        specialist_counts.append((raw_agent_id, raw_count))
-    return tuple(specialist_counts)
 
 
 def latest_continuation(

@@ -35,8 +35,7 @@ class ProxyWorkroomRequestExecutor:
         *,
         request: ProxyTurnRequest,
         message: str | None,
-        specialists: tuple[str, ...],
-        specialist_counts: tuple[tuple[str, int], ...],
+        participants: tuple[str, ...],
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
@@ -53,8 +52,7 @@ class ProxyWorkroomRequestExecutor:
         active_continuation = _override_active_staffing(
             workroom_progress,
             message=message,
-            specialists=specialists,
-            specialist_counts=specialist_counts,
+            participants=participants,
         )
         async for event in self._workroom_dispatcher.execute_workroom_continuation(
             request=request,
@@ -71,8 +69,7 @@ class ProxyWorkroomRequestExecutor:
         *,
         request: ProxyTurnRequest,
         workroom_id: str | None,
-        specialists: tuple[str, ...],
-        specialist_counts: tuple[tuple[str, int], ...],
+        participants: tuple[str, ...],
         workroom_request: str | None,
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
@@ -81,8 +78,7 @@ class ProxyWorkroomRequestExecutor:
         async for event in self._workroom_dispatcher.execute_workroom(
             request=request,
             workroom_id=workroom_id,
-            specialists=specialists,
-            specialist_counts=specialist_counts,
+            participants=participants,
             workroom_request=workroom_request,
             goal=(
                 loop_state.goal
@@ -120,23 +116,17 @@ def _override_active_staffing(
     continuation: ContinuationState,
     *,
     message: str | None,
-    specialists: tuple[str, ...],
-    specialist_counts: tuple[tuple[str, int], ...],
+    participants: tuple[str, ...],
 ) -> ContinuationState:
-    workroom_specialists = specialists or continuation.workroom_specialists
-    workroom_specialist_counts = (
-        specialist_counts or continuation.workroom_specialist_counts
-    )
+    workroom_participants = participants or continuation.workroom_participants
     workroom_request = message or continuation.workroom_request
     if (
-        workroom_specialists == continuation.workroom_specialists
-        and workroom_specialist_counts == continuation.workroom_specialist_counts
+        workroom_participants == continuation.workroom_participants
         and workroom_request == continuation.workroom_request
     ):
         return continuation
     return replace(
         continuation,
-        workroom_specialists=workroom_specialists,
-        workroom_specialist_counts=workroom_specialist_counts,
+        workroom_participants=workroom_participants,
         workroom_request=workroom_request,
     )

@@ -103,8 +103,7 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 request=request,
                 definition=_definition(),
                 goal="Debate it",
-                specialists=("architect", "reviewer"),
-                specialist_counts=(("reviewer", 2),),
+                participants=("architect", "reviewer", "reviewer"),
                 state=state,
             )
         ]

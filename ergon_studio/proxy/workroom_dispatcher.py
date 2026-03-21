@@ -53,8 +53,7 @@ class ProxyWorkroomDispatcher:
         *,
         request: ProxyTurnRequest,
         workroom_id: str | None,
-        specialists: tuple[str, ...] = (),
-        specialist_counts: tuple[tuple[str, int], ...] = (),
+        participants: tuple[str, ...] = (),
         workroom_request: str | None = None,
         goal: str,
         state: ProxyTurnState,
@@ -63,8 +62,7 @@ class ProxyWorkroomDispatcher:
     ) -> AsyncIterator[ProxyEvent]:
         definition = self._resolve_workroom_definition(
             workroom_id=workroom_id,
-            specialists=specialists,
-            specialist_counts=specialist_counts,
+            participants=participants,
         )
         if definition is None:
             state.finish_reason = "error"
@@ -82,8 +80,7 @@ class ProxyWorkroomDispatcher:
             request=request,
             definition=definition,
             goal=goal,
-            specialists=specialists,
-            specialist_counts=specialist_counts,
+            participants=participants,
             workroom_request=workroom_request,
             state=state,
             result_sink=result_sink,
@@ -103,8 +100,7 @@ class ProxyWorkroomDispatcher:
     ) -> AsyncIterator[ProxyEvent]:
         definition = self._resolve_workroom_definition(
             workroom_id=continuation.workroom_id,
-            specialists=continuation.workroom_specialists,
-            specialist_counts=continuation.workroom_specialist_counts,
+            participants=continuation.workroom_participants,
         )
         if definition is None:
             state.finish_reason = "error"
@@ -128,8 +124,7 @@ class ProxyWorkroomDispatcher:
             request=request,
             definition=definition,
             goal=continuation.goal or request.latest_user_text() or "",
-            specialists=continuation.workroom_specialists,
-            specialist_counts=continuation.workroom_specialist_counts,
+            participants=continuation.workroom_participants,
             workroom_request=continuation.workroom_request,
             state=state,
             continuation=continuation,
@@ -145,8 +140,7 @@ class ProxyWorkroomDispatcher:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        specialists: tuple[str, ...] = (),
-        specialist_counts: tuple[tuple[str, int], ...] = (),
+        participants: tuple[str, ...] = (),
         workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
@@ -160,8 +154,7 @@ class ProxyWorkroomDispatcher:
                 request=request,
                 definition=definition,
                 goal=goal,
-                specialists=specialists,
-                specialist_counts=specialist_counts,
+                participants=participants,
                 workroom_request=workroom_request,
                 state=state,
                 continuation=continuation,
@@ -176,8 +169,7 @@ class ProxyWorkroomDispatcher:
                 request=request,
                 definition=definition,
                 goal=goal,
-                specialists=specialists,
-                specialist_counts=specialist_counts,
+                participants=participants,
                 workroom_request=workroom_request,
                 state=state,
                 continuation=continuation,
@@ -193,15 +185,13 @@ class ProxyWorkroomDispatcher:
         self,
         *,
         workroom_id: str | None,
-        specialists: tuple[str, ...],
-        specialist_counts: tuple[tuple[str, int], ...],
+        participants: tuple[str, ...],
     ) -> DefinitionDocument | None:
         if is_ad_hoc_workroom(workroom_id):
-            if not specialists:
+            if not participants:
                 return None
             return _ad_hoc_workroom_definition(
-                specialists=specialists,
-                specialist_counts=specialist_counts,
+                participants=participants,
             )
         return self.registry.workroom_definitions.get(workroom_id or "")
 
@@ -223,17 +213,9 @@ def _workroom_intro(definition: DefinitionDocument) -> str:
 
 def _ad_hoc_workroom_definition(
     *,
-    specialists: tuple[str, ...],
-    specialist_counts: tuple[tuple[str, int], ...],
+    participants: tuple[str, ...],
 ) -> DefinitionDocument:
-    count_map = {agent_id: count for agent_id, count in specialist_counts}
-    expanded_staffing = tuple(
-        agent_id
-        for agent_id in specialists
-        for _ in range(count_map.get(agent_id, 1))
-    )
-    if not expanded_staffing:
-        expanded_staffing = specialists
+    expanded_staffing = participants
     unique_roles = {agent_id for agent_id in expanded_staffing}
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
         shape = "staged"
@@ -241,7 +223,11 @@ def _ad_hoc_workroom_definition(
         max_rounds = len(expanded_staffing)
     else:
         shape = "discussion"
-        metadata = {"turns": list(specialists)}
+        ordered_roles: list[str] = []
+        for agent_id in expanded_staffing:
+            if agent_id not in ordered_roles:
+                ordered_roles.append(agent_id)
+        metadata = {"turns": ordered_roles}
         max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(
         id=AD_HOC_WORKROOM_ID,

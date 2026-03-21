@@ -14,14 +14,11 @@ class StaffedParticipant:
 def expand_staffed_participants(
     base_participants: tuple[str, ...],
     *,
-    specialists: tuple[str, ...] = (),
-    specialist_counts: tuple[tuple[str, int], ...] = (),
+    participants: tuple[str, ...] = (),
 ) -> tuple[StaffedParticipant, ...]:
-    count_map = dict(specialist_counts)
-    allowed = set(specialists) if specialists else None
-    if allowed is not None:
-        allowed.update(count_map)
-    participants: list[StaffedParticipant] = []
+    count_map = _participant_counts(participants)
+    allowed = set(count_map) if count_map else None
+    staffed_participants: list[StaffedParticipant] = []
     seen_agents: set[str] = set()
     for agent_id in base_participants:
         if agent_id in seen_agents:
@@ -29,9 +26,9 @@ def expand_staffed_participants(
         seen_agents.add(agent_id)
         if allowed is not None and agent_id not in allowed:
             continue
-        total_instances = count_map.get(agent_id, 1)
+        total_instances = count_map.get(agent_id, 1) if count_map else 1
         for instance_index in range(1, total_instances + 1):
-            participants.append(
+            staffed_participants.append(
                 StaffedParticipant(
                     agent_id=agent_id,
                     label=_participant_label(
@@ -43,7 +40,7 @@ def expand_staffed_participants(
                     total_instances=total_instances,
                 )
             )
-    return tuple(participants)
+    return tuple(staffed_participants)
 
 
 def expand_staffed_sequence(
@@ -117,3 +114,12 @@ def _participant_label(
     if total_instances <= 1:
         return agent_id
     return f"{agent_id}[{instance_index}]"
+
+
+def _participant_counts(
+    participants: tuple[str, ...],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for agent_id in participants:
+        counts[agent_id] = counts.get(agent_id, 0) + 1
+    return counts

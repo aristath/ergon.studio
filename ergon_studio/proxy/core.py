@@ -326,8 +326,7 @@ class ProxyOrchestrationCore:
             async for event in self._workroom_request_executor.execute_workroom(
                 request=request,
                 workroom_id=action.workroom_id,
-                specialists=action.specialists,
-                specialist_counts=action.specialist_counts,
+                participants=action.participants,
                 workroom_request=action.message,
                 state=state,
                 result_sink=_result_sink(result_holder),
@@ -340,8 +339,7 @@ class ProxyOrchestrationCore:
             async for event in self._workroom_request_executor.execute_active_workroom(
                 request=request,
                 message=action.message,
-                specialists=(),
-                specialist_counts=(),
+                participants=(),
                 state=state,
                 result_sink=_result_sink(result_holder),
                 loop_state=loop_state,
@@ -427,13 +425,8 @@ def _orchestrator_continuation_state(
         workroom_id=(
             workroom_progress.workroom_id if workroom_progress is not None else None
         ),
-        workroom_specialists=(
-            workroom_progress.workroom_specialists
-            if workroom_progress is not None
-            else ()
-        ),
-        workroom_specialist_counts=(
-            workroom_progress.workroom_specialist_counts
+        workroom_participants=(
+            workroom_progress.workroom_participants
             if workroom_progress is not None
             else ()
         ),

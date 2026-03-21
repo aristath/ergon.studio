@@ -60,8 +60,7 @@ class ProxyStagedWorkroomExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        specialists: tuple[str, ...] = (),
-        specialist_counts: tuple[tuple[str, int], ...] = (),
+        participants: tuple[str, ...] = (),
         workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
@@ -69,20 +68,14 @@ class ProxyStagedWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        staffed_specialists = (
-            continuation.workroom_specialists
+        staffed_participants = (
+            continuation.workroom_participants
             if continuation is not None
-            else specialists
-        )
-        staffed_specialist_counts = (
-            continuation.workroom_specialist_counts
-            if continuation is not None
-            else specialist_counts
+            else participants
         )
         stage_groups = _filtered_stage_groups(
             definition,
-            staffed_specialists,
-            staffed_specialist_counts,
+            staffed_participants,
         )
         start_index = (
             continuation.progress_index
@@ -178,10 +171,7 @@ class ProxyStagedWorkroomExecutor:
                                 workroom_progress=self._next_workroom_progress(
                                     definition=definition,
                                     stage_groups=stage_groups,
-                                    staffed_specialists=staffed_specialists,
-                                    staffed_specialist_counts=(
-                                        staffed_specialist_counts
-                                    ),
+                                    staffed_participants=staffed_participants,
                                     workroom_request=workroom_request,
                                     stage_index=stage_index,
                                     goal=goal,
@@ -247,8 +237,7 @@ class ProxyStagedWorkroomExecutor:
                         continuation=ContinuationState(
                             mode="workroom",
                             workroom_id=definition.id,
-                            workroom_specialists=staffed_specialists,
-                            workroom_specialist_counts=staffed_specialist_counts,
+                            workroom_participants=staffed_participants,
                             workroom_request=workroom_request,
                             last_stage_outputs=tuple(last_stage_outputs),
                             last_stage_parallel_attempts=(
@@ -289,8 +278,7 @@ class ProxyStagedWorkroomExecutor:
                         workroom_progress=self._next_workroom_progress(
                             definition=definition,
                             stage_groups=stage_groups,
-                            staffed_specialists=staffed_specialists,
-                            staffed_specialist_counts=staffed_specialist_counts,
+                            staffed_participants=staffed_participants,
                             workroom_request=workroom_request,
                             stage_index=stage_index,
                             goal=goal,
@@ -407,8 +395,7 @@ class ProxyStagedWorkroomExecutor:
         *,
         definition: DefinitionDocument,
         stage_groups: tuple[tuple[str, ...], ...],
-        staffed_specialists: tuple[str, ...],
-        staffed_specialist_counts: tuple[tuple[str, int], ...],
+        staffed_participants: tuple[str, ...],
         stage_index: int,
         goal: str,
         current_brief: str,
@@ -425,8 +412,7 @@ class ProxyStagedWorkroomExecutor:
         return ContinuationState(
             mode="workroom",
             workroom_id=definition.id,
-            workroom_specialists=staffed_specialists,
-            workroom_specialist_counts=staffed_specialist_counts,
+            workroom_participants=staffed_participants,
             workroom_request=workroom_request,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
@@ -444,16 +430,13 @@ class ProxyStagedWorkroomExecutor:
 
 def _filtered_stage_groups(
     definition: DefinitionDocument,
-    specialists: tuple[str, ...],
-    specialist_counts: tuple[tuple[str, int], ...],
+    participants: tuple[str, ...],
 ) -> tuple[tuple[str, ...], ...]:
     stage_groups = staged_groups_for_definition(definition)
-    if not specialists and not specialist_counts:
+    if not participants:
         return stage_groups
-    count_map = dict(specialist_counts)
-    allowed = set(specialists) if specialists else None
-    if allowed is not None:
-        allowed.update(count_map)
+    count_map = _participant_counts(participants)
+    allowed = set(count_map)
     filtered: list[tuple[str, ...]] = []
     for group in stage_groups:
         filtered_group = _expand_group_staffing(
@@ -469,7 +452,7 @@ def _filtered_stage_groups(
 def _expand_group_staffing(
     *,
     group: tuple[str, ...],
-    allowed: set[str] | None,
+    allowed: set[str],
     count_map: dict[str, int],
 ) -> tuple[str, ...]:
     expanded: list[str] = []
@@ -478,12 +461,21 @@ def _expand_group_staffing(
         if agent_id in seen_roles:
             continue
         seen_roles.add(agent_id)
-        if allowed is not None and agent_id not in allowed:
+        if agent_id not in allowed:
             continue
         default_count = sum(1 for candidate in group if candidate == agent_id)
         desired_count = count_map.get(agent_id, default_count)
         expanded.extend(agent_id for _ in range(desired_count))
     return tuple(expanded)
+
+
+def _participant_counts(
+    participants: tuple[str, ...],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for agent_id in participants:
+        counts[agent_id] = counts.get(agent_id, 0) + 1
+    return counts
 
 
 def _is_parallel_attempt_group(group: tuple[str, ...]) -> bool:

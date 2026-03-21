@@ -59,8 +59,7 @@ class ProxyDiscussionWorkroomExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        specialists: tuple[str, ...] = (),
-        specialist_counts: tuple[tuple[str, int], ...] = (),
+        participants: tuple[str, ...] = (),
         workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
@@ -68,20 +67,14 @@ class ProxyDiscussionWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        staffed_specialists = (
-            continuation.workroom_specialists
+        staffed_participants = (
+            continuation.workroom_participants
             if continuation is not None
-            else specialists
-        )
-        staffed_specialist_counts = (
-            continuation.workroom_specialist_counts
-            if continuation is not None
-            else specialist_counts
+            else participants
         )
         participants = expand_staffed_participants(
             workroom_participants_for_definition(definition),
-            specialists=staffed_specialists,
-            specialist_counts=staffed_specialist_counts,
+            participants=staffed_participants,
         )
         sequence = expand_staffed_sequence(
             workroom_turn_sequence_for_definition(definition),
@@ -175,8 +168,7 @@ class ProxyDiscussionWorkroomExecutor:
                     continuation=ContinuationState(
                         mode="workroom",
                         workroom_id=definition.id,
-                        workroom_specialists=staffed_specialists,
-                        workroom_specialist_counts=staffed_specialist_counts,
+                        workroom_participants=staffed_participants,
                         workroom_request=workroom_request,
                         progress_index=turn_index,
                         agent_id=participant.agent_id,
@@ -207,8 +199,7 @@ class ProxyDiscussionWorkroomExecutor:
                     workroom_progress = ContinuationState(
                         mode="workroom",
                         workroom_id=definition.id,
-                        workroom_specialists=staffed_specialists,
-                        workroom_specialist_counts=staffed_specialist_counts,
+                        workroom_participants=staffed_participants,
                         workroom_request=workroom_request,
                         progress_index=next_turn,
                         agent_id=(

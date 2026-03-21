@@ -111,7 +111,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             async for event in dispatcher.execute_workroom(
                 request=request,
                 workroom_id="ad-hoc-workroom",
-                specialists=("architect", "coder", "critic"),
+                participants=("architect", "coder", "critic"),
                 goal="Brainstorm it",
                 state=state,
             )
@@ -162,8 +162,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             async for event in dispatcher.execute_workroom(
                 request=request,
                 workroom_id="ad-hoc-workroom",
-                specialists=("coder",),
-                specialist_counts=(("coder", 3),),
+                participants=("coder", "coder", "coder"),
                 goal="Try three implementations",
                 state=state,
             )

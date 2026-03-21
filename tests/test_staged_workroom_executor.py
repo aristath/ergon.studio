@@ -159,8 +159,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 request=request,
                 definition=_definition(),
                 goal="Try a few approaches",
-                specialists=("coder",),
-                specialist_counts=(("coder", 3),),
+                participants=("coder", "coder", "coder"),
                 state=state,
             )
         ]
@@ -331,7 +330,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             continuation=ContinuationState(
                 mode="workroom",
                 workroom_id="best-of-n",
-                workroom_specialists=("coder", "reviewer"),
+                workroom_participants=("coder", "coder", "reviewer"),
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 progress_index=1,
@@ -384,7 +383,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             continuation=ContinuationState(
                 mode="workroom",
                 workroom_id="best-of-n",
-                workroom_specialists=("coder", "reviewer"),
+                workroom_participants=("coder", "coder", "reviewer"),
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 progress_index=1,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument, load_definitions_from_dir
 from ergon_studio.upstream import UpstreamSettings
-from ergon_studio.workroom_layout import referenced_agents_for_definition
+from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ def _validate_workroom_references(
 ) -> None:
     known_agents = set(agent_definitions)
     for workroom_id, definition in workroom_definitions.items():
-        referenced_agents = set(referenced_agents_for_definition(definition))
+        referenced_agents = set(workroom_participants_for_definition(definition))
         missing_agents = sorted(
             agent_id for agent_id in referenced_agents if agent_id not in known_agents
         )

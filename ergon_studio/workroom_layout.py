@@ -22,12 +22,6 @@ def workroom_participants_for_definition(
     )
 
 
-def referenced_agents_for_definition(
-    definition: DefinitionDocument,
-) -> tuple[str, ...]:
-    return workroom_participants_for_definition(definition)
-
-
 def _validate_member_sequence(
     workroom_id: str,
     values: list[object],

@@ -5,10 +5,7 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import load_definition
-from ergon_studio.workroom_layout import (
-    referenced_agents_for_definition,
-    workroom_participants_for_definition,
-)
+from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 
 class WorkroomLayoutTests(unittest.TestCase):
@@ -34,10 +31,6 @@ Generate multiple candidates.
             definition = load_definition(definition_path)
             self.assertEqual(
                 workroom_participants_for_definition(definition),
-                ("coder", "coder", "coder", "reviewer"),
-            )
-            self.assertEqual(
-                referenced_agents_for_definition(definition),
                 ("coder", "coder", "coder", "reviewer"),
             )
 

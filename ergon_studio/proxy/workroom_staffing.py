@@ -68,30 +68,6 @@ def expand_staffed_participants(
     return tuple(staffed_participants)
 
 
-def participant_by_label(
-    participants: tuple[StaffedParticipant, ...],
-    label: str | None,
-) -> StaffedParticipant | None:
-    if label is None:
-        return None
-    for participant in participants:
-        if participant.label == label:
-            return participant
-    return None
-
-
-def participant_for_agent(
-    participants: tuple[StaffedParticipant, ...],
-    agent_id: str | None,
-) -> StaffedParticipant | None:
-    if agent_id is None:
-        return None
-    for participant in participants:
-        if participant.agent_id == agent_id:
-            return participant
-    return None
-
-
 def participant_context(participant: StaffedParticipant) -> str | None:
     if participant.total_instances <= 1:
         return None
@@ -99,18 +75,6 @@ def participant_context(participant: StaffedParticipant) -> str | None:
         f"You are instance {participant.instance_index} of "
         f"{participant.total_instances} staffed {participant.agent_id}s for this "
         "round. Produce an independently useful contribution."
-    )
-
-
-def participant_labels_for_agents(
-    participants: tuple[StaffedParticipant, ...],
-    agent_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    allowed = set(agent_ids)
-    return tuple(
-        participant.label
-        for participant in participants
-        if participant.agent_id in allowed
     )
 
 

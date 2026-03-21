@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
 from ergon_studio.proxy.models import (
-    ProxyContentDeltaEvent,
-    ProxyFinishEvent,
     ProxyReasoningDeltaEvent,
     ProxyToolCallEvent,
     ProxyTurnRequest,
@@ -30,9 +28,7 @@ from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
-    | ProxyContentDeltaEvent
     | ProxyToolCallEvent
-    | ProxyFinishEvent
 )
 
 

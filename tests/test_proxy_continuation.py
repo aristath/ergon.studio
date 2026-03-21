@@ -7,7 +7,6 @@ from ergon_studio.proxy.continuation import (
     decode_continuation_from_tool_call_id,
     decode_original_tool_call,
     encode_continuation_tool_call,
-    latest_continuation,
     latest_pending_continuation,
     original_tool_call_id,
 )
@@ -63,41 +62,6 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.worklog, ("architect: use main.py",))
         self.assertEqual(decoded.actor, "coder[1]")
 
-    def test_latest_continuation_uses_latest_tool_message(self) -> None:
-        first_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(
-                actor="coder",
-                workroom_name="ad hoc",
-                workroom_participants=("coder",),
-            ),
-        )
-        second_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
-            state=ContinuationState(actor="orchestrator"),
-        )
-        messages = (
-            ProxyInputMessage(role="user", content="Build it"),
-            ProxyInputMessage(role="assistant", content="", tool_calls=(first_call,)),
-            ProxyInputMessage(
-                role="tool",
-                content="first output",
-                tool_call_id=first_call.id,
-            ),
-            ProxyInputMessage(role="assistant", content="", tool_calls=(second_call,)),
-            ProxyInputMessage(
-                role="tool",
-                content="second output",
-                tool_call_id=second_call.id,
-            ),
-        )
-
-        decoded = latest_continuation(messages)
-
-        self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.actor, "orchestrator")
-        self.assertIsNone(decoded.workroom_name)
-
     def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
@@ -118,7 +82,6 @@ class ProxyContinuationTests(unittest.TestCase):
         )
 
         self.assertIsNone(latest_pending_continuation(messages))
-        self.assertIsNone(latest_continuation(messages))
 
     def test_latest_pending_continuation_returns_matching_assistant_and_results(
         self,

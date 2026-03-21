@@ -68,7 +68,6 @@ class ProxyWorkroomExecutor:
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
-        workroom_key = _workroom_key(workroom_name)
         round_participants = _round_participants(
             participants=participants,
             continuation=continuation,
@@ -100,7 +99,6 @@ class ProxyWorkroomExecutor:
                 parallel_results = await self._run_parallel_round(
                     request=request,
                     workroom_name=workroom_name,
-                    workroom_key=workroom_key,
                     staffed_members=staffed_members,
                     user_request=user_request,
                     workroom_message=workroom_message,
@@ -149,8 +147,7 @@ class ProxyWorkroomExecutor:
                         agent_id=participant.agent_id,
                         prompt=prompt,
                         session_id=(
-                            f"proxy-workroom-{workroom_key}-{participant.label}-"
-                            f"{uuid4().hex}"
+                            f"proxy-workroom-{participant.label}-{uuid4().hex}"
                         ),
                         model_id_override=request.model,
                         host_tools=request.tools,
@@ -250,7 +247,6 @@ class ProxyWorkroomExecutor:
         *,
         request: ProxyTurnRequest,
         workroom_name: str,
-        workroom_key: str,
         staffed_members: tuple[StaffedParticipant, ...],
         user_request: str,
         workroom_message: str | None,
@@ -260,7 +256,6 @@ class ProxyWorkroomExecutor:
                 self._run_round_participant(
                     request=request,
                     workroom_name=workroom_name,
-                    workroom_key=workroom_key,
                     participant=participant,
                     user_request=user_request,
                     workroom_message=workroom_message,
@@ -275,7 +270,6 @@ class ProxyWorkroomExecutor:
         *,
         request: ProxyTurnRequest,
         workroom_name: str,
-        workroom_key: str,
         participant: StaffedParticipant,
         user_request: str,
         workroom_message: str | None,
@@ -298,7 +292,7 @@ class ProxyWorkroomExecutor:
         stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
-            session_id=f"proxy-workroom-{workroom_key}-{participant.label}-{uuid4().hex}",
+            session_id=f"proxy-workroom-{participant.label}-{uuid4().hex}",
             model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,
@@ -349,8 +343,6 @@ def _prior_work(
     return tuple(prior_work[-6:])
 
 
-def _workroom_key(workroom_name: str) -> str:
-    return workroom_name.replace(" ", "_")
 
 
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:

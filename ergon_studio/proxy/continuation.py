@@ -143,15 +143,6 @@ def original_tool_call_id(tool_call_id: str) -> str | None:
     return original or None
 
 
-def latest_continuation(
-    messages: tuple[ProxyInputMessage, ...],
-) -> ContinuationState | None:
-    pending = latest_pending_continuation(messages)
-    if pending is None:
-        return None
-    return pending.state
-
-
 def latest_pending_continuation(
     messages: tuple[ProxyInputMessage, ...],
 ) -> PendingContinuation | None:

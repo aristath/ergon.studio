@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
@@ -23,9 +22,7 @@ from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
     ProxyFunctionTool,
-    ProxyOutputItemRef,
     ProxyReasoningDeltaEvent,
-    ProxyToolCall,
     ProxyToolCallEvent,
     ProxyTurnRequest,
     ProxyTurnResult,
@@ -51,11 +48,12 @@ from ergon_studio.proxy.prompts import (
     workflow_step_prompt,
     workflow_summary_prompt,
 )
+from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_metadata import (
     workflow_finalizers_for_definition,
     workflow_handoffs_for_definition,
     workflow_max_rounds_for_definition,
-    workflow_orchestration_for_definition,
     workflow_participants_for_definition,
     workflow_selection_sequence_for_definition,
     workflow_start_agent_for_definition,
@@ -70,34 +68,6 @@ ProxyEvent = (
     | ProxyFinishEvent
 )
 
-@dataclass
-class ProxyTurnState:
-    content: str = ""
-    reasoning: str = ""
-    mode: str = "act"
-    finish_reason: str = "stop"
-    tool_calls: tuple[ProxyToolCall, ...] = ()
-    output_items: tuple[ProxyOutputItemRef, ...] = field(default_factory=tuple)
-
-    def append_content(self, delta: str) -> None:
-        self.content += delta
-        self.record_output_item("content")
-
-    def set_content(self, content: str) -> None:
-        self.content = content
-        if content:
-            self.record_output_item("content")
-
-    def append_reasoning(self, delta: str) -> None:
-        self.reasoning += delta
-        self.record_output_item("reasoning")
-
-    def record_output_item(self, kind: str, *, call_id: str | None = None) -> None:
-        item = ProxyOutputItemRef(kind, call_id)
-        if item in self.output_items:
-            return
-        self.output_items = (*self.output_items, item)
-
 
 class ProxyOrchestrationCore:
     def __init__(
@@ -110,6 +80,13 @@ class ProxyOrchestrationCore:
         self._agent_runner = ProxyAgentRunner(
             registry,
             agent_builder=agent_builder,
+        )
+        self._workflow_dispatcher = ProxyWorkflowDispatcher(
+            registry,
+            execute_grouped_workflow=self._execute_grouped_workflow,
+            execute_group_chat_workflow=self._execute_group_chat_workflow,
+            execute_magentic_workflow=self._execute_magentic_workflow,
+            execute_handoff_workflow=self._execute_handoff_workflow,
         )
 
     def stream_turn(
@@ -364,56 +341,14 @@ class ProxyOrchestrationCore:
         created_at: int,
         state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
-        definition = self.registry.workflow_definitions.get(plan.workflow_id or "")
-        if definition is None:
-            state.finish_reason = "error"
-            error_text = f"Unknown workflow: {plan.workflow_id or '(none)'}"
-            state.content = error_text
-            yield ProxyContentDeltaEvent(error_text)
-            return
-        intro = f"Orchestrator: running workflow {definition.id}.\n"
-        state.append_reasoning(intro)
-        yield ProxyReasoningDeltaEvent(intro)
-
-        goal = plan.goal or request.latest_user_text() or ""
-        orchestration = workflow_orchestration_for_definition(definition)
-        if orchestration in {"sequential", "grouped", "concurrent"}:
-            async for event in self._execute_grouped_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-            ):
-                yield event
-            return
-        if orchestration == "group_chat":
-            async for event in self._execute_group_chat_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-            ):
-                yield event
-            return
-        if orchestration == "magentic":
-            async for event in self._execute_magentic_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-            ):
-                yield event
-            return
-        if orchestration == "handoff":
-            async for event in self._execute_handoff_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-            ):
-                yield event
-            return
-        raise ValueError(f"unsupported workflow orchestration: {orchestration}")
+        del created_at
+        async for event in self._workflow_dispatcher.execute_workflow(
+            request=request,
+            workflow_id=plan.workflow_id,
+            goal=plan.goal or request.latest_user_text() or "",
+            state=state,
+        ):
+            yield event
 
     async def _execute_workflow_continuation(
         self,
@@ -425,69 +360,13 @@ class ProxyOrchestrationCore:
         state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         del created_at
-        definition = self.registry.workflow_definitions.get(
-            continuation.workflow_id or ""
-        )
-        if definition is None:
-            state.finish_reason = "error"
-            error_text = f"Unknown workflow: {continuation.workflow_id or '(none)'}"
-            state.content = error_text
-            yield ProxyContentDeltaEvent(error_text)
-            return
-        agent_name = continuation.agent_id or "(unknown)"
-        intro = (
-            f"Orchestrator: continuing workflow {definition.id} with {agent_name}.\n"
-        )
-        state.append_reasoning(intro)
-        yield ProxyReasoningDeltaEvent(intro)
-
-        goal = continuation.goal or request.latest_user_text() or ""
-        orchestration = workflow_orchestration_for_definition(definition)
-        if orchestration in {"sequential", "grouped", "concurrent"}:
-            async for event in self._execute_grouped_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-            ):
-                yield event
-            return
-        if orchestration == "group_chat":
-            async for event in self._execute_group_chat_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-            ):
-                yield event
-            return
-        if orchestration == "magentic":
-            async for event in self._execute_magentic_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-            ):
-                yield event
-            return
-        if orchestration == "handoff":
-            async for event in self._execute_handoff_workflow(
-                request=request,
-                definition=definition,
-                goal=goal,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-            ):
-                yield event
-            return
-        raise ValueError(f"unsupported workflow orchestration: {orchestration}")
+        async for event in self._workflow_dispatcher.execute_workflow_continuation(
+            request=request,
+            continuation=continuation,
+            pending=pending,
+            state=state,
+        ):
+            yield event
 
     async def _execute_grouped_workflow(
         self,

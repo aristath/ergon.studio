@@ -41,9 +41,15 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
-            with patch(
-                "ergon_studio.server_control.start_proxy_server_in_thread",
-                return_value=fake_handle,
+            with (
+                patch(
+                    "ergon_studio.server_control.ensure_upstream_reachable",
+                    return_value=None,
+                ),
+                patch(
+                    "ergon_studio.server_control.start_proxy_server_in_thread",
+                    return_value=fake_handle,
+                ),
             ):
                 status = controller.start(
                     config=ProxyAppConfig(
@@ -74,9 +80,15 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
-            with patch(
-                "ergon_studio.server_control.start_proxy_server_in_thread",
-                return_value=fake_handle,
+            with (
+                patch(
+                    "ergon_studio.server_control.ensure_upstream_reachable",
+                    return_value=None,
+                ),
+                patch(
+                    "ergon_studio.server_control.start_proxy_server_in_thread",
+                    return_value=fake_handle,
+                ),
             ):
                 controller.start(
                     config=ProxyAppConfig(
@@ -114,13 +126,19 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
-            with patch(
-                "ergon_studio.server_control.start_proxy_server_in_thread",
-                side_effect=[
-                    first_handle,
-                    OSError("address already in use"),
-                    rollback_handle,
-                ],
+            with (
+                patch(
+                    "ergon_studio.server_control.ensure_upstream_reachable",
+                    return_value=None,
+                ),
+                patch(
+                    "ergon_studio.server_control.start_proxy_server_in_thread",
+                    side_effect=[
+                        first_handle,
+                        OSError("address already in use"),
+                        rollback_handle,
+                    ],
+                ),
             ):
                 controller.start(
                     config=ProxyAppConfig(
@@ -139,3 +157,22 @@ class ServerControlTests(unittest.TestCase):
 
         self.assertTrue(controller.status.running)
         self.assertFalse(rollback_handle.closed)
+
+    def test_start_rejects_unreachable_upstream(self) -> None:
+        controller = ProxyServerController()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            with patch(
+                "ergon_studio.server_control.ensure_upstream_reachable",
+                side_effect=ValueError("upstream endpoint is not reachable: refused"),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "upstream endpoint is not reachable: refused"
+                ):
+                    controller.start(
+                        config=ProxyAppConfig(
+                            upstream_base_url="http://localhost:8080/v1"
+                        ),
+                        definitions_dir=workspace.definitions_dir,
+                    )

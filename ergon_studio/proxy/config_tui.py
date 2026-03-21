@@ -23,7 +23,12 @@ from textual.widgets import (
     TextArea,
 )
 
-from ergon_studio.app_config import ProxyAppConfig, save_app_config
+from ergon_studio.app_config import (
+    ProxyAppConfig,
+    save_app_config,
+    validate_proxy_host,
+    validate_proxy_port,
+)
 from ergon_studio.registry import load_registry
 from ergon_studio.server_control import ProxyServerController
 from ergon_studio.upstream import UpstreamSettings
@@ -372,24 +377,13 @@ class ProxyConfigApp(App[None]):
             self._save_endpoint()
 
     def _save_endpoint(self) -> None:
-        host = self.query_one("#proxy-host", Input).value.strip()
+        host_text = self.query_one("#proxy-host", Input).value.strip()
         port_text = self.query_one("#proxy-port", Input).value.strip()
-        if not host:
-            self.query_one("#endpoint-message", Static).update(
-                "Proxy host must be non-empty"
-            )
-            return
         try:
-            port = int(port_text)
-        except ValueError:
-            self.query_one("#endpoint-message", Static).update(
-                "Proxy port must be an integer"
-            )
-            return
-        if port <= 0 or port > 65535:
-            self.query_one("#endpoint-message", Static).update(
-                "Proxy port must be between 1 and 65535"
-            )
+            host = validate_proxy_host(host_text)
+            port = validate_proxy_port(int(port_text))
+        except ValueError as exc:
+            self.query_one("#endpoint-message", Static).update(str(exc))
             return
         candidate = ProxyAppConfig(
             upstream_base_url=self.query_one("#endpoint-url", Input).value.strip(),

@@ -16,6 +16,21 @@ class ProxyAppConfig:
     disable_tool_calling: bool = False
 
 
+def validate_proxy_host(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("proxy host must be non-empty")
+    return stripped
+
+
+def validate_proxy_port(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("proxy port must be an integer")
+    if value <= 0 or value > 65535:
+        raise ValueError("proxy port must be between 1 and 65535")
+    return value
+
+
 def default_app_dir() -> Path:
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
     if xdg_config_home:
@@ -40,8 +55,8 @@ def load_app_config(path: Path) -> ProxyAppConfig:
     return ProxyAppConfig(
         upstream_base_url=_optional_str(payload.get("upstream_base_url")),
         upstream_api_key=_optional_str(payload.get("upstream_api_key")),
-        host=_optional_str(payload.get("host")) or "127.0.0.1",
-        port=_optional_int(payload.get("port")) or 4000,
+        host=validate_proxy_host(_optional_str(payload.get("host")) or "127.0.0.1"),
+        port=validate_proxy_port(_optional_int(payload.get("port")) or 4000),
         instruction_role=_optional_str(payload.get("instruction_role")) or "system",
         disable_tool_calling=(
             _optional_bool(payload.get("disable_tool_calling")) or False

@@ -14,6 +14,10 @@ class ProxyCliTests(unittest.TestCase):
     def test_proxy_cli_starts_proxy_server_in_headless_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
+                patch(
+                    "ergon_studio.proxy_cli.ensure_upstream_reachable",
+                    return_value=None,
+                ),
                 patch("ergon_studio.proxy_cli.load_registry") as load_registry,
                 patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy,
             ):
@@ -53,6 +57,10 @@ class ProxyCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
                 patch("ergon_studio.proxy_cli.ensure_workspace") as ensure_workspace,
+                patch(
+                    "ergon_studio.proxy_cli.ensure_upstream_reachable",
+                    return_value=None,
+                ),
                 patch("ergon_studio.proxy_cli.load_registry") as load_registry,
                 patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy,
             ):
@@ -80,3 +88,33 @@ class ProxyCliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, run_config_tui.return_value)
             run_config_tui.assert_called_once()
+
+    def test_proxy_cli_rejects_unreachable_upstream(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stderr = io.StringIO()
+            with (
+                redirect_stderr(stderr),
+                patch(
+                    "ergon_studio.proxy_cli.ensure_upstream_reachable",
+                    side_effect=ValueError(
+                        "upstream endpoint is not reachable: refused"
+                    ),
+                ),
+                patch("ergon_studio.proxy_cli.load_registry") as load_registry,
+                self.assertRaises(SystemExit) as exc,
+            ):
+                load_registry.return_value = object()
+                main(
+                    [
+                        "--serve",
+                        "--app-dir",
+                        temp_dir,
+                        "--definitions-dir",
+                        str(Path(temp_dir) / "definitions"),
+                        "--upstream-base-url",
+                        "http://localhost:8080/v1",
+                    ]
+                )
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("upstream endpoint is not reachable", stderr.getvalue())

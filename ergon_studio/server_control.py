@@ -3,11 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ergon_studio.app_config import ProxyAppConfig
+from ergon_studio.app_config import (
+    ProxyAppConfig,
+    validate_proxy_host,
+    validate_proxy_port,
+)
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import ProxyServerHandle, start_proxy_server_in_thread
 from ergon_studio.registry import RuntimeRegistry, load_registry
-from ergon_studio.upstream import UpstreamSettings, validate_upstream_base_url
+from ergon_studio.upstream import (
+    UpstreamSettings,
+    ensure_upstream_reachable,
+    validate_upstream_base_url,
+)
 
 
 @dataclass(frozen=True)
@@ -40,14 +48,18 @@ class ProxyServerController:
         definitions_dir: Path,
     ) -> ProxyServerStatus:
         upstream_base_url = validate_upstream_base_url(config.upstream_base_url)
+        host = validate_proxy_host(config.host)
+        port = validate_proxy_port(config.port)
+        upstream = UpstreamSettings(
+            base_url=upstream_base_url,
+            api_key=config.upstream_api_key.strip() or None,
+            instruction_role=config.instruction_role.strip() or None,
+            tool_calling=not config.disable_tool_calling,
+        )
+        ensure_upstream_reachable(upstream)
         registry = load_registry(
             definitions_dir,
-            upstream=UpstreamSettings(
-                base_url=upstream_base_url,
-                api_key=config.upstream_api_key.strip() or None,
-                instruction_role=config.instruction_role.strip() or None,
-                tool_calling=not config.disable_tool_calling,
-            ),
+            upstream=upstream,
         )
         core = ProxyOrchestrationCore(registry)
         old_handle = self._handle
@@ -55,16 +67,16 @@ class ProxyServerController:
         old_registry = self._registry
         replacing_same_bind = (
             old_handle is not None
-            and old_host == config.host
-            and old_handle.port == config.port
+            and old_host == host
+            and old_handle.port == port
         )
 
         if replacing_same_bind:
             self.stop()
             try:
                 self._handle = start_proxy_server_in_thread(
-                    host=config.host,
-                    port=config.port,
+                    host=host,
+                    port=port,
                     core=core,
                 )
             except Exception:
@@ -79,15 +91,15 @@ class ProxyServerController:
                 raise
         else:
             new_handle = start_proxy_server_in_thread(
-                host=config.host,
-                port=config.port,
+                host=host,
+                port=port,
                 core=core,
             )
             if old_handle is not None:
                 old_handle.close()
             self._handle = new_handle
 
-        self._host = config.host
+        self._host = host
         self._registry = registry
         return self.status
 

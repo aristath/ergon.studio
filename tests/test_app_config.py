@@ -13,6 +13,8 @@ from ergon_studio.app_config import (
     definitions_dir,
     load_app_config,
     save_app_config,
+    validate_proxy_host,
+    validate_proxy_port,
 )
 
 
@@ -69,3 +71,13 @@ class AppConfigTests(unittest.TestCase):
                 ValueError, "config boolean values must be bools"
             ):
                 load_app_config(path)
+
+    def test_validate_proxy_host_rejects_empty_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "proxy host must be non-empty"):
+            validate_proxy_host("   ")
+
+    def test_validate_proxy_port_rejects_out_of_range_values(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "proxy port must be between 1 and 65535"
+        ):
+            validate_proxy_port(0)

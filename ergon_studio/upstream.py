@@ -4,6 +4,7 @@ import json
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 
 
@@ -43,3 +44,17 @@ def probe_upstream_models(
             continue
         models.append(entry)
     return models
+
+
+def ensure_upstream_reachable(settings: UpstreamSettings, *, timeout: int = 3) -> None:
+    request = urllib.request.Request(settings.base_url)
+    if settings.api_key:
+        request.add_header("Authorization", f"Bearer {settings.api_key}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return
+    except HTTPError:
+        # Any HTTP response proves the upstream endpoint is reachable.
+        return
+    except URLError as exc:
+        raise ValueError(f"upstream endpoint is not reachable: {exc.reason}") from exc

@@ -8,6 +8,8 @@ from ergon_studio.app_config import (
     config_path,
     default_app_dir,
     load_app_config,
+    validate_proxy_host,
+    validate_proxy_port,
 )
 from ergon_studio.app_config import (
     definitions_dir as default_definitions_dir,
@@ -16,7 +18,11 @@ from ergon_studio.proxy.config_tui import run_config_tui
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
-from ergon_studio.upstream import UpstreamSettings, validate_upstream_base_url
+from ergon_studio.upstream import (
+    UpstreamSettings,
+    ensure_upstream_reachable,
+    validate_upstream_base_url,
+)
 from ergon_studio.workspace import ensure_workspace
 
 
@@ -40,18 +46,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_proxy_server(*, definitions_dir: Path, config: ProxyAppConfig) -> int:
     upstream_base_url = validate_upstream_base_url(config.upstream_base_url)
+    host = validate_proxy_host(config.host)
+    port = validate_proxy_port(config.port)
+    upstream = UpstreamSettings(
+        base_url=upstream_base_url,
+        api_key=config.upstream_api_key.strip() or None,
+        instruction_role=config.instruction_role.strip() or None,
+        tool_calling=not config.disable_tool_calling,
+    )
+    ensure_upstream_reachable(upstream)
     registry = load_registry(
         definitions_dir,
-        upstream=UpstreamSettings(
-            base_url=upstream_base_url,
-            api_key=config.upstream_api_key.strip() or None,
-            instruction_role=config.instruction_role.strip() or None,
-            tool_calling=not config.disable_tool_calling,
-        ),
+        upstream=upstream,
     )
     serve_proxy(
-        host=config.host,
-        port=config.port,
+        host=host,
+        port=port,
         core=ProxyOrchestrationCore(registry),
     )
     return 0
@@ -106,11 +116,19 @@ def _resolve_config(
     disable_tool_calling: bool,
 ) -> ProxyAppConfig:
     return ProxyAppConfig(
-        upstream_base_url=upstream_base_url or config.upstream_base_url,
-        upstream_api_key=upstream_api_key or config.upstream_api_key,
-        host=host or config.host,
-        port=port or config.port,
-        instruction_role=instruction_role or config.instruction_role,
+        upstream_base_url=(
+            config.upstream_base_url if upstream_base_url is None else upstream_base_url
+        ),
+        upstream_api_key=(
+            config.upstream_api_key if upstream_api_key is None else upstream_api_key
+        ),
+        host=config.host if host is None else host,
+        port=config.port if port is None else port,
+        instruction_role=(
+            config.instruction_role
+            if instruction_role is None
+            else instruction_role
+        ),
         disable_tool_calling=disable_tool_calling or config.disable_tool_calling,
     )
 

@@ -20,7 +20,6 @@ class ContinuationState:
     workroom_message: str | None = None
     participant_label: str | None = None
     worklog: tuple[str, ...] = ()
-    round_outputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,8 +49,6 @@ def encode_continuation_tool_call(
         payload["pl"] = state.participant_label
     if state.worklog:
         payload["h"] = list(state.worklog)
-    if state.round_outputs:
-        payload["ro"] = list(state.round_outputs)
     encoded = (
         urlsafe_b64encode(
             zlib.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -81,7 +78,6 @@ def decode_continuation_from_tool_call_id(
     workroom_message = payload.get("pr")
     participant_label = payload.get("pl")
     worklog = payload.get("h", [])
-    round_outputs = payload.get("ro", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
     if workroom_id is not None and not isinstance(workroom_id, str):
@@ -98,10 +94,6 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in worklog
     ):
         return None
-    if not isinstance(round_outputs, list) or not all(
-        isinstance(item, str) for item in round_outputs
-    ):
-        return None
     return ContinuationState(
         mode=mode,
         agent_id=agent_id,
@@ -110,7 +102,6 @@ def decode_continuation_from_tool_call_id(
         workroom_message=workroom_message,
         participant_label=participant_label,
         worklog=tuple(worklog),
-        round_outputs=tuple(round_outputs),
     )
 
 

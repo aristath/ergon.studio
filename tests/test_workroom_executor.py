@@ -357,7 +357,7 @@ def _continuation_state():
         workroom_participants=("reviewer",),
         agent_id="reviewer",
         participant_label="reviewer",
-        round_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+        worklog=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 
 

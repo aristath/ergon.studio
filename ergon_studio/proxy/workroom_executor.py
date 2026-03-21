@@ -88,6 +88,9 @@ class ProxyWorkroomExecutor:
             staffed_members=staffed_members,
             continuation=continuation,
         )
+        persisted_worklog = (
+            continuation.worklog if continuation is not None else worklog
+        )
         workroom_message = (
             continuation.workroom_message
             if continuation is not None and continuation.workroom_message is not None
@@ -95,9 +98,7 @@ class ProxyWorkroomExecutor:
             if workroom_message is not None
             else None
         )
-        round_outputs: list[str] = (
-            list(continuation.round_outputs) if continuation is not None else []
-        )
+        room_lines: list[str] = []
 
         if self._should_try_parallel_round(
             staffed_members=staffed_members,
@@ -127,10 +128,10 @@ class ProxyWorkroomExecutor:
                     reasoning_delta = f"{result.participant.label}: {result.text}"
                     state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
-                    round_outputs.append(reasoning_delta)
+                    room_lines.append(reasoning_delta)
                 result_sink(
                     ProxyMoveResult(
-                        worklog_lines=tuple(round_outputs),
+                        worklog_lines=tuple(room_lines),
                         active_workroom=_active_workroom_state(
                             definition=definition,
                             round_participants=round_participants,
@@ -158,8 +159,8 @@ class ProxyWorkroomExecutor:
                     workroom_message=workroom_message,
                     transcript_summary=summarize_conversation(request.messages),
                     prior_work=_prior_work(
-                        worklog=worklog,
-                        round_outputs=round_outputs,
+                        worklog=persisted_worklog,
+                        room_lines=room_lines,
                     ),
                 )
                 agent_text = ""
@@ -221,8 +222,7 @@ class ProxyWorkroomExecutor:
                             workroom_message=workroom_message,
                             agent_id=participant.agent_id,
                             participant_label=participant.label,
-                            worklog=worklog,
-                            round_outputs=tuple(round_outputs),
+                            worklog=(*persisted_worklog, *room_lines),
                         ),
                         state=state,
                     )
@@ -241,14 +241,14 @@ class ProxyWorkroomExecutor:
                         )
                         state.append_reasoning(reasoning_delta)
                         yield ProxyReasoningDeltaEvent(reasoning_delta)
-                        round_outputs.append(reasoning_delta)
+                        room_lines.append(reasoning_delta)
                         break
                     raise ValueError(
                         f"unsupported workroom internal action: {type(action).__name__}"
                     )
                 text_summary = agent_text.strip()
                 if text_summary:
-                    round_outputs.append(f"{participant.label}: {text_summary}")
+                    room_lines.append(f"{participant.label}: {text_summary}")
                 if (
                     len(staffed_members) == 1
                     and request.tools
@@ -259,7 +259,7 @@ class ProxyWorkroomExecutor:
                 break
         result_sink(
             ProxyMoveResult(
-                worklog_lines=tuple(round_outputs),
+                worklog_lines=tuple(room_lines),
                 active_workroom=_active_workroom_state(
                     definition=definition,
                     round_participants=round_participants,
@@ -396,11 +396,11 @@ def _active_workroom_state(
 def _prior_work(
     *,
     worklog: tuple[str, ...],
-    round_outputs: list[str],
+    room_lines: list[str],
 ) -> tuple[str, ...]:
     prior_work = [
         *worklog,
-        *round_outputs,
+        *room_lines,
     ]
     if not prior_work:
         return ()

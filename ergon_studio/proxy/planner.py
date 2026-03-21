@@ -26,6 +26,7 @@ class ProxyTurnPlan:
     mode: str
     workflow_id: str | None = None
     agent_id: str | None = None
+    staffing_action: str | None = None
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
     playbook_request: str | None = None
@@ -97,9 +98,19 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "the lead developer should bring in a specific subset of the team."
             ),
             (
+                "- For workflow or continue_playbook, you may optionally set "
+                "staffing_action to keep, replace, augment, or trim."
+            ),
+            (
                 "- You may optionally set specialist_counts for grouped playbooks "
                 "when the lead developer wants multiple staffed instances of a "
                 "role, such as several coders for parallel attempts."
+            ),
+            (
+                "- On continue_playbook, use keep to preserve the current team, "
+                "replace to restaff the tactic explicitly, augment to add or scale "
+                "up listed specialists, and trim to remove or scale down listed "
+                "specialists."
             ),
             (
                 "- For workflow or continue_playbook, you may optionally set "
@@ -154,7 +165,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"staffing_action":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -267,6 +278,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     mode = str(payload.get("mode", "act")).strip().lower()
     if mode not in {"act", "delegate", "workflow", "continue_playbook", "finish"}:
         mode = "act"
+    staffing_action = _normalize_staffing_action(payload.get("staffing_action"))
     workflow_id = resolve_workflow_reference(
         registry, _optional_text(payload.get("workflow_id"))
     )
@@ -281,6 +293,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
     playbook_focus = normalize_playbook_focus(payload.get("playbook_focus"))
     if mode not in {"workflow", "continue_playbook"}:
+        staffing_action = None
         playbook_focus = None
     elif comparison_mode is not None and playbook_focus is None:
         playbook_focus = "compare"
@@ -288,6 +301,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         mode=mode,
         workflow_id=workflow_id,
         agent_id=agent_id,
+        staffing_action=staffing_action,
         specialists=specialists,
         specialist_counts=specialist_counts,
         playbook_request=_optional_text(payload.get("playbook_request")),
@@ -389,6 +403,15 @@ def _normalize_comparison_mode(value: object) -> str | None:
     candidate = value.strip().lower()
     if candidate in {"select_best", "synthesize_best", "critique_options"}:
         return candidate
+    return None
+
+
+def _normalize_staffing_action(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"keep", "replace", "augment", "trim"}:
+        return normalized
     return None
 
 

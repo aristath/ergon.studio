@@ -197,6 +197,20 @@ class ProxyPlannerTests(unittest.TestCase):
             (("coder", 3), ("architect", 1)),
         )
 
+    def test_parse_turn_plan_parses_staffing_action(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"mode":"continue_playbook","workflow_id":"best-of-n",'
+                '"staffing_action":"augment","specialists":["reviewer"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertEqual(plan.staffing_action, "augment")
+
     def test_parse_turn_plan_parses_playbook_request(self) -> None:
         registry = _make_registry()
 
@@ -284,6 +298,13 @@ def _make_registry():
                 metadata={"id": "coder", "role": "coder"},
                 body="## Identity\nCoder.",
                 sections={"Identity": "Coder."},
+            ),
+            "reviewer": DefinitionDocument(
+                id="reviewer",
+                path=Path("reviewer.md"),
+                metadata={"id": "reviewer", "role": "reviewer"},
+                body="## Identity\nReviewer.",
+                sections={"Identity": "Reviewer."},
             ),
         },
         workflow_definitions={

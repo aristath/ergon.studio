@@ -331,6 +331,117 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(continuation.workflow_specialists, ("coder",))
         self.assertEqual(continuation.workflow_specialist_counts, (("coder", 3),))
 
+    async def test_execute_active_workflow_can_augment_staffing_from_plan(
+        self,
+    ) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            raise AssertionError("not expected")
+
+        async def _execute_workflow_continuation(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("continued")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+        loop_state = ProxyDecisionLoopState(
+            goal="Build calculator",
+            current_brief="Architecture ready",
+            workflow_progress=ContinuationState(
+                mode="workflow",
+                agent_id="architect",
+                workflow_id="standard-build",
+                workflow_specialists=("architect", "coder"),
+                workflow_specialist_counts=(("coder", 2),),
+            ),
+        )
+
+        [event async for event in executor.execute_active_workflow(
+            request=request,
+            plan=ProxyTurnPlan(
+                mode="continue_playbook",
+                workflow_id="standard-build",
+                staffing_action="augment",
+                specialists=("tester",),
+                specialist_counts=(("coder", 3),),
+            ),
+            state=ProxyTurnState(),
+            loop_state=loop_state,
+        )]
+
+        continuation = calls[0]["continuation"]
+        self.assertEqual(
+            continuation.workflow_specialists,
+            ("architect", "coder", "tester"),
+        )
+        self.assertEqual(continuation.workflow_specialist_counts, (("coder", 3),))
+
+    async def test_execute_active_workflow_can_trim_staffing_from_plan(
+        self,
+    ) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            raise AssertionError("not expected")
+
+        async def _execute_workflow_continuation(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("continued")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+        loop_state = ProxyDecisionLoopState(
+            goal="Build calculator",
+            current_brief="Architecture ready",
+            workflow_progress=ContinuationState(
+                mode="workflow",
+                agent_id="architect",
+                workflow_id="standard-build",
+                workflow_specialists=("architect", "coder", "tester"),
+                workflow_specialist_counts=(("coder", 3),),
+            ),
+        )
+
+        [event async for event in executor.execute_active_workflow(
+            request=request,
+            plan=ProxyTurnPlan(
+                mode="continue_playbook",
+                workflow_id="standard-build",
+                staffing_action="trim",
+                specialists=("tester",),
+                specialist_counts=(("coder", 2),),
+            ),
+            state=ProxyTurnState(),
+            loop_state=loop_state,
+        )]
+
+        continuation = calls[0]["continuation"]
+        self.assertEqual(continuation.workflow_specialists, ("architect", "coder"))
+        self.assertEqual(continuation.workflow_specialist_counts, (("coder", 2),))
+
     async def test_execute_active_workflow_can_override_playbook_request(
         self,
     ) -> None:

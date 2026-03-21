@@ -8,10 +8,7 @@ from agent_framework import ResponseStream
 
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.agent_runner import (
-    ProxyAgentRunner,
-    ProxyToolChoice,
-)
+from ergon_studio.proxy.agent_runner import ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     PendingContinuation,
@@ -30,7 +27,6 @@ from ergon_studio.proxy.magentic_workflow_executor import (
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
-    ProxyFunctionTool,
     ProxyReasoningDeltaEvent,
     ProxyToolCallEvent,
     ProxyTurnRequest,
@@ -74,35 +70,35 @@ class ProxyOrchestrationCore:
             execute_handoff_workflow=self._execute_handoff_workflow,
         )
         self._workflow_support = ProxyWorkflowSupport(
-            run_text_agent=self._run_text_agent,
+            run_text_agent=self._agent_runner.run_text_agent,
         )
         self._turn_executor = ProxyTurnExecutor(
-            stream_text_agent=self._stream_text_agent,
-            run_text_agent=self._run_text_agent,
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            run_text_agent=self._agent_runner.run_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
         )
         self._turn_planner = ProxyTurnPlanner(
             registry,
-            run_text_agent=self._run_text_agent,
+            run_text_agent=self._agent_runner.run_text_agent,
         )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
-            stream_text_agent=self._stream_text_agent,
+            stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
-            stream_text_agent=self._stream_text_agent,
+            stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
-            stream_text_agent=self._stream_text_agent,
+            stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
             select_manager_agent=self._workflow_support.select_manager_agent,
         )
         self._handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
-            stream_text_agent=self._stream_text_agent,
+            stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
             select_handoff_target=self._workflow_support.select_handoff_target,
@@ -377,50 +373,3 @@ class ProxyOrchestrationCore:
             pending=pending,
         ):
             yield summary_event
-
-    async def _run_text_agent(
-        self,
-        *,
-        agent_id: str,
-        prompt: str,
-        session_id: str,
-        model_id_override: str,
-        preamble: str = "",
-        pending_continuation: PendingContinuation | None = None,
-    ) -> str | None:
-        return await self._agent_runner.run_text_agent(
-            agent_id=agent_id,
-            prompt=prompt,
-            session_id=session_id,
-            model_id_override=model_id_override,
-            preamble=preamble,
-            pending_continuation=pending_continuation,
-        )
-
-    async def _stream_text_agent(
-        self,
-        *,
-        agent_id: str,
-        prompt: str,
-        session_id: str,
-        model_id_override: str,
-        preamble: str = "",
-        host_tools: tuple[ProxyFunctionTool, ...] = (),
-        tool_choice: ProxyToolChoice = None,
-        parallel_tool_calls: bool | None = None,
-        pending_continuation: PendingContinuation | None = None,
-        final_response_sink: Callable[[Any], None] | None = None,
-    ) -> AsyncIterator[str]:
-        async for delta in self._agent_runner.stream_text_agent(
-            agent_id=agent_id,
-            prompt=prompt,
-            session_id=session_id,
-            model_id_override=model_id_override,
-            preamble=preamble,
-            host_tools=host_tools,
-            tool_choice=tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-            pending_continuation=pending_continuation,
-            final_response_sink=final_response_sink,
-        ):
-            yield delta

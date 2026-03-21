@@ -9,28 +9,16 @@ from ergon_studio.proxy_cli import main
 
 
 class ProxyCliTests(unittest.TestCase):
-    def test_proxy_cli_starts_proxy_server(self) -> None:
+    def test_proxy_cli_starts_proxy_server_in_headless_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            definitions_dir = Path(temp_dir) / "definitions"
-            (definitions_dir / "agents").mkdir(parents=True)
-            (definitions_dir / "workflows").mkdir(parents=True)
-            (definitions_dir / "agents" / "orchestrator.md").write_text(
-                (
-                    "---\n"
-                    "id: orchestrator\n"
-                    "role: orchestrator\n"
-                    "---\n"
-                    "## Identity\n"
-                    "Lead engineer.\n"
-                ),
-                encoding="utf-8",
-            )
-
             with patch("ergon_studio.proxy_cli.serve_proxy") as serve_proxy:
                 exit_code = main(
                     [
+                        "--serve",
+                        "--app-dir",
+                        temp_dir,
                         "--definitions-dir",
-                        str(definitions_dir),
+                        str(Path(temp_dir) / "definitions"),
                         "--host",
                         "0.0.0.0",
                         "--port",
@@ -48,12 +36,13 @@ class ProxyCliTests(unittest.TestCase):
 
     def test_proxy_cli_requires_upstream_base_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            definitions_dir = Path(temp_dir) / "definitions"
-            definitions_dir.mkdir()
-
             with self.assertRaisesRegex(ValueError, "missing upstream base URL"):
-                main(["--definitions-dir", str(definitions_dir)])
+                main(["--serve", "--app-dir", temp_dir])
 
-    def test_proxy_cli_requires_definitions_dir(self) -> None:
-        with self.assertRaisesRegex(ValueError, "missing definitions directory"):
-            main(["--upstream-base-url", "http://localhost:8080/v1"])
+    def test_proxy_cli_launches_tui_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("ergon_studio.proxy_cli.run_config_tui") as run_config_tui:
+                exit_code = main(["--app-dir", temp_dir])
+
+            self.assertEqual(exit_code, run_config_tui.return_value)
+            run_config_tui.assert_called_once()

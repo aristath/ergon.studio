@@ -1,73 +1,50 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
+from ergon_studio.app_config import ProxyAppConfig, default_app_dir, load_app_config
+from ergon_studio.proxy.config_tui import run_config_tui
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
 from ergon_studio.upstream import UpstreamSettings
+from ergon_studio.workspace import ensure_workspace
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ergon-studio")
+    parser = argparse.ArgumentParser(prog="ergon")
+    parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--app-dir", type=Path, default=None)
     parser.add_argument(
         "--definitions-dir",
         type=Path,
-        default=Path(os.environ["ERGON_DEFINITIONS_DIR"])
-        if os.environ.get("ERGON_DEFINITIONS_DIR")
-        else None,
+        default=None,
     )
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=4000)
-    parser.add_argument(
-        "--upstream-base-url",
-        type=str,
-        default=os.environ.get("ERGON_UPSTREAM_BASE_URL"),
-    )
-    parser.add_argument(
-        "--upstream-api-key", type=str, default=os.environ.get("ERGON_UPSTREAM_API_KEY")
-    )
-    parser.add_argument(
-        "--instruction-role", type=str, default=os.environ.get("ERGON_INSTRUCTION_ROLE")
-    )
+    parser.add_argument("--host", type=str, default=None)
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--upstream-base-url", type=str, default=None)
+    parser.add_argument("--upstream-api-key", type=str, default=None)
+    parser.add_argument("--instruction-role", type=str, default=None)
     parser.add_argument("--disable-tool-calling", action="store_true")
     return parser
 
 
-def run_proxy_server(
-    *,
-    definitions_dir: Path,
-    host: str,
-    port: int,
-    upstream_base_url: str | None,
-    upstream_api_key: str | None,
-    instruction_role: str | None,
-    disable_tool_calling: bool,
-) -> int:
-    if definitions_dir is None:
-        raise ValueError(
-            "missing definitions directory; pass --definitions-dir or set "
-            "ERGON_DEFINITIONS_DIR"
-        )
-    if not upstream_base_url or not upstream_base_url.strip():
-        raise ValueError(
-            "missing upstream base URL; pass --upstream-base-url or set "
-            "ERGON_UPSTREAM_BASE_URL"
-        )
+def run_proxy_server(*, definitions_dir: Path, config: ProxyAppConfig) -> int:
+    if not config.upstream_base_url.strip():
+        raise ValueError("missing upstream base URL")
     registry = load_registry(
         definitions_dir,
         upstream=UpstreamSettings(
-            base_url=upstream_base_url.strip(),
-            api_key=upstream_api_key.strip() if upstream_api_key else None,
-            instruction_role=instruction_role.strip() if instruction_role else None,
-            tool_calling=not disable_tool_calling,
+            base_url=config.upstream_base_url.strip(),
+            api_key=config.upstream_api_key.strip() or None,
+            instruction_role=config.instruction_role.strip() or None,
+            tool_calling=not config.disable_tool_calling,
         ),
     )
     serve_proxy(
-        host=host,
-        port=port,
+        host=config.host,
+        port=config.port,
         core=ProxyOrchestrationCore(registry),
     )
     return 0
@@ -76,8 +53,9 @@ def run_proxy_server(
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return run_proxy_server(
-        definitions_dir=args.definitions_dir,
+    workspace = ensure_workspace(args.app_dir or default_app_dir())
+    config = _resolve_config(
+        load_app_config(workspace.config_path),
         host=args.host,
         port=args.port,
         upstream_base_url=args.upstream_base_url,
@@ -85,7 +63,33 @@ def main(argv: list[str] | None = None) -> int:
         instruction_role=args.instruction_role,
         disable_tool_calling=args.disable_tool_calling,
     )
+    definitions_dir = args.definitions_dir or workspace.definitions_dir
+    if args.serve:
+        return run_proxy_server(definitions_dir=definitions_dir, config=config)
+    return run_config_tui(
+        app_dir=workspace.app_dir,
+        definitions_dir=definitions_dir,
+        initial_config=config,
+    )
 
 
+def _resolve_config(
+    config: ProxyAppConfig,
+    *,
+    host: str | None,
+    port: int | None,
+    upstream_base_url: str | None,
+    upstream_api_key: str | None,
+    instruction_role: str | None,
+    disable_tool_calling: bool,
+) -> ProxyAppConfig:
+    return ProxyAppConfig(
+        upstream_base_url=upstream_base_url or config.upstream_base_url,
+        upstream_api_key=upstream_api_key or config.upstream_api_key,
+        host=host or config.host,
+        port=port or config.port,
+        instruction_role=instruction_role or config.instruction_role,
+        disable_tool_calling=disable_tool_calling or config.disable_tool_calling,
+    )
 if __name__ == "__main__":
     raise SystemExit(main())

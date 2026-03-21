@@ -89,7 +89,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workflow_builds_ad_hoc_workroom_definition(self) -> None:
         calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-        async def _magentic_handler(**kwargs):
+        async def _group_chat_handler(**kwargs):
             calls.append(
                 (
                     kwargs["definition"].id,
@@ -102,8 +102,8 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
         dispatcher = ProxyWorkflowDispatcher(
             _registry(),
             execute_grouped_workflow=_empty_handler,
-            execute_group_chat_workflow=_empty_handler,
-            execute_magentic_workflow=_magentic_handler,
+            execute_group_chat_workflow=_group_chat_handler,
+            execute_magentic_workflow=_empty_handler,
             execute_handoff_workflow=_empty_handler,
         )
         request = ProxyTurnRequest(
@@ -130,6 +130,66 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
         self.assertIsInstance(events[1], ProxyContentDeltaEvent)
         self.assertIn("opening an ad hoc workroom", state.reasoning.lower())
+
+    async def test_execute_workflow_builds_parallel_attempt_ad_hoc_workroom(
+        self,
+    ) -> None:
+        calls: list[tuple[str, str, tuple[str, ...], str]] = []
+
+        async def _grouped_handler(**kwargs):
+            calls.append(
+                (
+                    kwargs["definition"].id,
+                    kwargs["goal"],
+                    tuple(kwargs["definition"].metadata["steps"]),
+                    str(kwargs["definition"].metadata["orchestration"]),
+                )
+            )
+            yield ProxyContentDeltaEvent("done")
+
+        dispatcher = ProxyWorkflowDispatcher(
+            _registry(),
+            execute_grouped_workflow=_grouped_handler,
+            execute_group_chat_workflow=_empty_handler,
+            execute_magentic_workflow=_empty_handler,
+            execute_handoff_workflow=_empty_handler,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(
+                ProxyInputMessage(
+                    role="user",
+                    content="Try three implementations",
+                ),
+            ),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in dispatcher.execute_workflow(
+                request=request,
+                workflow_id="ad-hoc-workroom",
+                specialists=("coder",),
+                specialist_counts=(("coder", 3),),
+                goal="Try three implementations",
+                state=state,
+            )
+        ]
+
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "ad-hoc-workroom",
+                    "Try three implementations",
+                    ("coder", "coder", "coder"),
+                    "grouped",
+                )
+            ],
+        )
+        self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
+        self.assertIsInstance(events[1], ProxyContentDeltaEvent)
 
 
 async def _empty_handler(**_kwargs):

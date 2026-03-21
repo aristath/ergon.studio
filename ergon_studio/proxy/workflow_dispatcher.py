@@ -68,6 +68,7 @@ class ProxyWorkflowDispatcher:
         definition = self._resolve_workroom_definition(
             workflow_id=workflow_id,
             specialists=specialists,
+            specialist_counts=specialist_counts,
         )
         if definition is None:
             state.finish_reason = "error"
@@ -107,6 +108,7 @@ class ProxyWorkflowDispatcher:
         definition = self._resolve_workroom_definition(
             workflow_id=continuation.workflow_id,
             specialists=continuation.workflow_specialists,
+            specialist_counts=continuation.workflow_specialist_counts,
         )
         if definition is None:
             state.finish_reason = "error"
@@ -228,11 +230,15 @@ class ProxyWorkflowDispatcher:
         *,
         workflow_id: str | None,
         specialists: tuple[str, ...],
+        specialist_counts: tuple[tuple[str, int], ...],
     ) -> DefinitionDocument | None:
         if is_ad_hoc_workroom(workflow_id):
             if not specialists:
                 return None
-            return _ad_hoc_workroom_definition(specialists)
+            return _ad_hoc_workroom_definition(
+                specialists=specialists,
+                specialist_counts=specialist_counts,
+            )
         return self.registry.workflow_definitions.get(workflow_id or "")
 
 
@@ -254,17 +260,36 @@ def _workroom_intro(definition: DefinitionDocument) -> str:
 
 
 def _ad_hoc_workroom_definition(
+    *,
     specialists: tuple[str, ...],
+    specialist_counts: tuple[tuple[str, int], ...],
 ) -> DefinitionDocument:
+    count_map = {agent_id: count for agent_id, count in specialist_counts}
+    expanded_staffing = tuple(
+        agent_id
+        for agent_id in specialists
+        for _ in range(count_map.get(agent_id, 1))
+    )
+    if not expanded_staffing:
+        expanded_staffing = specialists
+    unique_roles = {agent_id for agent_id in expanded_staffing}
+    if len(expanded_staffing) > 1 and len(unique_roles) == 1:
+        orchestration = "grouped"
+        steps = list(expanded_staffing)
+        max_rounds = len(expanded_staffing)
+    else:
+        orchestration = "group_chat"
+        steps = list(specialists)
+        max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(
         id=AD_HOC_WORKROOM_ID,
         path=Path(AD_HOC_WORKROOM_ID),
         metadata={
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
-            "orchestration": "magentic",
-            "steps": list(specialists),
-            "max_rounds": max(len(specialists) * 2, 2),
+            "orchestration": orchestration,
+            "steps": steps,
+            "max_rounds": max_rounds,
         },
         body=(
             "## Purpose\n"

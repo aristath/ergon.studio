@@ -18,7 +18,6 @@ from ergon_studio.proxy.models import (
     ProxyTurnResult,
 )
 from ergon_studio.proxy.orchestrator_tools import (
-    MessageWorkroomAction,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
     parse_message_workroom_action,
@@ -73,8 +72,9 @@ class ProxyOrchestrationCore:
                 worklog = list(pending.state.worklog if pending is not None else ())
                 if pending is not None:
                     if pending.state.workroom_name is not None:
-                        stream = self._resume_subtask(
+                        stream = self._message_workroom(
                             request=request,
+                            continuation=pending.state,
                             pending=pending,
                             state=state,
                             worklog=tuple(worklog),
@@ -189,9 +189,11 @@ class ProxyOrchestrationCore:
                     internal_tool_calls[0],
                     registry=self.registry,
                 )
-                workroom_stream = self._execute_internal_action(
+                workroom_stream = self._message_workroom(
                     request=request,
-                    action=action,
+                    workroom_name=action.preset,
+                    participants=action.participants,
+                    workroom_message=action.message,
                     state=state,
                     worklog=tuple(worklog),
                 )
@@ -212,50 +214,6 @@ class ProxyOrchestrationCore:
 
         raise ValueError("orchestrator exceeded internal move limit")
 
-    def _execute_internal_action(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        action: MessageWorkroomAction,
-        state: ProxyTurnState,
-        worklog: tuple[str, ...],
-    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
-        if action.preset is None and not action.participants:
-            state.finish_reason = "error"
-            error_text = "message_workroom needs a preset or participants target."
-            state.content = error_text
-            return ResponseStream(
-                _single_event_stream(ProxyContentDeltaEvent(error_text)),
-                finalizer=lambda _updates: (),
-            )
-        return self._message_workroom(
-            request=request,
-            workroom_name=action.preset,
-            participants=action.participants,
-            workroom_message=action.message,
-            state=state,
-            worklog=worklog,
-        )
-
-    def _resume_subtask(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        pending: PendingContinuation,
-        state: ProxyTurnState,
-        worklog: tuple[str, ...],
-    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
-        continuation = pending.state
-        if continuation.workroom_name is not None:
-            return self._message_workroom(
-                request=request,
-                continuation=continuation,
-                pending=pending,
-                state=state,
-                worklog=worklog,
-            )
-        raise ValueError("unsupported continuation state")
-
     def _message_workroom(
         self,
         *,
@@ -268,6 +226,18 @@ class ProxyOrchestrationCore:
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
+        if (
+            continuation is None
+            and workroom_name is None
+            and not participants
+        ):
+            state.finish_reason = "error"
+            error_text = "message_workroom needs a preset or participants target."
+            state.content = error_text
+            return ResponseStream(
+                _single_event_stream(ProxyContentDeltaEvent(error_text)),
+                finalizer=lambda _updates: (),
+            )
         if continuation is not None:
             assert continuation.workroom_name is not None
             workroom_name = continuation.workroom_name

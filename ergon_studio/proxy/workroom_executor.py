@@ -84,10 +84,9 @@ class ProxyWorkroomExecutor:
         )
         user_request = request.latest_user_text() or ""
         staffed_members = expand_staffed_participants(round_participants)
-        start_index = (
-            continuation.member_index
-            if continuation and continuation.member_index is not None
-            else 0
+        start_index = _continuation_start_index(
+            staffed_members=staffed_members,
+            continuation=continuation,
         )
         workroom_message = (
             continuation.workroom_message
@@ -220,8 +219,8 @@ class ProxyWorkroomExecutor:
                             workroom_id=_active_workroom_id(definition),
                             workroom_participants=round_participants,
                             workroom_message=workroom_message,
-                            member_index=member_index,
                             agent_id=participant.agent_id,
+                            participant_label=participant.label,
                             worklog=worklog,
                             round_outputs=tuple(round_outputs),
                         ),
@@ -360,6 +359,23 @@ def _round_participants(
     if participants:
         return participants
     return workroom_participants_for_definition(definition)
+
+
+def _continuation_start_index(
+    *,
+    staffed_members: tuple[StaffedParticipant, ...],
+    continuation: ContinuationState | None,
+) -> int:
+    if continuation is None:
+        return 0
+    if continuation.participant_label is not None:
+        for index, participant in enumerate(staffed_members):
+            if participant.label == continuation.participant_label:
+                return index
+    for index, participant in enumerate(staffed_members):
+        if participant.agent_id == continuation.agent_id:
+            return index
+    return 0
 
 
 def _active_workroom_state(

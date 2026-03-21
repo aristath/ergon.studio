@@ -18,7 +18,7 @@ class ContinuationState:
     workroom_id: str | None = None
     workroom_participants: tuple[str, ...] = ()
     workroom_message: str | None = None
-    member_index: int | None = None
+    participant_label: str | None = None
     worklog: tuple[str, ...] = ()
     round_outputs: tuple[str, ...] = ()
 
@@ -46,8 +46,8 @@ def encode_continuation_tool_call(
         payload["p"] = list(state.workroom_participants)
     if state.workroom_message is not None:
         payload["pr"] = state.workroom_message
-    if state.member_index is not None:
-        payload["i"] = state.member_index
+    if state.participant_label is not None:
+        payload["pl"] = state.participant_label
     if state.worklog:
         payload["h"] = list(state.worklog)
     if state.round_outputs:
@@ -79,7 +79,7 @@ def decode_continuation_from_tool_call_id(
     workroom_id = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
-    member_index = payload.get("i")
+    participant_label = payload.get("pl")
     worklog = payload.get("h", [])
     round_outputs = payload.get("ro", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
@@ -92,7 +92,7 @@ def decode_continuation_from_tool_call_id(
         return None
     if workroom_message is not None and not isinstance(workroom_message, str):
         return None
-    if member_index is not None and not isinstance(member_index, int):
+    if participant_label is not None and not isinstance(participant_label, str):
         return None
     if not isinstance(worklog, list) or not all(
         isinstance(item, str) for item in worklog
@@ -108,7 +108,7 @@ def decode_continuation_from_tool_call_id(
         workroom_id=workroom_id,
         workroom_participants=tuple(workroom_participants),
         workroom_message=workroom_message,
-        member_index=member_index,
+        participant_label=participant_label,
         worklog=tuple(worklog),
         round_outputs=tuple(round_outputs),
     )

@@ -355,8 +355,8 @@ def _continuation_state():
         mode="workroom",
         workroom_id="debate",
         workroom_participants=("reviewer",),
-        member_index=0,
         agent_id="reviewer",
+        participant_label="reviewer",
         round_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 

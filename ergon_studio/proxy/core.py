@@ -87,7 +87,6 @@ class ProxyOrchestrationCore:
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=workflow_support.emit_summary,
-            select_comparison_outcome=workflow_support.select_comparison_outcome,
         )
         group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
@@ -211,11 +210,7 @@ class ProxyOrchestrationCore:
             if plan.delivery_requirements is not None:
                 loop_state.delivery_requirements = plan.delivery_requirements
             loop_state.current_move_rationale = plan.rationale
-            loop_state.current_move_success_criteria = plan.success_criteria
-            loop_state.current_comparison_mode = plan.comparison_mode
-            loop_state.current_comparison_criteria = plan.comparison_criteria
             loop_state.current_playbook_request = plan.playbook_request
-            loop_state.current_playbook_focus = plan.playbook_focus
             if plan.mode == "finish":
                 unmet = unmet_delivery_requirements(
                     loop_state.delivery_requirements,
@@ -230,11 +225,7 @@ class ProxyOrchestrationCore:
                     loop_state.worklog = (*loop_state.worklog, note)
                     yield ProxyReasoningDeltaEvent(note)
                     loop_state.current_move_rationale = None
-                    loop_state.current_move_success_criteria = None
-                    loop_state.current_comparison_mode = None
-                    loop_state.current_comparison_criteria = None
                     loop_state.current_playbook_request = None
-                    loop_state.current_playbook_focus = None
                     continue
             result_holder: dict[str, object] = {}
             async for event in self._turn_router.execute_plan(
@@ -249,19 +240,11 @@ class ProxyOrchestrationCore:
                 return
             if plan.mode in {"act", "finish"}:
                 loop_state.current_move_rationale = None
-                loop_state.current_move_success_criteria = None
-                loop_state.current_comparison_mode = None
-                loop_state.current_comparison_criteria = None
                 loop_state.current_playbook_request = None
-                loop_state.current_playbook_focus = None
                 return
             if not result_holder:
                 loop_state.current_move_rationale = None
-                loop_state.current_move_success_criteria = None
-                loop_state.current_comparison_mode = None
-                loop_state.current_comparison_criteria = None
                 loop_state.current_playbook_request = None
-                loop_state.current_playbook_focus = None
                 return
             loop_state.absorb_result(result=_result(result_holder, loop_state))
 
@@ -292,11 +275,9 @@ class ProxyOrchestrationCore:
             goal=goal,
             current_brief=current_brief,
             worklog=continuation.decision_history,
-            latest_selection_outcome=continuation.selection_outcome,
             delivery_requirements=continuation.delivery_requirements,
             delivery_evidence=continuation.delivery_evidence,
             current_playbook_request=continuation.workflow_request,
-            current_playbook_focus=continuation.workflow_focus,
         )
 
 

@@ -95,21 +95,6 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("Current playbook round assignment:", prompt)
         self.assertIn("Compare the two alternatives and pick one.", prompt)
 
-    def test_build_turn_planner_prompt_includes_active_playbook_focus(self) -> None:
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Keep going"),),
-        )
-
-        prompt = build_turn_planner_prompt(
-            request,
-            active_workflow_id="best-of-n",
-            active_playbook_focus="critique",
-        )
-
-        self.assertIn("Current playbook round focus:", prompt)
-        self.assertIn("critique", prompt)
-
     def test_build_turn_planner_prompt_includes_delivery_requirements(self) -> None:
         request = ProxyTurnRequest(
             model="ergon",

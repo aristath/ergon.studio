@@ -10,10 +10,6 @@ from ergon_studio.proxy.delivery_requirements import (
     unmet_delivery_requirements,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.selection_outcome import (
-    ProxySelectionOutcome,
-    selection_outcome_lines,
-)
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.workflow_policy import (
     acceptance_mode_for_metadata,
@@ -31,13 +27,9 @@ class ProxyTurnPlan:
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
     playbook_request: str | None = None
-    playbook_focus: str | None = None
     delivery_requirements: tuple[str, ...] | None = None
-    comparison_mode: str | None = None
-    comparison_criteria: str | None = None
     request: str | None = None
     rationale: str | None = None
-    success_criteria: str | None = None
 
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
@@ -162,10 +154,8 @@ def build_turn_planner_prompt(
     active_specialists: tuple[str, ...] = (),
     active_specialist_counts: tuple[tuple[str, int], ...] = (),
     active_playbook_request: str | None = None,
-    active_playbook_focus: str | None = None,
     active_delivery_requirements: tuple[str, ...] = (),
     satisfied_delivery_evidence: tuple[str, ...] = (),
-    selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
         "Conversation transcript:",
@@ -198,13 +188,6 @@ def build_turn_planner_prompt(
                 *worklog[-12:],
             ]
         )
-    if selection_outcome is not None:
-        lines.extend(
-            [
-                "",
-                *selection_outcome_lines(selection_outcome),
-            ]
-        )
     if active_workflow_id:
         lines.extend(
             [
@@ -219,14 +202,6 @@ def build_turn_planner_prompt(
                 "",
                 "Current playbook round assignment:",
                 active_playbook_request,
-            ]
-        )
-    if active_playbook_focus:
-        lines.extend(
-            [
-                "",
-                "Current playbook round focus:",
-                active_playbook_focus,
             ]
         )
     if active_delivery_requirements:

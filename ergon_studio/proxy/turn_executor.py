@@ -71,11 +71,6 @@ class ProxyTurnExecutor:
             move_rationale=(
                 loop_state.current_move_rationale if loop_state is not None else None
             ),
-            success_criteria=(
-                loop_state.current_move_success_criteria
-                if loop_state is not None
-                else None
-            ),
         )
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
@@ -147,11 +142,6 @@ class ProxyTurnExecutor:
             move_rationale=(
                 loop_state.current_move_rationale if loop_state is not None else None
             ),
-            success_criteria=(
-                loop_state.current_move_success_criteria
-                if loop_state is not None
-                else None
-            ),
         )
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
@@ -219,7 +209,6 @@ class ProxyTurnExecutor:
             transcript_summary=summarize_conversation(request.messages),
             current_brief=current_brief,
             move_rationale=plan.rationale,
-            success_criteria=plan.success_criteria,
         )
         specialist_text = ""
         first = True
@@ -305,6 +294,4 @@ def _decision_notice(
     lines = [base]
     if loop_state is not None and loop_state.current_move_rationale:
         lines.append(f"Why: {loop_state.current_move_rationale}")
-    if loop_state is not None and loop_state.current_move_success_criteria:
-        lines.append(f"Success target: {loop_state.current_move_success_criteria}")
     return "\n".join(lines) + "\n"

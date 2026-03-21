@@ -56,7 +56,6 @@ class ProxyWorkflowDispatcher:
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
-        workflow_focus: str | None = None,
         goal: str,
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
@@ -82,7 +81,6 @@ class ProxyWorkflowDispatcher:
             specialists=specialists,
             specialist_counts=specialist_counts,
             workflow_request=workflow_request,
-            workflow_focus=workflow_focus,
             state=state,
             result_sink=result_sink,
             loop_state=loop_state,
@@ -125,7 +123,6 @@ class ProxyWorkflowDispatcher:
             specialists=continuation.workflow_specialists,
             specialist_counts=continuation.workflow_specialist_counts,
             workflow_request=continuation.workflow_request,
-            workflow_focus=continuation.workflow_focus,
             state=state,
             continuation=continuation,
             pending=pending,
@@ -143,7 +140,6 @@ class ProxyWorkflowDispatcher:
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
-        workflow_focus: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -159,7 +155,6 @@ class ProxyWorkflowDispatcher:
                 specialists=specialists,
                 specialist_counts=specialist_counts,
                 workflow_request=workflow_request,
-                workflow_focus=workflow_focus,
                 state=state,
                 continuation=continuation,
                 pending=pending,
@@ -176,7 +171,6 @@ class ProxyWorkflowDispatcher:
                 specialists=specialists,
                 specialist_counts=specialist_counts,
                 workflow_request=workflow_request,
-                workflow_focus=workflow_focus,
                 state=state,
                 continuation=continuation,
                 pending=pending,
@@ -193,7 +187,6 @@ class ProxyWorkflowDispatcher:
                 specialists=specialists,
                 specialist_counts=specialist_counts,
                 workflow_request=workflow_request,
-                workflow_focus=workflow_focus,
                 state=state,
                 continuation=continuation,
                 pending=pending,
@@ -210,7 +203,6 @@ class ProxyWorkflowDispatcher:
                 specialists=specialists,
                 specialist_counts=specialist_counts,
                 workflow_request=workflow_request,
-                workflow_focus=workflow_focus,
                 state=state,
                 continuation=continuation,
                 pending=pending,
@@ -230,8 +222,4 @@ def _workflow_notice(
     lines = [base]
     if loop_state is not None and loop_state.current_move_rationale:
         lines.append(f"Why: {loop_state.current_move_rationale}")
-    if loop_state is not None and loop_state.current_move_success_criteria:
-        lines.append(f"Success target: {loop_state.current_move_success_criteria}")
-    if loop_state is not None and loop_state.current_playbook_focus:
-        lines.append(f"Round focus: {loop_state.current_playbook_focus}")
     return "\n".join(lines) + "\n"

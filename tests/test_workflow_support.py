@@ -61,7 +61,6 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
             participants=("architect", "coder"),
             prior_outputs=("architect: plan",),
             move_rationale="Architecture is done; implementation should start.",
-            success_criteria="Pick the next specialist who can advance delivery.",
             model_id_override="qwen",
         )
 
@@ -83,65 +82,10 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
             prior_outputs=("coder: done",),
             allowed=(),
             move_rationale="The handoff is likely complete.",
-            success_criteria="Only continue if another specialist is truly needed.",
             model_id_override="qwen",
         )
 
         self.assertIsNone(selected)
-
-    async def test_select_comparison_outcome_parses_structured_result(self) -> None:
-        async def _run_text_agent(**_kwargs):
-            return (
-                '{"selected_candidate_number":2,'
-                '"summary":"Candidate 2 is safer and clearer.",'
-                '"next_refinement":"Polish the selected candidate."}'
-            )
-
-        support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
-
-        outcome = await support.select_comparison_outcome(
-            workflow_id="best-of-n",
-            goal="Pick the best candidate",
-            comparison_mode="select_best",
-            comparison_candidates=("coder[1]: Idea A", "coder[2]: Idea B"),
-            stage_outputs=("reviewer: Candidate 2 wins",),
-            comparison_criteria="Prefer the safer and simpler approach.",
-            move_rationale="We need a clear winner before polishing.",
-            success_criteria="Choose the best candidate and explain why.",
-            model_id_override="qwen",
-        )
-
-        self.assertIsNotNone(outcome)
-        assert outcome is not None
-        self.assertEqual(outcome.mode, "select_best")
-        self.assertEqual(outcome.selected_candidate_index, 1)
-        self.assertEqual(outcome.selected_candidate_text, "coder[2]: Idea B")
-        self.assertEqual(
-            outcome.next_refinement,
-            "Polish the selected candidate.",
-        )
-
-    async def test_select_comparison_outcome_returns_none_without_candidates(
-        self,
-    ) -> None:
-        async def _run_text_agent(**_kwargs):
-            raise AssertionError("should not be called")
-
-        support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
-
-        outcome = await support.select_comparison_outcome(
-            workflow_id="best-of-n",
-            goal="Pick the best candidate",
-            comparison_mode="select_best",
-            comparison_candidates=(),
-            stage_outputs=("reviewer: Candidate 2 wins",),
-            comparison_criteria=None,
-            move_rationale=None,
-            success_criteria=None,
-            model_id_override="qwen",
-        )
-
-        self.assertIsNone(outcome)
 
 
 def _definition() -> DefinitionDocument:

@@ -12,7 +12,6 @@ from ergon_studio.proxy.continuation import (
     original_tool_call_id,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
-from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
 
 
 class ProxyContinuationTests(unittest.TestCase):
@@ -63,16 +62,8 @@ class ProxyContinuationTests(unittest.TestCase):
                 workflow_specialists=("coder", "reviewer"),
                 workflow_specialist_counts=(("coder", 3),),
                 workflow_request="Polish the selected candidate.",
-                workflow_focus="polish",
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
-                selection_outcome=ProxySelectionOutcome(
-                    mode="select_best",
-                    selected_candidate_index=1,
-                    selected_candidate_text="coder[2]: Idea B",
-                    summary="Candidate 2 is clearer and safer.",
-                    next_refinement="Polish candidate 2 next.",
-                ),
                 step_index=1,
                 agent_index=0,
                 request_text="Implement A",
@@ -93,24 +84,11 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.workflow_specialists, ("coder", "reviewer"))
         self.assertEqual(decoded.workflow_specialist_counts, (("coder", 3),))
         self.assertEqual(decoded.workflow_request, "Polish the selected candidate.")
-        self.assertEqual(decoded.workflow_focus, "polish")
         self.assertEqual(
             decoded.last_stage_outputs,
             ("coder[1]: Idea A", "coder[2]: Idea B"),
         )
         self.assertTrue(decoded.last_stage_parallel_attempts)
-        self.assertIsNotNone(decoded.selection_outcome)
-        assert decoded.selection_outcome is not None
-        self.assertEqual(decoded.selection_outcome.mode, "select_best")
-        self.assertEqual(decoded.selection_outcome.selected_candidate_index, 1)
-        self.assertEqual(
-            decoded.selection_outcome.selected_candidate_text,
-            "coder[2]: Idea B",
-        )
-        self.assertEqual(
-            decoded.selection_outcome.next_refinement,
-            "Polish candidate 2 next.",
-        )
         self.assertEqual(decoded.workflow_outputs, ("architect: use main.py",))
         self.assertEqual(decoded.agent_index, 0)
 

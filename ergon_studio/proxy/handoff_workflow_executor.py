@@ -72,7 +72,6 @@ class ProxyHandoffWorkflowExecutor:
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
-        workflow_focus: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -118,17 +117,6 @@ class ProxyHandoffWorkflowExecutor:
                 else None
             )
         )
-        workflow_focus = (
-            continuation.workflow_focus
-            if continuation is not None and continuation.workflow_focus is not None
-            else workflow_focus
-            if workflow_focus is not None
-            else (
-                loop_state.current_playbook_focus
-                if loop_state is not None
-                else None
-            )
-        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -154,7 +142,6 @@ class ProxyHandoffWorkflowExecutor:
                     goal=goal,
                     current_brief=current_brief,
                     playbook_request=workflow_request,
-                    playbook_focus=workflow_focus,
                     prior_outputs=tuple(workflow_outputs),
                     allowed=handoffs.get(
                         current_participant.label,
@@ -166,11 +153,6 @@ class ProxyHandoffWorkflowExecutor:
                     ),
                     move_rationale=(
                         loop_state.current_move_rationale
-                        if loop_state is not None
-                        else None
-                    ),
-                    success_criteria=(
-                        loop_state.current_move_success_criteria
                         if loop_state is not None
                         else None
                     ),
@@ -199,16 +181,10 @@ class ProxyHandoffWorkflowExecutor:
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
-                playbook_focus=workflow_focus,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workflow_outputs),
                 move_rationale=(
                     loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
-                success_criteria=(
-                    loop_state.current_move_success_criteria
                     if loop_state is not None
                     else None
                 ),
@@ -251,7 +227,6 @@ class ProxyHandoffWorkflowExecutor:
                         workflow_specialists=staffed_specialists,
                         workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
-                        workflow_focus=workflow_focus,
                         delivery_requirements=(
                             loop_state.delivery_requirements
                             if loop_state is not None
@@ -307,7 +282,6 @@ class ProxyHandoffWorkflowExecutor:
                             workflow_specialists=staffed_specialists,
                             workflow_specialist_counts=staffed_specialist_counts,
                             workflow_request=workflow_request,
-                            workflow_focus=workflow_focus,
                             delivery_requirements=(
                                 loop_state.delivery_requirements
                                 if loop_state is not None
@@ -342,7 +316,6 @@ class ProxyHandoffWorkflowExecutor:
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
-                playbook_focus=workflow_focus,
                 prior_outputs=tuple(workflow_outputs),
                 allowed=handoffs.get(
                     current_participant.label,
@@ -354,11 +327,6 @@ class ProxyHandoffWorkflowExecutor:
                 ),
                 move_rationale=(
                     loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
-                success_criteria=(
-                    loop_state.current_move_success_criteria
                     if loop_state is not None
                     else None
                 ),

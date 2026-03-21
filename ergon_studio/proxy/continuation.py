@@ -7,8 +7,6 @@ from dataclasses import dataclass
 
 from ergon_studio.proxy.delivery_requirements import normalize_delivery_requirements
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
-from ergon_studio.proxy.playbook_focus import normalize_playbook_focus
-from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
 
 _TOKEN_PREFIX = "ergon:"
 _TOKEN_VERSION = 1
@@ -25,10 +23,8 @@ class ContinuationState:
     workflow_specialists: tuple[str, ...] = ()
     workflow_specialist_counts: tuple[tuple[str, int], ...] = ()
     workflow_request: str | None = None
-    workflow_focus: str | None = None
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
-    selection_outcome: ProxySelectionOutcome | None = None
     step_index: int | None = None
     agent_index: int | None = None
     request_text: str | None = None
@@ -71,20 +67,10 @@ def encode_continuation_tool_call(
         }
     if state.workflow_request is not None:
         payload["pr"] = state.workflow_request
-    if state.workflow_focus is not None:
-        payload["pf"] = state.workflow_focus
     if state.last_stage_outputs:
         payload["ls"] = list(state.last_stage_outputs)
     if state.last_stage_parallel_attempts:
         payload["lp"] = True
-    if state.selection_outcome is not None:
-        payload["so"] = {
-            "m": state.selection_outcome.mode,
-            "i": state.selection_outcome.selected_candidate_index,
-            "t": state.selection_outcome.selected_candidate_text,
-            "s": state.selection_outcome.summary,
-            "n": state.selection_outcome.next_refinement,
-        }
     if state.step_index is not None:
         payload["s"] = state.step_index
     if state.agent_index is not None:
@@ -130,10 +116,8 @@ def decode_continuation_from_tool_call_id(
     workflow_specialists = payload.get("p", [])
     workflow_specialist_counts_payload = payload.get("pc", {})
     workflow_request = payload.get("pr")
-    workflow_focus = payload.get("pf")
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
-    selection_outcome_payload = payload.get("so")
     step_index = payload.get("s")
     agent_index = payload.get("i")
     request_text = payload.get("r")
@@ -174,15 +158,7 @@ def decode_continuation_from_tool_call_id(
         return None
     if workflow_request is not None and not isinstance(workflow_request, str):
         return None
-    if workflow_focus is not None and not isinstance(workflow_focus, str):
-        return None
-    workflow_focus = normalize_playbook_focus(workflow_focus)
-    if payload.get("pf") is not None and workflow_focus is None:
-        return None
     if not isinstance(last_stage_parallel_attempts, bool):
-        return None
-    selection_outcome = _decode_selection_outcome(selection_outcome_payload)
-    if selection_outcome_payload is not None and selection_outcome is None:
         return None
     if step_index is not None and not isinstance(step_index, int):
         return None
@@ -212,10 +188,8 @@ def decode_continuation_from_tool_call_id(
         workflow_specialists=tuple(workflow_specialists),
         workflow_specialist_counts=workflow_specialist_counts or (),
         workflow_request=workflow_request,
-        workflow_focus=workflow_focus,
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
-        selection_outcome=selection_outcome,
         step_index=step_index,
         agent_index=agent_index,
         request_text=request_text,
@@ -274,40 +248,6 @@ def original_tool_call_id(tool_call_id: str) -> str | None:
         return None
     return original or None
 
-
-def _decode_selection_outcome(
-    payload: object,
-) -> ProxySelectionOutcome | None:
-    if payload is None:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    mode = payload.get("m")
-    if not isinstance(mode, str) or not mode:
-        return None
-    selected_candidate_index = payload.get("i")
-    if selected_candidate_index is not None and not isinstance(
-        selected_candidate_index, int
-    ):
-        return None
-    selected_candidate_text = payload.get("t")
-    if selected_candidate_text is not None and not isinstance(
-        selected_candidate_text, str
-    ):
-        return None
-    summary = payload.get("s")
-    if summary is not None and not isinstance(summary, str):
-        return None
-    next_refinement = payload.get("n")
-    if next_refinement is not None and not isinstance(next_refinement, str):
-        return None
-    return ProxySelectionOutcome(
-        mode=mode,
-        selected_candidate_index=selected_candidate_index,
-        selected_candidate_text=selected_candidate_text,
-        summary=summary,
-        next_refinement=next_refinement,
-    )
 
 
 def _decode_specialist_counts(

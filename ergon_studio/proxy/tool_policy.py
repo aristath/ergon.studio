@@ -41,24 +41,3 @@ def validate_tool_choice(
         "type": "function",
         "function": {"name": stripped_name},
     }
-
-
-def resolve_agent_tool_policy(
-    *,
-    tools: tuple[ProxyFunctionTool, ...],
-    tool_choice: str | dict[str, Any] | None,
-    parallel_tool_calls: bool | None,
-) -> tuple[
-    tuple[ProxyFunctionTool, ...],
-    str | dict[str, Any] | None,
-    bool | None,
-]:
-    tool_choice = validate_tool_choice(tool_choice, tools=tools)
-    resolved_tools = tools
-    resolved_tool_choice = tool_choice
-    if tool_choice == "none":
-        resolved_tools = ()
-    elif isinstance(tool_choice, dict):
-        name = tool_choice["function"]["name"]
-        resolved_tools = tuple(tool for tool in tools if tool.name == name)
-    return resolved_tools, resolved_tool_choice, parallel_tool_calls

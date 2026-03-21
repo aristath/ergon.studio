@@ -22,7 +22,7 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
+from ergon_studio.proxy.tool_policy import validate_tool_choice
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
@@ -186,15 +186,15 @@ class ProxyAgentRunner:
         pending_continuation: PendingContinuation | None,
     ) -> AgentInvocation:
         agent = build_runtime_agent(self.registry, agent_id)
-        (
-            allowed_tools,
-            resolved_tool_choice,
-            resolved_parallel,
-        ) = resolve_agent_tool_policy(
-            tools=tuple(host_tools),
-            tool_choice=tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-        )
+        resolved_tool_choice = validate_tool_choice(tool_choice, tools=host_tools)
+        allowed_tools = tuple(host_tools)
+        if resolved_tool_choice == "none":
+            allowed_tools = ()
+        elif isinstance(resolved_tool_choice, dict):
+            required_name = resolved_tool_choice["function"]["name"]
+            allowed_tools = tuple(
+                tool for tool in host_tools if tool.name == required_name
+            )
         declared_tools = tuple(allowed_tools) + tuple(extra_tools)
         if declared_tools and not self.registry.upstream.tool_calling:
             if resolved_tool_choice not in (None, "auto", "none"):
@@ -203,7 +203,7 @@ class ProxyAgentRunner:
                 )
             declared_tools = ()
             resolved_tool_choice = None
-            resolved_parallel = None
+            parallel_tool_calls = None
         messages = tuple(
             build_agent_messages(
                 registry=self.registry,
@@ -218,7 +218,7 @@ class ProxyAgentRunner:
             messages=messages,
             tools=declared_tools,
             tool_choice=resolved_tool_choice,
-            parallel_tool_calls=resolved_parallel,
+            parallel_tool_calls=parallel_tool_calls,
         )
 
     def _invoke_upstream(

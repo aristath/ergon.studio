@@ -3,11 +3,9 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 from functools import partial
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
     ContinuationState,
@@ -37,6 +35,7 @@ from ergon_studio.proxy.turn_state import (
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
+from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -300,12 +299,10 @@ class ProxyOrchestrationCore:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         if continuation is not None:
-            definition = _resolve_workroom_definition(
-                registry=self.registry,
-                workroom_id=continuation.workroom_id,
-                participants=continuation.workroom_participants,
-            )
-            if definition is None:
+            if (
+                continuation.workroom_id is not None
+                and continuation.workroom_id not in self.registry.workroom_definitions
+            ):
                 error_text = (
                     f"Unknown workroom: {continuation.workroom_id or '(none)'}"
                 )
@@ -313,30 +310,32 @@ class ProxyOrchestrationCore:
                 state.content = error_text
                 yield ProxyContentDeltaEvent(error_text)
                 return
+            workroom_id = continuation.workroom_id
             intro = _workroom_notice(
-                f"Orchestrator: continuing workroom {definition.id} with "
+                f"Orchestrator: continuing workroom {(workroom_id or 'ad hoc')} with "
                 f"{continuation.agent_id or '(unknown)'}."
             )
             participants = continuation.workroom_participants
             workroom_message = continuation.workroom_message
         else:
-            definition = _resolve_workroom_definition(
+            resolved = _resolve_workroom_target(
                 registry=self.registry,
                 workroom_id=workroom_id,
                 participants=participants,
             )
-            if definition is None:
+            if resolved is None:
                 error_text = f"Unknown workroom: {workroom_id or '(none)'}"
                 state.finish_reason = "error"
                 state.content = error_text
                 yield ProxyContentDeltaEvent(error_text)
                 return
-            intro = _workroom_notice(_workroom_intro(definition))
+            workroom_id, participants = resolved
+            intro = _workroom_notice(_workroom_intro(workroom_id))
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         async for event in self._workroom_executor.execute(
             request=request,
-            definition=definition,
+            workroom_id=workroom_id,
             participants=participants,
             workroom_message=workroom_message,
             state=state,
@@ -394,52 +393,30 @@ def _store_result(holder: dict[str, object], result: ProxyMoveResult) -> None:
     holder["result"] = result
 
 
-def _resolve_workroom_definition(
+def _resolve_workroom_target(
     *,
     registry: RuntimeRegistry,
     workroom_id: str | None,
     participants: tuple[str, ...],
-) -> DefinitionDocument | None:
-    if workroom_id is None and participants:
-        return _ad_hoc_workroom_definition(participants=participants)
-    return registry.workroom_definitions.get(workroom_id or "")
+) -> tuple[str | None, tuple[str, ...]] | None:
+    if workroom_id is not None:
+        definition = registry.workroom_definitions.get(workroom_id)
+        if definition is None:
+            return None
+        resolved_participants = participants or workroom_participants_for_definition(
+            definition
+        )
+        return workroom_id, resolved_participants
+    if participants:
+        return None, participants
+    return None
 
 
 def _workroom_notice(base: str) -> str:
     return base + "\n"
 
 
-def _workroom_intro(definition: DefinitionDocument) -> str:
-    if _is_ad_hoc_workroom_definition(definition):
+def _workroom_intro(workroom_id: str | None) -> str:
+    if workroom_id is None:
         return "Orchestrator: opening an ad hoc workroom."
-    return f"Orchestrator: opening workroom {definition.id}."
-
-
-def _ad_hoc_workroom_definition(
-    *,
-    participants: tuple[str, ...],
-) -> DefinitionDocument:
-    return DefinitionDocument(
-        id="__ad_hoc__",
-        path=Path("__ad_hoc__"),
-        metadata={
-            "id": "__ad_hoc__",
-            "name": "Ad Hoc Workroom",
-            "participants": list(participants),
-        },
-        body=(
-            "## Purpose\n"
-            "A temporary staffed workroom opened by the lead developer for "
-            "natural-language collaboration."
-        ),
-        sections={
-            "Purpose": (
-                "A temporary staffed workroom opened by the lead developer for "
-                "natural-language collaboration."
-            )
-        },
-    )
-
-
-def _is_ad_hoc_workroom_definition(definition: DefinitionDocument) -> bool:
-    return definition.metadata.get("id") == "__ad_hoc__"
+    return f"Orchestrator: opening workroom {workroom_id}."

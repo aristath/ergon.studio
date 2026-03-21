@@ -4,9 +4,7 @@ import asyncio
 import json
 import time
 import unittest
-from pathlib import Path
 
-from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
@@ -41,7 +39,8 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_ordered_definition(),
+                workroom_id="debate",
+                participants=("architect", "reviewer"),
                 state=state,
                 result_sink=captured.append,
             )
@@ -87,7 +86,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_ordered_definition(),
+                workroom_id="debate",
                 participants=("architect", "reviewer", "reviewer"),
                 state=state,
                 result_sink=captured.append,
@@ -138,7 +137,8 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_parallel_definition(),
+                workroom_id="best-of-n",
+                participants=("coder", "coder", "coder"),
                 state=state,
                 result_sink=captured.append,
             )
@@ -183,7 +183,8 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_parallel_definition(),
+                workroom_id="best-of-n",
+                participants=("coder", "coder", "coder"),
                 state=state,
                 result_sink=captured.append,
             )
@@ -245,7 +246,8 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_ad_hoc_solo_definition(),
+                workroom_id=None,
+                participants=("coder",),
                 state=state,
                 result_sink=captured.append,
             )
@@ -289,7 +291,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             event
             async for event in executor.execute(
                 request=request,
-                definition=_ordered_definition(),
+                workroom_id="debate",
                 workroom_message="Choose one clear direction.",
                 participants=("reviewer",),
                 state=state,
@@ -304,46 +306,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Relevant team work so far:", reviewer_prompt)
         self.assertIn("coder[1]: Idea A", reviewer_prompt)
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
-
-
-def _ordered_definition() -> DefinitionDocument:
-    return DefinitionDocument(
-        id="debate",
-        path=Path("debate.md"),
-        metadata={
-            "id": "debate",
-            "participants": ["architect", "reviewer"],
-        },
-        body="## Purpose\nDebate.",
-        sections={"Purpose": "Debate."},
-    )
-
-
-def _parallel_definition() -> DefinitionDocument:
-    return DefinitionDocument(
-        id="best-of-n",
-        path=Path("best-of-n.md"),
-        metadata={
-            "id": "best-of-n",
-            "participants": ["coder", "coder", "coder"],
-        },
-        body="## Purpose\nCompare attempts.",
-        sections={"Purpose": "Compare attempts."},
-    )
-
-
-def _ad_hoc_solo_definition() -> DefinitionDocument:
-    return DefinitionDocument(
-        id="__ad_hoc__",
-        path=Path("__ad_hoc__.md"),
-        metadata={
-            "id": "__ad_hoc__",
-            "participants": ["coder"],
-        },
-        body="## Purpose\nSolo implementation.",
-        sections={"Purpose": "Solo implementation."},
-    )
-
 
 def _continuation_state():
     from ergon_studio.proxy.continuation import ContinuationState

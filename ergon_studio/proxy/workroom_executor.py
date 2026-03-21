@@ -7,7 +7,6 @@ from functools import partial
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
 from ergon_studio.proxy.models import (
@@ -34,7 +33,6 @@ from ergon_studio.proxy.workroom_staffing import (
     expand_staffed_participants,
     participant_context,
 )
-from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -67,7 +65,7 @@ class ProxyWorkroomExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        definition: DefinitionDocument,
+        workroom_id: str | None,
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
         state: ProxyTurnState,
@@ -76,8 +74,9 @@ class ProxyWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None],
         worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
+        workroom_name = _workroom_name(workroom_id)
+        workroom_key = _workroom_key(workroom_id)
         round_participants = _round_participants(
-            definition=definition,
             participants=participants,
             continuation=continuation,
         )
@@ -106,7 +105,8 @@ class ProxyWorkroomExecutor:
         ):
             parallel_results = await self._run_parallel_round(
                 request=request,
-                definition=definition,
+                workroom_name=workroom_name,
+                workroom_key=workroom_key,
                 staffed_members=staffed_members,
                 user_request=user_request,
                 workroom_message=workroom_message,
@@ -141,7 +141,7 @@ class ProxyWorkroomExecutor:
             participant_move_count = 0
             while True:
                 prompt = workroom_round_prompt(
-                    workroom_id=definition.id,
+                    workroom_id=workroom_name,
                     agent_id=participant.agent_id,
                     role_instance_label=(
                         participant.label
@@ -164,7 +164,7 @@ class ProxyWorkroomExecutor:
                     agent_id=participant.agent_id,
                     prompt=prompt,
                     session_id=(
-                        f"proxy-workroom-{definition.id}-{participant.label}-{uuid4().hex}"
+                        f"proxy-workroom-{workroom_key}-{participant.label}-{uuid4().hex}"
                     ),
                     model_id_override=request.model,
                     host_tools=request.tools,
@@ -211,7 +211,7 @@ class ProxyWorkroomExecutor:
                         request=request,
                         continuation=ContinuationState(
                             mode="workroom",
-                            workroom_id=_active_workroom_id(definition),
+                            workroom_id=workroom_id,
                             workroom_participants=round_participants,
                             workroom_message=workroom_message,
                             agent_id=participant.agent_id,
@@ -274,7 +274,8 @@ class ProxyWorkroomExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        definition: DefinitionDocument,
+        workroom_name: str,
+        workroom_key: str,
         staffed_members: tuple[StaffedParticipant, ...],
         user_request: str,
         workroom_message: str | None,
@@ -283,7 +284,8 @@ class ProxyWorkroomExecutor:
             asyncio.create_task(
                 self._run_round_participant(
                     request=request,
-                    definition=definition,
+                    workroom_name=workroom_name,
+                    workroom_key=workroom_key,
                     participant=participant,
                     user_request=user_request,
                     workroom_message=workroom_message,
@@ -297,13 +299,14 @@ class ProxyWorkroomExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        definition: DefinitionDocument,
+        workroom_name: str,
+        workroom_key: str,
         participant: StaffedParticipant,
         user_request: str,
         workroom_message: str | None,
     ) -> _AgentAttemptResult:
         prompt = workroom_round_prompt(
-            workroom_id=definition.id,
+            workroom_id=workroom_name,
             agent_id=participant.agent_id,
             role_instance_label=(
                 participant.label
@@ -321,7 +324,7 @@ class ProxyWorkroomExecutor:
         async for delta in self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
-            session_id=f"proxy-workroom-{definition.id}-{participant.label}-{uuid4().hex}",
+            session_id=f"proxy-workroom-{workroom_key}-{participant.label}-{uuid4().hex}",
             model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,
@@ -339,15 +342,12 @@ class ProxyWorkroomExecutor:
 
 def _round_participants(
     *,
-    definition: DefinitionDocument,
     participants: tuple[str, ...],
     continuation: ContinuationState | None,
 ) -> tuple[str, ...]:
     if continuation is not None and continuation.workroom_participants:
         return continuation.workroom_participants
-    if participants:
-        return participants
-    return workroom_participants_for_definition(definition)
+    return participants
 
 
 def _continuation_start_index(
@@ -380,10 +380,12 @@ def _prior_work(
     return tuple(prior_work[-6:])
 
 
-def _active_workroom_id(definition: DefinitionDocument) -> str | None:
-    if definition.metadata.get("id") == "__ad_hoc__":
-        return None
-    return definition.id
+def _workroom_name(workroom_id: str | None) -> str:
+    return workroom_id or "ad hoc"
+
+
+def _workroom_key(workroom_id: str | None) -> str:
+    return workroom_id or "__ad_hoc__"
 
 
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:

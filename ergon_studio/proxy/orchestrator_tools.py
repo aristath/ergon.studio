@@ -8,16 +8,28 @@ from ergon_studio.registry import RuntimeRegistry
 
 INTERNAL_TOOL_NAMES = frozenset({"message_workroom", "reply_lead_dev"})
 
+WORKROOM_INTERNAL_TOOLS = (
+    ProxyFunctionTool(
+        name="reply_lead_dev",
+        description=(
+            "Send a concise update back to the lead developer when you are "
+            "done, blocked, or need a decision."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+            },
+            "required": ["message"],
+        },
+    ),
+)
+
 
 @dataclass(frozen=True)
 class MessageWorkroomAction:
     preset: str | None
     participants: tuple[str, ...]
-    message: str
-
-
-@dataclass(frozen=True)
-class ReplyLeadDevAction:
     message: str
 
 
@@ -60,25 +72,6 @@ def build_orchestrator_internal_tools(
     )
 
 
-def build_workroom_internal_tools() -> tuple[ProxyFunctionTool, ...]:
-    return (
-        ProxyFunctionTool(
-            name="reply_lead_dev",
-            description=(
-                "Send a concise update back to the lead developer when you are "
-                "done, blocked, or need a decision."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string"},
-                },
-                "required": ["message"],
-            },
-        ),
-    )
-
-
 def parse_message_workroom_action(
     tool_call: ProxyToolCall,
     *,
@@ -97,15 +90,13 @@ def parse_message_workroom_action(
     )
 
 
-def parse_reply_lead_dev_action(
+def parse_reply_lead_dev_message(
     tool_call: ProxyToolCall,
-) -> ReplyLeadDevAction:
+) -> str:
     if tool_call.name != "reply_lead_dev":
         raise ValueError(f"unsupported workroom tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
-    return ReplyLeadDevAction(
-        message=_required_text(payload.get("message"), field="message"),
-    )
+    return _required_text(payload.get("message"), field="message")
 
 
 def is_internal_tool_name(name: str) -> bool:

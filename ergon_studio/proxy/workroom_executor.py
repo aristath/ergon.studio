@@ -14,9 +14,9 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.orchestrator_tools import (
-    build_workroom_internal_tools,
+    WORKROOM_INTERNAL_TOOLS,
     is_internal_tool_name,
-    parse_reply_lead_dev_action,
+    parse_reply_lead_dev_message,
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.transcript import summarize_conversation
@@ -147,7 +147,7 @@ class ProxyWorkroomExecutor:
                         prompt=prompt,
                         model_id_override=request.model,
                         host_tools=request.tools,
-                        extra_tools=build_workroom_internal_tools(),
+                        extra_tools=WORKROOM_INTERNAL_TOOLS,
                         tool_choice=request.tool_choice,
                         parallel_tool_calls=request.parallel_tool_calls,
                         pending_continuation=participant_pending,
@@ -200,10 +200,10 @@ class ProxyWorkroomExecutor:
                                 yield event
                             return
                     if internal_tool_calls:
-                        action = parse_reply_lead_dev_action(internal_tool_calls[0])
-                        reasoning_delta = (
-                            f"{participant.label}: {action.message.strip()}"
+                        message = parse_reply_lead_dev_message(
+                            internal_tool_calls[0]
                         )
+                        reasoning_delta = f"{participant.label}: {message}"
                         state.append_reasoning(reasoning_delta)
                         yield ProxyReasoningDeltaEvent(reasoning_delta)
                         room_lines.append(reasoning_delta)

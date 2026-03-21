@@ -28,8 +28,6 @@ class AgentRunnerTests(unittest.TestCase):
         agent = build_runtime_agent(registry, "orchestrator")
 
         self.assertEqual(agent.id, "orchestrator")
-        self.assertEqual(agent.name, "Orchestrator")
-        self.assertEqual(agent.role, "orchestrator")
         self.assertEqual(agent.temperature, 0.7)
         self.assertEqual(agent.max_tokens, 1200)
         self.assertIn("## Identity", agent.instructions)

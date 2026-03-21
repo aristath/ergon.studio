@@ -33,8 +33,6 @@ ProxyToolChoice = str | dict[str, Any] | None
 @dataclass(frozen=True)
 class RuntimeAgent:
     id: str
-    name: str
-    role: str
     instructions: str
     temperature: float | int | None = None
     max_tokens: int | None = None
@@ -281,11 +279,8 @@ def build_runtime_agent(
     agent_id: str,
 ) -> RuntimeAgent:
     definition = registry.agent_definitions[agent_id]
-    role = str(definition.metadata.get("role", definition.id))
     return RuntimeAgent(
         id=definition.id,
-        name=str(definition.metadata.get("name", definition.id)),
-        role=role,
         instructions=compose_instructions(definition, registry=registry),
         temperature=_metadata_number(definition.metadata.get("temperature")),
         max_tokens=_metadata_int(definition.metadata.get("max_tokens")),

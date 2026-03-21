@@ -1,11 +1,9 @@
 ---
 id: standard-build
 name: Standard Build
-stages:
+participants:
   - architect
-  - coder
-  - reviewer
 ---
 
 ## Purpose
-Run a simple architecture to implementation to review flow.
+Start with an architecture pass before the lead developer staffs the next round.

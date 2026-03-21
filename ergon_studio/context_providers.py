@@ -11,7 +11,7 @@ from agent_framework import (
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.registry import RuntimeRegistry
-from ergon_studio.workroom_layout import workroom_kind_for_definition
+from ergon_studio.workroom_layout import workroom_participants_for_definition
 
 
 class AgentProfileContextProvider(BaseContextProvider):
@@ -68,8 +68,10 @@ class AgentProfileContextProvider(BaseContextProvider):
             for workroom_id, definition in sorted(
                 self.registry.workroom_definitions.items()
             ):
-                kind = workroom_kind_for_definition(definition)
-                workroom_summaries.append(f"{workroom_id}({kind})")
+                participants = ", ".join(
+                    workroom_participants_for_definition(definition)
+                )
+                workroom_summaries.append(f"{workroom_id}({participants})")
             lines.append(
                 "Available specialists: "
                 + (", ".join(agent_summaries) if agent_summaries else "none")

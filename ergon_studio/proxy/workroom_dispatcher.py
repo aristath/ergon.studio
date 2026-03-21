@@ -19,9 +19,6 @@ from ergon_studio.proxy.turn_state import (
 )
 from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
 from ergon_studio.registry import RuntimeRegistry
-from ergon_studio.workroom_layout import (
-    workroom_kind_for_definition,
-)
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -41,12 +38,10 @@ class ProxyWorkroomDispatcher:
         self,
         registry: RuntimeRegistry,
         *,
-        execute_staged_workroom: WorkroomHandler,
-        execute_discussion_workroom: WorkroomHandler,
+        execute_workroom_round: WorkroomHandler,
     ) -> None:
         self.registry = registry
-        self._execute_staged_workroom = execute_staged_workroom
-        self._execute_discussion_workroom = execute_discussion_workroom
+        self._execute_workroom_round = execute_workroom_round
 
     async def execute_workroom(
         self,
@@ -146,38 +141,19 @@ class ProxyWorkroomDispatcher:
         result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        kind = workroom_kind_for_definition(definition)
-        if kind == "staged":
-            async for event in self._execute_staged_workroom(
-                request=request,
-                definition=definition,
-                goal=goal,
-                participants=participants,
-                workroom_request=workroom_request,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-                result_sink=result_sink,
-                loop_state=loop_state,
-            ):
-                yield event
-            return
-        if kind == "discussion":
-            async for event in self._execute_discussion_workroom(
-                request=request,
-                definition=definition,
-                goal=goal,
-                participants=participants,
-                workroom_request=workroom_request,
-                state=state,
-                continuation=continuation,
-                pending=pending,
-                result_sink=result_sink,
-                loop_state=loop_state,
-            ):
-                yield event
-            return
-        raise ValueError(f"unsupported workroom kind: {kind}")
+        async for event in self._execute_workroom_round(
+            request=request,
+            definition=definition,
+            goal=goal,
+            participants=participants,
+            workroom_request=workroom_request,
+            state=state,
+            continuation=continuation,
+            pending=pending,
+            result_sink=result_sink,
+            loop_state=loop_state,
+        ):
+            yield event
 
     def _resolve_workroom_definition(
         self,
@@ -212,23 +188,13 @@ def _ad_hoc_workroom_definition(
     *,
     participants: tuple[str, ...],
 ) -> DefinitionDocument:
-    expanded_staffing = participants
-    unique_roles = {agent_id for agent_id in expanded_staffing}
-    if len(expanded_staffing) > 1 and len(unique_roles) == 1:
-        metadata: dict[str, object] = {"stages": list(expanded_staffing)}
-    else:
-        ordered_roles: list[str] = []
-        for agent_id in expanded_staffing:
-            if agent_id not in ordered_roles:
-                ordered_roles.append(agent_id)
-        metadata = {"turns": ordered_roles}
     return DefinitionDocument(
         id=AD_HOC_WORKROOM_ID,
         path=Path(AD_HOC_WORKROOM_ID),
         metadata={
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
-            **metadata,
+            "participants": list(participants),
         },
         body=(
             "## Purpose\n"

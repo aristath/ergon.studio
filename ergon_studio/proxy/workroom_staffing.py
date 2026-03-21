@@ -18,45 +18,54 @@ def expand_staffed_participants(
 ) -> tuple[StaffedParticipant, ...]:
     count_map = _participant_counts(participants)
     allowed = set(count_map) if count_map else None
+    base_counts = _participant_counts(base_participants)
     staffed_participants: list[StaffedParticipant] = []
-    seen_agents: set[str] = set()
+    emitted_counts: dict[str, int] = {}
+    emitted_totals: dict[str, int] = {}
     for agent_id in base_participants:
-        if agent_id in seen_agents:
-            continue
-        seen_agents.add(agent_id)
         if allowed is not None and agent_id not in allowed:
             continue
-        total_instances = count_map.get(agent_id, 1) if count_map else 1
-        for instance_index in range(1, total_instances + 1):
-            staffed_participants.append(
-                StaffedParticipant(
+        total_instances = (
+            count_map.get(agent_id, 0) if count_map else base_counts.get(agent_id, 0)
+        )
+        if total_instances <= 0:
+            continue
+        instance_index = emitted_counts.get(agent_id, 0) + 1
+        emitted_counts[agent_id] = instance_index
+        if instance_index > total_instances:
+            continue
+        emitted_totals[agent_id] = total_instances
+        staffed_participants.append(
+            StaffedParticipant(
+                agent_id=agent_id,
+                label=_participant_label(
                     agent_id=agent_id,
-                    label=_participant_label(
-                        agent_id=agent_id,
-                        instance_index=instance_index,
-                        total_instances=total_instances,
-                    ),
                     instance_index=instance_index,
                     total_instances=total_instances,
-                )
+                ),
+                instance_index=instance_index,
+                total_instances=total_instances,
             )
+        )
+    if count_map:
+        for agent_id, total_instances in count_map.items():
+            if allowed is None or agent_id not in allowed:
+                continue
+            already_emitted = emitted_counts.get(agent_id, 0)
+            for instance_index in range(already_emitted + 1, total_instances + 1):
+                staffed_participants.append(
+                    StaffedParticipant(
+                        agent_id=agent_id,
+                        label=_participant_label(
+                            agent_id=agent_id,
+                            instance_index=instance_index,
+                            total_instances=total_instances,
+                        ),
+                        instance_index=instance_index,
+                        total_instances=total_instances,
+                    )
+                )
     return tuple(staffed_participants)
-
-
-def expand_staffed_sequence(
-    base_sequence: tuple[str, ...],
-    *,
-    participants: tuple[StaffedParticipant, ...],
-) -> tuple[str, ...]:
-    if not base_sequence or not participants:
-        return ()
-    labels_by_agent: dict[str, list[str]] = {}
-    for participant in participants:
-        labels_by_agent.setdefault(participant.agent_id, []).append(participant.label)
-    expanded: list[str] = []
-    for agent_id in base_sequence:
-        expanded.extend(labels_by_agent.get(agent_id, ()))
-    return tuple(expanded)
 
 
 def participant_by_label(

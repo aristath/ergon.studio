@@ -1,7 +1,7 @@
 ---
 id: debate
 name: Debate
-turns:
+participants:
   - architect
   - coder
   - critic

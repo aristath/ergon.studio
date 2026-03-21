@@ -20,8 +20,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_reports_unknown_workroom(self) -> None:
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_empty_handler,
-            execute_discussion_workroom=_empty_handler,
+            execute_workroom_round=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -47,17 +46,16 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
             [ProxyContentDeltaEvent],
         )
 
-    async def test_execute_workroom_dispatches_staged_handler(self) -> None:
+    async def test_execute_workroom_dispatches_round_handler(self) -> None:
         calls: list[tuple[str, str]] = []
 
-        async def _staged_handler(**kwargs):
+        async def _workroom_handler(**kwargs):
             calls.append((kwargs["definition"].id, kwargs["goal"]))
             yield ProxyContentDeltaEvent("done")
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_staged_handler,
-            execute_discussion_workroom=_empty_handler,
+            execute_workroom_round=_workroom_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -87,20 +85,19 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_builds_ad_hoc_workroom_definition(self) -> None:
         calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-        async def _discussion_handler(**kwargs):
+        async def _workroom_handler(**kwargs):
             calls.append(
                 (
                     kwargs["definition"].id,
                     kwargs["goal"],
-                    tuple(kwargs["definition"].metadata["turns"]),
+                    tuple(kwargs["definition"].metadata["participants"]),
                 )
             )
             yield ProxyContentDeltaEvent("done")
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_empty_handler,
-            execute_discussion_workroom=_discussion_handler,
+            execute_workroom_round=_workroom_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -133,21 +130,20 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         calls: list[tuple[str, str, tuple[str, ...], bool]] = []
 
-        async def _staged_handler(**kwargs):
+        async def _workroom_handler(**kwargs):
             calls.append(
                 (
                     kwargs["definition"].id,
                     kwargs["goal"],
-                    tuple(kwargs["definition"].metadata["stages"]),
-                    "turns" in kwargs["definition"].metadata,
+                    tuple(kwargs["definition"].metadata["participants"]),
+                    "participants" in kwargs["definition"].metadata,
                 )
             )
             yield ProxyContentDeltaEvent("done")
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_staged_workroom=_staged_handler,
-            execute_discussion_workroom=_empty_handler,
+            execute_workroom_round=_workroom_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -179,7 +175,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                     "ad-hoc-workroom",
                     "Try three implementations",
                     ("coder", "coder", "coder"),
-                    False,
+                    True,
                 )
             ],
         )
@@ -218,7 +214,7 @@ def _registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "stages": ["architect"],
+                    "participants": ["architect"],
                 },
                 body="## Purpose\nBuild.",
                 sections={"Purpose": "Build."},

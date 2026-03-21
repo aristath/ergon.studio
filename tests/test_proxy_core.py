@@ -159,6 +159,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         _internal_action(
                             "continue_workroom",
+                            participants=["coder"],
                             message="Implement the approved plan",
                         ),
                         "Workroom final summary",
@@ -315,6 +316,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "continue_workroom",
+                            participants=["coder"],
                             message="Continue from the architecture plan",
                         ),
                         "Workroom final summary",
@@ -400,10 +402,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reasoning, "")
         self.assertEqual(result.content, "Fresh reply")
 
-    async def test_workroom_continuation_keeps_remaining_agents_in_same_group(
+    async def test_workroom_continuation_keeps_remaining_participants_in_same_round(
         self,
     ) -> None:
-        registry = _staged_workroom_registry()
+        registry = _multi_participant_workroom_registry()
         first_core = ProxyOrchestrationCore(
             registry,
             agent_builder=_fake_agent_builder(
@@ -411,7 +413,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "open_workroom",
-                            workroom_id="staged-build",
+                            workroom_id="build-room",
                             message="Build calculator",
                         ),
                     ],
@@ -447,10 +449,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             registry,
             agent_builder=_fake_agent_builder(
                 {
+                    "orchestrator": ["Workroom final summary"],
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "reviewer": ["Reviewed result"],
-                    "orchestrator": ["Workroom final summary"],
                 }
             ),
         )
@@ -484,7 +486,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Reviewed", reasoning)
         self.assertEqual(resumed_result.content, "Workroom final summary")
 
-    async def test_discussion_workroom_uses_turns_as_turn_order(self) -> None:
+    async def test_workroom_uses_template_participant_order(self) -> None:
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -518,47 +520,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertGreaterEqual(reasoning.count("architect:"), 2)
+        self.assertIn("architect[1]: Option", reasoning)
+        self.assertIn("architect[2]: Refined", reasoning)
         self.assertIn("brainstormer: Option", reasoning)
         self.assertIn("reviewer: Decision-ready", reasoning)
         self.assertEqual(result.content, "Debate final summary")
-
-    async def test_dynamic_workroom_runs_as_discussion_room(self) -> None:
-        registry = _advanced_workroom_registry()
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_builder=_fake_agent_builder(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_workroom",
-                            workroom_id="dynamic-open-ended",
-                            message="Build it",
-                        ),
-                        "Dynamic final summary",
-                    ],
-                    "architect": ["Architecture pass"],
-                    "reviewer": ["Review pass"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build it"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("architect: Architecture", reasoning)
-        self.assertIn("reviewer: Review", reasoning)
-        self.assertEqual(result.content, "Dynamic final summary")
 
     async def test_continue_workroom_can_replace_room_staffing(self) -> None:
         registry = _advanced_workroom_registry()
@@ -569,7 +535,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "open_workroom",
-                            workroom_id="dynamic-open-ended",
+                            workroom_id="debate",
                             message="Build it",
                         ),
                         _internal_action(
@@ -579,7 +545,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         "Done",
                     ],
-                    "architect": ["Architecture pass"],
+                    "architect": ["Architecture pass", "Refined architecture"],
+                    "brainstormer": ["Alternative path"],
                     "reviewer": ["Review pass", "Final verdict"],
                 }
             ),
@@ -598,54 +565,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertEqual(reasoning.count("architect: Architecture"), 1)
+        self.assertEqual(reasoning.count("architect[1]: Architecture"), 1)
+        self.assertEqual(reasoning.count("brainstormer: Alternative"), 1)
         self.assertEqual(reasoning.count("reviewer: Review"), 1)
         self.assertEqual(reasoning.count("reviewer: Final"), 1)
         self.assertEqual(result.content, "Done")
-
-    async def test_handoff_chain_runs_as_staged_room(self) -> None:
-        registry = _advanced_workroom_registry()
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_builder=_fake_agent_builder(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_workroom",
-                            workroom_id="handoff-chain",
-                            message="Research and decide",
-                        ),
-                        _internal_action(
-                            "continue_workroom",
-                            message=(
-                                "Continue the staged handoff toward a "
-                                "recommendation"
-                            ),
-                        ),
-                        "Handoff final summary",
-                    ],
-                    "researcher": ["Initial direction"],
-                    "reviewer": ["Final recommendation"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Research and decide"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("researcher: Initial", reasoning)
-        self.assertIn("reviewer: Final", reasoning)
-        self.assertEqual(result.content, "Handoff final summary")
 
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
@@ -982,13 +906,13 @@ class _FakeRegistry:
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=Path("standard-build.md"),
-                    metadata={
-                        "id": "standard-build",
-                        "stages": ["architect", "coder"],
-                    },
-                    body="## Purpose\nBuild.",
-                    sections={"Purpose": "Build."},
-                )
+                metadata={
+                    "id": "standard-build",
+                    "participants": ["architect"],
+                },
+                body="## Purpose\nBuild.",
+                sections={"Purpose": "Build."},
+            )
             },
         )
 
@@ -1042,17 +966,17 @@ def _fake_registry():
     return _FakeRegistry()
 
 
-def _staged_workroom_registry():
+def _multi_participant_workroom_registry():
     registry = _FakeRegistry()
-    registry.workroom_definitions["staged-build"] = DefinitionDocument(
-        id="staged-build",
-        path=Path("staged-build.md"),
+    registry.workroom_definitions["build-room"] = DefinitionDocument(
+        id="build-room",
+        path=Path("build-room.md"),
         metadata={
-            "id": "staged-build",
-            "stages": [["architect", "coder", "reviewer"]],
+            "id": "build-room",
+            "participants": ["architect", "coder", "reviewer"],
         },
-        body="## Purpose\nStaged build.",
-        sections={"Purpose": "Staged build."},
+        body="## Purpose\nBuild room.",
+        sections={"Purpose": "Build room."},
     )
     return registry
 
@@ -1121,7 +1045,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("debate.md"),
                 metadata={
                     "id": "debate",
-                    "turns": [
+                    "participants": [
                         "architect",
                         "brainstormer",
                         "architect",
@@ -1130,26 +1054,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 },
                 body="## Purpose\nDebate.",
                 sections={"Purpose": "Debate."},
-            ),
-            "dynamic-open-ended": DefinitionDocument(
-                id="dynamic-open-ended",
-                path=Path("dynamic-open-ended.md"),
-                metadata={
-                    "id": "dynamic-open-ended",
-                    "turns": ["architect", "reviewer"],
-                },
-                body="## Purpose\nAdaptive.",
-                sections={"Purpose": "Adaptive."},
-            ),
-            "handoff-chain": DefinitionDocument(
-                id="handoff-chain",
-                path=Path("handoff-chain.md"),
-                metadata={
-                    "id": "handoff-chain",
-                    "stages": [["researcher"], ["reviewer"]],
-                },
-                body="## Purpose\nHandoff.",
-                sections={"Purpose": "Handoff."},
             ),
         },
     )

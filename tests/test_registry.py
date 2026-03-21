@@ -75,7 +75,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: standard-build\n"
-                    "stages:\n"
+                    "participants:\n"
                     "  - architect\n"
                     "  - coder\n"
                     "---\n"
@@ -88,7 +88,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: research-then-decide\n"
-                    "stages:\n"
+                    "participants:\n"
                     "  - researcher\n"
                     "---\n"
                     "## Purpose\n"
@@ -100,7 +100,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: debate\n"
-                    "turns:\n"
+                    "participants:\n"
                     "  - architect\n"
                     "  - reviewer\n"
                     "---\n"
@@ -166,7 +166,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: standard-build\n"
-                    "stages:\n"
+                    "participants:\n"
                     "  - coder\n"
                     "---\n"
                     "## Purpose\n"

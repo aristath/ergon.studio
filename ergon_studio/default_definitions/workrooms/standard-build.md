@@ -1,22 +1,19 @@
 ---
 id: standard-build
 name: Staged Build
-stages:
+participants:
   - architect
-  - coder
-  - tester
-  - reviewer
 ---
 
 ## Purpose
-Common delivery workroom for new features or meaningful code changes.
+Starting workroom for concrete build tasks that need an initial plan.
 
 ## Use When
 - the goal is concrete enough to build
-- the lead developer wants a measured pass through planning, implementation,
-  verification, and review
+- the lead developer wants to start with an architecture pass before staffing the
+  next round
 - the work is non-trivial but not chaotic enough to require open-ended staffing
 
 ## Notes
-This is a workroom preset, not a law. The lead developer may skip stages, revisit them,
-or use a different tactic entirely.
+This is a workroom preset, not a law. The lead developer decides who continues the
+next round.

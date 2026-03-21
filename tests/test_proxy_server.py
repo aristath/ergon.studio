@@ -590,6 +590,7 @@ class ProxyServerTests(unittest.TestCase):
                         ),
                         _internal_action(
                             "continue_workroom",
+                            participants=["coder"],
                             message="Continue the build from the plan",
                         ),
                         "Workroom final summary",
@@ -1257,7 +1258,7 @@ def _proxy_registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "stages": ["architect", "coder"],
+                    "participants": ["architect"],
                 },
                 body="## Purpose\nBuild.",
                 sections={"Purpose": "Build."},

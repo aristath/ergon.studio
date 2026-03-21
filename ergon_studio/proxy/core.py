@@ -14,9 +14,6 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     latest_pending_continuation,
 )
-from ergon_studio.proxy.discussion_workroom_executor import (
-    ProxyDiscussionWorkroomExecutor,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -34,7 +31,6 @@ from ergon_studio.proxy.orchestrator_tools import (
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
-from ergon_studio.proxy.staged_workroom_executor import ProxyStagedWorkroomExecutor
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
@@ -43,6 +39,7 @@ from ergon_studio.proxy.turn_state import (
     ProxyTurnState,
 )
 from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
+from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -68,18 +65,13 @@ class ProxyOrchestrationCore:
             agent_builder=agent_builder,
         )
         self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
-        staged_workroom_executor = ProxyStagedWorkroomExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-        )
-        discussion_workroom_executor = ProxyDiscussionWorkroomExecutor(
+        workroom_executor = ProxyWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
         )
         self._workroom_dispatcher = ProxyWorkroomDispatcher(
             registry,
-            execute_staged_workroom=staged_workroom_executor.execute,
-            execute_discussion_workroom=discussion_workroom_executor.execute,
+            execute_workroom_round=workroom_executor.execute,
         )
 
     def stream_turn(

@@ -10,10 +10,7 @@ from ergon_studio.proxy.delivery_requirements import (
     unmet_delivery_requirements,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.playbook_focus import (
-    PLAYBOOK_FOCUS_VALUES,
-    normalize_playbook_focus,
-)
+from ergon_studio.proxy.playbook_focus import normalize_playbook_focus
 from ergon_studio.proxy.selection_outcome import (
     ProxySelectionOutcome,
     selection_outcome_lines,
@@ -48,7 +45,6 @@ class ProxyTurnPlan:
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
     delivery_values = ", ".join(DELIVERY_REQUIREMENT_VALUES)
-    focus_values = ", ".join(PLAYBOOK_FOCUS_VALUES)
     workflow_lines = []
     for workflow_id, definition in sorted(registry.workflow_definitions.items()):
         hints = ", ".join(selection_hints_for_metadata(definition.metadata)) or "none"
@@ -85,20 +81,30 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             ),
             "Output JSON only.",
             "",
-            "Allowed modes:",
-            '- "act": the lead developer handles the next move directly.',
-            '- "delegate": assign one specialist a focused task.',
-            '- "workflow": start a named playbook involving one or more specialists.',
+            "Allowed actions:",
+            '- "reply": the lead developer handles the next move directly.',
+            '- "delegate": message one specialist with a focused assignment.',
+            '- "start_playbook": start a named playbook tactic.',
             '- "continue_playbook": continue the playbook already in progress.',
-            '- "finish": deliver the current result back to the product manager.',
+            '- "deliver": return the current result to the product manager.',
             "",
             "Rules:",
+            "- Think like a pragmatic lead developer, not a classifier.",
             (
-                "- Think like a pragmatic lead developer, not a classifier."
+                "- Keep the JSON compact. Only include fields that matter for the "
+                "very next move."
             ),
             (
-                "- When useful, explain why this move is the right next step and "
-                "what a good outcome would look like."
+                "- target names the specialist, playbook, or 'current' playbook "
+                "for continue_playbook."
+            ),
+            (
+                "- assignment is the natural-language brief for the next move."
+            ),
+            (
+                "- staffing is optional and only for playbook actions. It is a list "
+                "of specialist ids. Repeating a role means multiple independent "
+                "instances, such as ['coder','coder','reviewer']."
             ),
             (
                 "- You may optionally set delivery_requirements to express the "
@@ -106,60 +112,27 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 f"Allowed values: {delivery_values}."
             ),
             (
-                "- You may optionally name staffed specialists for a playbook when "
-                "the lead developer should bring in a specific subset of the team."
+                "- rationale is optional. Use it when it helps explain the next move."
             ),
             (
-                "- For workflow or continue_playbook, you may optionally set "
-                "staffing_action to keep, replace, augment, or trim."
-            ),
-            (
-                "- You may optionally set specialist_counts for grouped playbooks "
-                "when the lead developer wants multiple staffed instances of a "
-                "role, such as several coders for parallel attempts."
-            ),
-            (
-                "- On continue_playbook, use keep to preserve the current team, "
-                "replace to restaff the tactic explicitly, augment to add or scale "
-                "up listed specialists, and trim to remove or scale down listed "
-                "specialists."
-            ),
-            (
-                "- For workflow or continue_playbook, you may optionally set "
-                "playbook_request to state the concrete assignment for this "
-                "playbook round."
-            ),
-            (
-                "- For workflow or continue_playbook, you may optionally set "
-                "playbook_focus to describe the kind of round this is. Allowed "
-                f"values: {focus_values}."
-            ),
-            (
-                "- When a move is about judging alternatives, you may set "
-                "comparison_mode to select_best, synthesize_best, or critique_options."
-            ),
-            (
-                "- Prefer act for discussion, clarification, planning with the product "
+                "- Prefer reply for discussion, clarification, planning with "
+                "the product "
                 "manager, and small direct actions."
             ),
             (
-                "- Prefer finish when the work is materially done and the lead "
+                "- Prefer deliver when the work is materially done and the lead "
                 "developer should hand back a concrete result."
             ),
             (
                 "- Prefer delegate for narrow, well-bounded specialist work."
             ),
             (
-                "- Prefer workflow when the work would benefit from multiple steps, "
-                "comparison, review, repair, debate, or adaptive staffing."
+                "- Prefer start_playbook when the work would benefit from a known "
+                "multi-agent tactic."
             ),
             (
                 "- Prefer continue_playbook when the current playbook is still the "
                 "right tactic and should advance another round."
-            ),
-            (
-                "- Workflows are playbooks, not rigid laws. Choose one when it is a "
-                "good tactic, not because keywords happen to match."
             ),
             (
                 "- Preserve the full delivery goal when the product manager expects "
@@ -177,7 +150,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"staffing_action":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"delivery_requirements":[],"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"action":"reply|delegate|start_playbook|continue_playbook|deliver","target":null,"assignment":"","staffing":[],"delivery_requirements":[],"rationale":""}',
         ]
     )
 
@@ -315,6 +288,90 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     if not isinstance(payload, dict):
         raise ValueError("planner output must be a JSON object")
 
+    if "action" in payload:
+        return _parse_action_plan(payload, registry=registry)
+    return _parse_legacy_plan(payload, registry=registry)
+
+
+def _parse_action_plan(
+    payload: dict[str, object],
+    *,
+    registry: RuntimeRegistry,
+) -> ProxyTurnPlan:
+    action = _normalize_action(payload.get("action"))
+    assignment = _optional_text(payload.get("assignment"))
+    rationale = _optional_text(payload.get("rationale"))
+    delivery_requirements = (
+        normalize_delivery_requirements(payload["delivery_requirements"])
+        if "delivery_requirements" in payload
+        else None
+    )
+    specialists, specialist_counts = _normalize_staffing_list(
+        payload.get("staffing"),
+        registry=registry,
+    )
+    target = _optional_text(payload.get("target"))
+
+    if action == "delegate":
+        agent_id = target if target in registry.agent_definitions else None
+        return ProxyTurnPlan(
+            mode="delegate",
+            agent_id=agent_id,
+            request=assignment,
+            delivery_requirements=delivery_requirements,
+            rationale=rationale,
+        )
+
+    if action == "start_playbook":
+        return ProxyTurnPlan(
+            mode="workflow",
+            workflow_id=resolve_workflow_reference(registry, target),
+            specialists=specialists,
+            specialist_counts=specialist_counts,
+            playbook_request=assignment,
+            delivery_requirements=delivery_requirements,
+            rationale=rationale,
+        )
+
+    if action == "continue_playbook":
+        workflow_id = None if target == "current" else resolve_workflow_reference(
+            registry,
+            target,
+        )
+        staffing_action = (
+            "replace" if specialists or specialist_counts else None
+        )
+        return ProxyTurnPlan(
+            mode="continue_playbook",
+            workflow_id=workflow_id,
+            staffing_action=staffing_action,
+            specialists=specialists,
+            specialist_counts=specialist_counts,
+            playbook_request=assignment,
+            delivery_requirements=delivery_requirements,
+            rationale=rationale,
+        )
+
+    if action == "deliver":
+        return ProxyTurnPlan(
+            mode="finish",
+            delivery_requirements=delivery_requirements,
+            rationale=rationale,
+        )
+
+    return ProxyTurnPlan(
+        mode="act",
+        delivery_requirements=delivery_requirements,
+        rationale=rationale,
+    )
+
+
+def _parse_legacy_plan(
+    payload: dict[str, object],
+    *,
+    registry: RuntimeRegistry,
+) -> ProxyTurnPlan:
+
     mode = str(payload.get("mode", "act")).strip().lower()
     if mode not in {"act", "delegate", "workflow", "continue_playbook", "finish"}:
         mode = "act"
@@ -441,6 +498,36 @@ def _normalize_specialist_counts(
     return tuple(specialist_counts)
 
 
+def _normalize_staffing_list(
+    value: object,
+    *,
+    registry: RuntimeRegistry,
+) -> tuple[tuple[str, ...], tuple[tuple[str, int], ...]]:
+    if not isinstance(value, list):
+        return (), ()
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if (
+            not candidate
+            or candidate == "orchestrator"
+            or candidate not in registry.agent_definitions
+        ):
+            continue
+        if candidate not in counts:
+            counts[candidate] = 0
+            order.append(candidate)
+        counts[candidate] += 1
+    specialists = tuple(order)
+    specialist_counts = tuple(
+        (agent_id, count) for agent_id in order if (count := counts[agent_id]) > 1
+    )
+    return specialists, specialist_counts
+
+
 def _normalize_comparison_mode(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -457,6 +544,21 @@ def _normalize_staffing_action(value: object) -> str | None:
     if normalized in {"keep", "replace", "augment", "trim"}:
         return normalized
     return None
+
+
+def _normalize_action(value: object) -> str:
+    if not isinstance(value, str):
+        return "reply"
+    normalized = value.strip().lower()
+    if normalized in {
+        "reply",
+        "delegate",
+        "start_playbook",
+        "continue_playbook",
+        "deliver",
+    }:
+        return normalized
+    return "reply"
 
 
 def summarize_conversation(

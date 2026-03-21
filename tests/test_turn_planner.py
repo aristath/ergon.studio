@@ -31,7 +31,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_turn_parses_finish_decision(self) -> None:
         async def _run_text_agent(**_kwargs):
-            return '{"mode":"finish","goal":"Deliver calculator"}'
+            return '{"action":"deliver","rationale":"The result is ready to hand back"}'
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(
@@ -42,13 +42,13 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
         plan = await planner.plan_turn(request)
 
         self.assertEqual(plan.mode, "finish")
-        self.assertEqual(plan.goal, "Deliver calculator")
+        self.assertEqual(plan.rationale, "The result is ready to hand back")
 
     async def test_plan_turn_parses_valid_workflow_plan(self) -> None:
         async def _run_text_agent(**_kwargs):
             return (
-                '{"mode":"workflow","workflow_id":"standard-build",'
-                '"goal":"Build calculator"}'
+                '{"action":"start_playbook","target":"standard-build",'
+                '"assignment":"Build the calculator with the standard tactic"}'
             )
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
@@ -61,11 +61,14 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(plan.mode, "workflow")
         self.assertEqual(plan.workflow_id, "standard-build")
-        self.assertEqual(plan.goal, "Build calculator")
+        self.assertEqual(
+            plan.playbook_request,
+            "Build the calculator with the standard tactic",
+        )
 
     async def test_plan_turn_parses_continue_playbook_decision(self) -> None:
         async def _run_text_agent(**_kwargs):
-            return '{"mode":"continue_playbook"}'
+            return '{"action":"continue_playbook","target":"current"}'
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(
@@ -93,7 +96,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         async def _run_text_agent(**_kwargs):
-            return '{"mode":"workflow","workflow_id":"standard-build"}'
+            return '{"action":"start_playbook","target":"standard-build"}'
 
         planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(

@@ -112,10 +112,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"delegate","agent_id":"coder",'
-                            '"request":"Implement it"}'
+                            '{"action":"delegate","target":"coder",'
+                            '"assignment":"Implement it"}'
                         ),
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         "Final summary",
                     ],
                     "coder": ["Patch", " applied"],
@@ -148,11 +148,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"standard-build",'
-                            '"goal":"Build calculator"}'
+                            '{"action":"start_playbook","target":"standard-build",'
+                            '"assignment":"Build calculator"}'
                         ),
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"finish"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
                     "architect": ["Plan"],

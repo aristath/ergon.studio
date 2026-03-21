@@ -154,6 +154,59 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.success_criteria, "Have a reviewed implementation")
         self.assertTrue(plan.deliverable_expected)
 
+    def test_parse_turn_plan_parses_compact_delegate_action(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"action":"delegate","target":"coder",'
+                '"assignment":"Implement the change","rationale":"Keep this focused"}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "delegate")
+        self.assertEqual(plan.agent_id, "coder")
+        self.assertEqual(plan.request, "Implement the change")
+        self.assertEqual(plan.rationale, "Keep this focused")
+
+    def test_parse_turn_plan_parses_compact_playbook_action(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"action":"start_playbook","target":"standard-build",'
+                '"assignment":"Build the feature safely","staffing":['
+                '"coder","coder","reviewer"],'
+                '"delivery_requirements":["review"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "workflow")
+        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.playbook_request, "Build the feature safely")
+        self.assertEqual(plan.specialists, ("coder", "reviewer"))
+        self.assertEqual(plan.specialist_counts, (("coder", 2),))
+        self.assertEqual(plan.delivery_requirements, ("review",))
+
+    def test_parse_turn_plan_parses_compact_continue_action(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"action":"continue_playbook","target":"current",'
+                '"assignment":"Run one more review pass","staffing":["reviewer"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertIsNone(plan.workflow_id)
+        self.assertEqual(plan.playbook_request, "Run one more review pass")
+        self.assertEqual(plan.staffing_action, "replace")
+        self.assertEqual(plan.specialists, ("reviewer",))
+
     def test_parse_turn_plan_drops_unknown_agent(self) -> None:
         registry = _make_registry()
 

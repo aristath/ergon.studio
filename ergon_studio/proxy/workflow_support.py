@@ -76,12 +76,12 @@ class ProxyWorkflowSupport:
         workflow_id: str,
         goal: str,
         current_brief: str,
-        playbook_request: str | None,
-        playbook_focus: str | None,
+        playbook_request: str | None = None,
+        playbook_focus: str | None = None,
         participants: tuple[str, ...],
         prior_outputs: tuple[str, ...],
-        move_rationale: str | None,
-        success_criteria: str | None,
+        move_rationale: str | None = None,
+        success_criteria: str | None = None,
         model_id_override: str,
     ) -> str | None:
         raw = await self._run_text_agent(
@@ -110,12 +110,12 @@ class ProxyWorkflowSupport:
         current_agent: str,
         goal: str,
         current_brief: str,
-        playbook_request: str | None,
-        playbook_focus: str | None,
+        playbook_request: str | None = None,
+        playbook_focus: str | None = None,
         prior_outputs: tuple[str, ...],
         allowed: tuple[str, ...],
-        move_rationale: str | None,
-        success_criteria: str | None,
+        move_rationale: str | None = None,
+        success_criteria: str | None = None,
         model_id_override: str,
     ) -> str | None:
         if not allowed:

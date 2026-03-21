@@ -139,7 +139,7 @@ class ProxyWorkroomExecutor:
                     ProxyMoveResult(
                         worklog_lines=tuple(round_outputs),
                         current_brief=current_brief,
-                        workroom_progress=_active_workroom_state(
+                        active_workroom=_active_workroom_state(
                             definition=definition,
                             round_participants=round_participants,
                             workroom_message=workroom_message,
@@ -235,7 +235,7 @@ class ProxyWorkroomExecutor:
             ProxyMoveResult(
                 worklog_lines=tuple(round_outputs),
                 current_brief=current_brief,
-                workroom_progress=_active_workroom_state(
+                active_workroom=_active_workroom_state(
                     definition=definition,
                     round_participants=round_participants,
                     workroom_message=workroom_message,

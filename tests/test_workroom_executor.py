@@ -51,10 +51,10 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             ("architect: Idea", "reviewer: Refine"),
         )
         self.assertEqual(captured[0].current_brief, "Refine")
-        self.assertIsNotNone(captured[0].workroom_progress)
-        assert captured[0].workroom_progress is not None
-        self.assertEqual(captured[0].workroom_progress.workroom_id, "debate")
-        self.assertIsNone(captured[0].workroom_progress.member_index)
+        self.assertIsNotNone(captured[0].active_workroom)
+        assert captured[0].active_workroom is not None
+        self.assertEqual(captured[0].active_workroom.workroom_id, "debate")
+        self.assertIsNone(captured[0].active_workroom.member_index)
         reasoning = "".join(
             event.delta
             for event in events

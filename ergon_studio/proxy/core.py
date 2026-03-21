@@ -169,18 +169,18 @@ class ProxyOrchestrationCore:
                     current_brief=loop_state.current_brief,
                     worklog=loop_state.worklog,
                     active_workroom_id=(
-                        loop_state.workroom_progress.workroom_id
-                        if loop_state.workroom_progress is not None
+                        loop_state.active_workroom.workroom_id
+                        if loop_state.active_workroom is not None
                         else None
                     ),
                     active_workroom_participants=(
-                        loop_state.workroom_progress.workroom_participants
-                        if loop_state.workroom_progress is not None
+                        loop_state.active_workroom.workroom_participants
+                        if loop_state.active_workroom is not None
                         else ()
                     ),
                     active_workroom_message=(
-                        loop_state.workroom_progress.workroom_message
-                        if loop_state.workroom_progress is not None
+                        loop_state.active_workroom.workroom_message
+                        if loop_state.active_workroom is not None
                         else None
                     ),
                 ),
@@ -277,7 +277,7 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         if isinstance(action, MessageWorkroomAction):
             state.mode = "workroom"
-            active_workroom = loop_state.workroom_progress
+            active_workroom = loop_state.active_workroom
             if (
                 active_workroom is None
                 and action.workroom_id is None
@@ -303,24 +303,24 @@ class ProxyOrchestrationCore:
                     participants=action.participants,
                     message=action.message,
                 )
-                async for event in self._execute_workroom_continuation(
+                async for event in self._message_workroom(
                     request=request,
                     continuation=continuation,
                     pending=None,
                     state=state,
-                    result_sink=_result_sink(result_holder),
+                    result_sink=partial(_store_result, result_holder),
                     loop_state=loop_state,
                 ):
                     yield event
                 return
-            async for event in self._execute_workroom(
+            async for event in self._message_workroom(
                 request=request,
                 workroom_id=action.workroom_id,
                 participants=action.participants,
                 workroom_message=action.message,
                 goal=loop_state.goal,
                 state=state,
-                result_sink=_result_sink(result_holder),
+                result_sink=partial(_store_result, result_holder),
                 loop_state=loop_state,
             ):
                 yield event
@@ -339,89 +339,74 @@ class ProxyOrchestrationCore:
         continuation = pending.state
         if continuation.mode == "workroom":
             state.mode = "workroom"
-            async for event in self._execute_workroom_continuation(
+            async for event in self._message_workroom(
                 request=request,
                 continuation=continuation,
                 pending=pending,
                 state=state,
-                result_sink=_result_sink(result_holder),
+                result_sink=partial(_store_result, result_holder),
                 loop_state=loop_state,
             ):
                 yield event
             return
         raise ValueError(f"unsupported continuation mode: {continuation.mode}")
 
-    async def _execute_workroom(
+    async def _message_workroom(
         self,
         *,
         request: ProxyTurnRequest,
-        workroom_id: str | None,
-        participants: tuple[str, ...],
-        workroom_message: str | None,
-        goal: str,
+        workroom_id: str | None = None,
+        participants: tuple[str, ...] = (),
+        workroom_message: str | None = None,
+        goal: str | None = None,
         state: ProxyTurnState,
         result_sink: Any,
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        definition = _resolve_workroom_definition(
-            registry=self.registry,
-            workroom_id=workroom_id,
-            participants=participants,
-        )
-        if definition is None:
-            error_text = f"Unknown workroom: {workroom_id or '(none)'}"
-            state.finish_reason = "error"
-            state.content = error_text
-            yield ProxyContentDeltaEvent(error_text)
-            return
-        intro = _workroom_notice(_workroom_intro(definition))
+        if continuation is not None:
+            definition = _resolve_workroom_definition(
+                registry=self.registry,
+                workroom_id=continuation.workroom_id,
+                participants=continuation.workroom_participants,
+            )
+            if definition is None:
+                error_text = (
+                    f"Unknown workroom: {continuation.workroom_id or '(none)'}"
+                )
+                state.finish_reason = "error"
+                state.content = error_text
+                yield ProxyContentDeltaEvent(error_text)
+                return
+            intro = _workroom_notice(
+                f"Orchestrator: continuing workroom {definition.id} with "
+                f"{continuation.agent_id or '(unknown)'}."
+            )
+            goal = continuation.goal or request.latest_user_text() or ""
+            participants = continuation.workroom_participants
+            workroom_message = continuation.workroom_message
+        else:
+            definition = _resolve_workroom_definition(
+                registry=self.registry,
+                workroom_id=workroom_id,
+                participants=participants,
+            )
+            if definition is None:
+                error_text = f"Unknown workroom: {workroom_id or '(none)'}"
+                state.finish_reason = "error"
+                state.content = error_text
+                yield ProxyContentDeltaEvent(error_text)
+                return
+            intro = _workroom_notice(_workroom_intro(definition))
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         async for event in self._workroom_executor.execute(
             request=request,
             definition=definition,
-            goal=goal,
+            goal=goal or request.latest_user_text() or "",
             participants=participants,
             workroom_message=workroom_message,
-            state=state,
-            result_sink=result_sink,
-            loop_state=loop_state,
-        ):
-            yield event
-
-    async def _execute_workroom_continuation(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        continuation: ContinuationState,
-        pending: PendingContinuation | None,
-        state: ProxyTurnState,
-        result_sink: Any,
-        loop_state: ProxyDecisionLoopState | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        definition = _resolve_workroom_definition(
-            registry=self.registry,
-            workroom_id=continuation.workroom_id,
-            participants=continuation.workroom_participants,
-        )
-        if definition is None:
-            error_text = f"Unknown workroom: {continuation.workroom_id or '(none)'}"
-            state.finish_reason = "error"
-            state.content = error_text
-            yield ProxyContentDeltaEvent(error_text)
-            return
-        intro = _workroom_notice(
-            f"Orchestrator: continuing workroom {definition.id} with "
-            f"{continuation.agent_id or '(unknown)'}."
-        )
-        state.append_reasoning(intro)
-        yield ProxyReasoningDeltaEvent(intro)
-        async for event in self._workroom_executor.execute(
-            request=request,
-            definition=definition,
-            goal=continuation.goal or request.latest_user_text() or "",
-            participants=continuation.workroom_participants,
-            workroom_message=continuation.workroom_message,
             state=state,
             continuation=continuation,
             pending=pending,
@@ -445,35 +430,35 @@ class ProxyOrchestrationCore:
         continuation = pending.state
         goal = continuation.goal or request.latest_user_text() or ""
         current_brief = continuation.current_brief or goal
-        workroom_progress = (
+        active_workroom = (
             continuation if continuation.workroom_id is not None else None
         )
         return ProxyDecisionLoopState(
             goal=goal,
             current_brief=current_brief,
             worklog=continuation.worklog,
-            workroom_progress=workroom_progress,
+            active_workroom=active_workroom,
         )
 
 
 def _orchestrator_continuation_state(
     loop_state: ProxyDecisionLoopState,
 ) -> ContinuationState:
-    workroom_progress = loop_state.workroom_progress
+    active_workroom = loop_state.active_workroom
     return ContinuationState(
         mode="orchestrator",
         agent_id="orchestrator",
         workroom_id=(
-            workroom_progress.workroom_id if workroom_progress is not None else None
+            active_workroom.workroom_id if active_workroom is not None else None
         ),
         workroom_participants=(
-            workroom_progress.workroom_participants
-            if workroom_progress is not None
+            active_workroom.workroom_participants
+            if active_workroom is not None
             else ()
         ),
         workroom_message=(
-            workroom_progress.workroom_message
-            if workroom_progress is not None
+            active_workroom.workroom_message
+            if active_workroom is not None
             else None
         ),
         goal=loop_state.goal,
@@ -487,13 +472,6 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
     if tool_choice == "required":
         return True
     return isinstance(tool_choice, dict)
-
-
-def _result_sink(holder: dict[str, object]) -> Any:
-    def _capture(result: ProxyMoveResult) -> None:
-        holder["result"] = result
-
-    return _capture
 
 
 def _update_workroom_message(
@@ -533,7 +511,7 @@ def _result(
     return ProxyMoveResult(
         worklog_lines=(),
         current_brief=loop_state.current_brief,
-        workroom_progress=loop_state.workroom_progress,
+        active_workroom=loop_state.active_workroom,
     )
 
 
@@ -551,6 +529,10 @@ def _should_continue_active_workroom(
 
 def _store_response(holder: dict[str, Any], value: object) -> None:
     holder["response"] = value
+
+
+def _store_result(holder: dict[str, object], result: ProxyMoveResult) -> None:
+    holder["result"] = result
 
 
 def _resolve_workroom_definition(

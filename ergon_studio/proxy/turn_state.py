@@ -10,7 +10,7 @@ from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 class ProxyMoveResult:
     worklog_lines: tuple[str, ...]
     current_brief: str
-    workroom_progress: ContinuationState | None = None
+    active_workroom: ContinuationState | None = None
 
 
 @dataclass
@@ -18,7 +18,7 @@ class ProxyDecisionLoopState:
     goal: str
     current_brief: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
-    workroom_progress: ContinuationState | None = None
+    active_workroom: ContinuationState | None = None
 
     def absorb_result(
         self,
@@ -29,7 +29,7 @@ class ProxyDecisionLoopState:
             self.worklog = (*self.worklog, *result.worklog_lines)
         if result.current_brief:
             self.current_brief = result.current_brief
-        self.workroom_progress = result.workroom_progress
+        self.active_workroom = result.active_workroom
 
 
 @dataclass

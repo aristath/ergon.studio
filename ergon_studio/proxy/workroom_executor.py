@@ -81,13 +81,6 @@ class ProxyWorkroomExecutor:
             if continuation and continuation.member_index is not None
             else 0
         )
-        room_brief = (
-            continuation.current_brief
-            if continuation and continuation.current_brief is not None
-            else workroom_message
-            if workroom_message is not None
-            else goal
-        )
         workroom_message = (
             continuation.workroom_message
             if continuation is not None and continuation.workroom_message is not None
@@ -134,13 +127,11 @@ class ProxyWorkroomExecutor:
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(round_outputs),
-                        current_brief=room_brief,
                         active_workroom=_active_workroom_state(
                             definition=definition,
                             round_participants=round_participants,
                             workroom_message=workroom_message,
                             goal=goal,
-                            current_brief=room_brief,
                             loop_state=loop_state,
                             workroom_outputs=workroom_outputs,
                             staffed_members=staffed_members,
@@ -200,7 +191,6 @@ class ProxyWorkroomExecutor:
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
                         goal=goal,
-                        current_brief=room_brief,
                         worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
@@ -218,13 +208,11 @@ class ProxyWorkroomExecutor:
         result_sink(
             ProxyMoveResult(
                 worklog_lines=tuple(round_outputs),
-                current_brief=room_brief,
                 active_workroom=_active_workroom_state(
                     definition=definition,
                     round_participants=round_participants,
                     workroom_message=workroom_message,
                     goal=goal,
-                    current_brief=room_brief,
                     loop_state=loop_state,
                     workroom_outputs=workroom_outputs,
                     staffed_members=staffed_members,
@@ -330,7 +318,6 @@ def _active_workroom_state(
     round_participants: tuple[str, ...],
     workroom_message: str | None,
     goal: str,
-    current_brief: str,
     loop_state: ProxyDecisionLoopState | None,
     workroom_outputs: list[str],
     staffed_members: tuple[StaffedParticipant, ...],
@@ -345,7 +332,6 @@ def _active_workroom_state(
         workroom_participants=round_participants,
         workroom_message=workroom_message,
         goal=goal,
-        current_brief=current_brief,
         worklog=loop_state.worklog if loop_state is not None else (),
         workroom_outputs=tuple(workroom_outputs),
     )

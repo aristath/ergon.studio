@@ -8,7 +8,6 @@ def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
     goal: str | None = None,
-    current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
     active_workroom_id: str | None = None,
     active_workroom_participants: tuple[str, ...] = (),
@@ -38,8 +37,6 @@ def orchestrator_turn_prompt(
     ]
     if goal:
         lines.extend(["", "Current goal:", goal])
-    if current_brief:
-        lines.extend(["", "Current best brief:", current_brief])
     if active_workroom_id:
         lines.extend(["", "Workroom currently in progress:", active_workroom_id])
     if active_workroom_participants:

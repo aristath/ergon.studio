@@ -50,7 +50,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             captured[0].worklog_lines,
             ("architect: Idea", "reviewer: Refine"),
         )
-        self.assertEqual(captured[0].current_brief, "Discuss it")
         self.assertIsNotNone(captured[0].active_workroom)
         assert captured[0].active_workroom is not None
         self.assertEqual(captured[0].active_workroom.workroom_id, "debate")
@@ -284,7 +283,6 @@ def _continuation_state():
         member_index=0,
         agent_id="reviewer",
         goal="Pick the best one",
-        current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
         workroom_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 

@@ -9,14 +9,12 @@ from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 @dataclass(frozen=True)
 class ProxyMoveResult:
     worklog_lines: tuple[str, ...]
-    current_brief: str
     active_workroom: ContinuationState | None = None
 
 
 @dataclass
 class ProxyDecisionLoopState:
     goal: str
-    current_brief: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
     active_workroom: ContinuationState | None = None
 
@@ -27,8 +25,6 @@ class ProxyDecisionLoopState:
     ) -> None:
         if result.worklog_lines:
             self.worklog = (*self.worklog, *result.worklog_lines)
-        if result.current_brief:
-            self.current_brief = result.current_brief
         self.active_workroom = result.active_workroom
 
 

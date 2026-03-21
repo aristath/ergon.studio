@@ -166,7 +166,6 @@ class ProxyOrchestrationCore:
                 prompt=orchestrator_turn_prompt(
                     request,
                     goal=loop_state.goal,
-                    current_brief=loop_state.current_brief,
                     worklog=loop_state.worklog,
                     active_workroom_id=(
                         loop_state.active_workroom.workroom_id
@@ -425,17 +424,14 @@ class ProxyOrchestrationCore:
             goal = request.latest_user_text() or ""
             return ProxyDecisionLoopState(
                 goal=goal,
-                current_brief=goal,
             )
         continuation = pending.state
         goal = continuation.goal or request.latest_user_text() or ""
-        current_brief = continuation.current_brief or goal
         active_workroom = (
             continuation if continuation.workroom_id is not None else None
         )
         return ProxyDecisionLoopState(
             goal=goal,
-            current_brief=current_brief,
             worklog=continuation.worklog,
             active_workroom=active_workroom,
         )
@@ -462,7 +458,6 @@ def _orchestrator_continuation_state(
             else None
         ),
         goal=loop_state.goal,
-        current_brief=loop_state.current_brief,
         worklog=loop_state.worklog,
     )
 
@@ -495,7 +490,6 @@ def _update_workroom_message(
         workroom_message=message,
         member_index=continuation.member_index,
         goal=continuation.goal,
-        current_brief=continuation.current_brief,
         worklog=continuation.worklog,
         workroom_outputs=continuation.workroom_outputs,
     )
@@ -510,7 +504,6 @@ def _result(
         return value
     return ProxyMoveResult(
         worklog_lines=(),
-        current_brief=loop_state.current_brief,
         active_workroom=loop_state.active_workroom,
     )
 

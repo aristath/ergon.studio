@@ -20,6 +20,7 @@ class OpenWorkroomAction:
 
 @dataclass(frozen=True)
 class ContinueWorkroomAction:
+    participants: tuple[str, ...]
     message: str
 
 
@@ -67,16 +68,27 @@ def build_orchestrator_internal_tools(
         ),
     ]
     if has_active_workroom:
-        tools.append(
+            tools.append(
             ProxyFunctionTool(
                 name="continue_workroom",
                 description=(
                     "Continue the workroom already in progress with a new "
-                    "natural-language assignment from the lead developer."
+                    "natural-language assignment from the lead developer. "
+                    "Optionally name the participants who should continue the "
+                    "next phase of the room."
                 ),
                 parameters={
                     "type": "object",
-                    "properties": {"message": {"type": "string"}},
+                    "properties": {
+                        "participants": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": list(specialist_ids),
+                            },
+                        },
+                        "message": {"type": "string"},
+                    },
                     "required": ["message"],
                 },
             )
@@ -114,8 +126,15 @@ def parse_internal_action(
         )
 
     if tool_call.name == "continue_workroom":
+        participants = _normalize_staffing_list(
+            payload.get("participants"),
+            registry=registry,
+        )
         message = _required_text(payload.get("message"), field="message")
-        return ContinueWorkroomAction(message=message)
+        return ContinueWorkroomAction(
+            participants=participants,
+            message=message,
+        )
 
     raise ValueError(f"unsupported internal tool: {tool_call.name}")
 

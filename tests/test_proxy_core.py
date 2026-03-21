@@ -560,6 +560,49 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Review", reasoning)
         self.assertEqual(result.content, "Dynamic final summary")
 
+    async def test_continue_workroom_can_replace_room_staffing(self) -> None:
+        registry = _advanced_workroom_registry()
+        core = ProxyOrchestrationCore(
+            registry,
+            agent_builder=_fake_agent_builder(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="dynamic-open-ended",
+                            message="Build it",
+                        ),
+                        _internal_action(
+                            "continue_workroom",
+                            participants=["reviewer"],
+                            message="Reviewer, give the final verdict.",
+                        ),
+                        "Done",
+                    ],
+                    "architect": ["Architecture pass"],
+                    "reviewer": ["Review pass", "Final verdict"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertEqual(reasoning.count("architect: Architecture"), 1)
+        self.assertEqual(reasoning.count("reviewer: Review"), 1)
+        self.assertEqual(reasoning.count("reviewer: Final"), 1)
+        self.assertEqual(result.content, "Done")
+
     async def test_handoff_chain_runs_as_staged_room(self) -> None:
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(

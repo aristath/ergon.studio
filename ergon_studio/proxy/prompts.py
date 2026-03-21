@@ -11,6 +11,7 @@ def orchestrator_turn_prompt(
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
     active_workroom_id: str | None = None,
+    active_workroom_participants: tuple[str, ...] = (),
     active_workroom_request: str | None = None,
 ) -> str:
     lines = [
@@ -41,6 +42,14 @@ def orchestrator_turn_prompt(
         lines.extend(["", "Current best brief:", current_brief])
     if active_workroom_id:
         lines.extend(["", "Workroom currently in progress:", active_workroom_id])
+    if active_workroom_participants:
+        lines.extend(
+            [
+                "",
+                "Current workroom staffing:",
+                ", ".join(active_workroom_participants),
+            ]
+        )
     if active_workroom_request:
         lines.extend(["", "Current workroom assignment:", active_workroom_request])
     if worklog:

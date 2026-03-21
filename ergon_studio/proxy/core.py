@@ -185,6 +185,11 @@ class ProxyOrchestrationCore:
                         if loop_state.workroom_progress is not None
                         else None
                     ),
+                    active_workroom_participants=(
+                        loop_state.workroom_progress.workroom_participants
+                        if loop_state.workroom_progress is not None
+                        else ()
+                    ),
                     active_workroom_request=(
                         loop_state.workroom_progress.workroom_request
                         if loop_state.workroom_progress is not None
@@ -309,6 +314,7 @@ class ProxyOrchestrationCore:
                 request=request,
                 continuation=_update_workroom_request(
                     active_workroom,
+                    participants=action.participants,
                     message=action.message,
                 ),
                 pending=None,
@@ -415,16 +421,21 @@ def _result_sink(holder: dict[str, object]) -> Any:
 def _update_workroom_request(
     continuation: ContinuationState,
     *,
+    participants: tuple[str, ...],
     message: str,
 ) -> ContinuationState:
-    if message == continuation.workroom_request:
+    next_participants = participants or continuation.workroom_participants
+    if (
+        message == continuation.workroom_request
+        and next_participants == continuation.workroom_participants
+    ):
         return continuation
     return ContinuationState(
         mode=continuation.mode,
         agent_id=continuation.agent_id,
         participant_label=continuation.participant_label,
         workroom_id=continuation.workroom_id,
-        workroom_participants=continuation.workroom_participants,
+        workroom_participants=next_participants,
         workroom_request=message,
         progress_index=continuation.progress_index,
         member_index=continuation.member_index,

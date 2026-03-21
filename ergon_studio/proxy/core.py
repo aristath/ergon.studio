@@ -18,6 +18,7 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     latest_pending_continuation,
 )
+from ergon_studio.proxy.grouped_workflow_executor import ProxyGroupedWorkflowExecutor
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -59,7 +60,6 @@ from ergon_studio.proxy.workflow_metadata import (
     workflow_start_agent_for_definition,
 )
 from ergon_studio.registry import RuntimeRegistry
-from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -87,6 +87,11 @@ class ProxyOrchestrationCore:
             execute_group_chat_workflow=self._execute_group_chat_workflow,
             execute_magentic_workflow=self._execute_magentic_workflow,
             execute_handoff_workflow=self._execute_handoff_workflow,
+        )
+        self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=self._stream_text_agent,
+            emit_tool_calls=self._emit_tool_calls,
+            emit_workflow_summary=self._emit_workflow_summary,
         )
 
     def stream_turn(
@@ -378,91 +383,15 @@ class ProxyOrchestrationCore:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        step_groups = workflow_step_groups_for_definition(definition)
-        start_index = (
-            continuation.step_index
-            if continuation and continuation.step_index is not None
-            else 0
-        )
-        start_agent_index = (
-            continuation.agent_index
-            if continuation and continuation.agent_index is not None
-            else 0
-        )
-        current_brief = (
-            continuation.current_brief
-            if continuation and continuation.current_brief is not None
-            else goal
-        )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
-        )
-        for step_index in range(start_index, len(step_groups)):
-            group = step_groups[step_index]
-            group_start_index = start_agent_index if step_index == start_index else 0
-            for agent_index in range(group_start_index, len(group)):
-                agent_id = group[agent_index]
-                specialist_prompt = workflow_step_prompt(
-                    workflow_id=definition.id,
-                    agent_id=agent_id,
-                    goal=goal,
-                    current_brief=current_brief,
-                    transcript_summary=summarize_conversation(request.messages),
-                    prior_outputs=tuple(workflow_outputs),
-                )
-                agent_text = ""
-                first = True
-                response_holder: dict[str, Any] = {}
-                async for delta in self._stream_text_agent(
-                    agent_id=agent_id,
-                    prompt=specialist_prompt,
-                    session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
-                    model_id_override=request.model,
-                    host_tools=request.tools,
-                    tool_choice=request.tool_choice,
-                    parallel_tool_calls=request.parallel_tool_calls,
-                    pending_continuation=pending
-                    if step_index == start_index and agent_index == group_start_index
-                    else None,
-                    final_response_sink=_response_holder_sink(response_holder),
-                ):
-                    agent_text += delta
-                    reasoning_delta = f"{agent_id}: {delta}" if first else delta
-                    first = False
-                    state.append_reasoning(reasoning_delta)
-                    yield ProxyReasoningDeltaEvent(reasoning_delta)
-                response = response_holder.get("response")
-                if response is not None:
-                    emitted = self._emit_tool_calls(
-                        response=response,
-                        request=request,
-                        continuation=ContinuationState(
-                            mode="workflow",
-                            workflow_id=definition.id,
-                            step_index=step_index,
-                            agent_index=agent_index,
-                            agent_id=agent_id,
-                            goal=goal,
-                            current_brief=agent_text.strip() or current_brief,
-                            workflow_outputs=tuple(workflow_outputs),
-                        ),
-                        state=state,
-                    )
-                    if emitted:
-                        for event in emitted:
-                            yield event
-                        return
-                workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
-                current_brief = agent_text.strip() or current_brief
-        async for summary_event in self._emit_workflow_summary(
+        async for event in self._grouped_workflow_executor.execute(
             request=request,
             definition=definition,
             goal=goal,
-            current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
             state=state,
+            continuation=continuation,
+            pending=pending,
         ):
-            yield summary_event
+            yield event
 
     async def _execute_group_chat_workflow(
         self,

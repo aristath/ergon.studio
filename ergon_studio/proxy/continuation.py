@@ -19,10 +19,10 @@ class ContinuationState:
     participant_label: str | None = None
     delivery_requirements: tuple[str, ...] = ()
     delivery_evidence: tuple[str, ...] = ()
-    workflow_id: str | None = None
-    workflow_specialists: tuple[str, ...] = ()
-    workflow_specialist_counts: tuple[tuple[str, int], ...] = ()
-    workflow_request: str | None = None
+    workroom_id: str | None = None
+    workroom_specialists: tuple[str, ...] = ()
+    workroom_specialist_counts: tuple[tuple[str, int], ...] = ()
+    workroom_request: str | None = None
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
     step_index: int | None = None
@@ -31,7 +31,7 @@ class ContinuationState:
     goal: str | None = None
     current_brief: str | None = None
     decision_history: tuple[str, ...] = ()
-    workflow_outputs: tuple[str, ...] = ()
+    workroom_outputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -57,16 +57,16 @@ def encode_continuation_tool_call(
         payload["dr"] = list(state.delivery_requirements)
     if state.delivery_evidence:
         payload["de"] = list(state.delivery_evidence)
-    if state.workflow_id is not None:
-        payload["w"] = state.workflow_id
-    if state.workflow_specialists:
-        payload["p"] = list(state.workflow_specialists)
-    if state.workflow_specialist_counts:
+    if state.workroom_id is not None:
+        payload["w"] = state.workroom_id
+    if state.workroom_specialists:
+        payload["p"] = list(state.workroom_specialists)
+    if state.workroom_specialist_counts:
         payload["pc"] = {
-            agent_id: count for agent_id, count in state.workflow_specialist_counts
+            agent_id: count for agent_id, count in state.workroom_specialist_counts
         }
-    if state.workflow_request is not None:
-        payload["pr"] = state.workflow_request
+    if state.workroom_request is not None:
+        payload["pr"] = state.workroom_request
     if state.last_stage_outputs:
         payload["ls"] = list(state.last_stage_outputs)
     if state.last_stage_parallel_attempts:
@@ -83,8 +83,8 @@ def encode_continuation_tool_call(
         payload["c"] = state.current_brief
     if state.decision_history:
         payload["h"] = list(state.decision_history)
-    if state.workflow_outputs:
-        payload["o"] = list(state.workflow_outputs)
+    if state.workroom_outputs:
+        payload["o"] = list(state.workroom_outputs)
     encoded = (
         urlsafe_b64encode(
             zlib.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -112,10 +112,10 @@ def decode_continuation_from_tool_call_id(
     participant_label = payload.get("al")
     delivery_requirements = payload.get("dr", [])
     delivery_evidence = payload.get("de", [])
-    workflow_id = payload.get("w")
-    workflow_specialists = payload.get("p", [])
-    workflow_specialist_counts_payload = payload.get("pc", {})
-    workflow_request = payload.get("pr")
+    workroom_id = payload.get("w")
+    workroom_specialists = payload.get("p", [])
+    workroom_specialist_counts_payload = payload.get("pc", {})
+    workroom_request = payload.get("pr")
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
     step_index = payload.get("s")
@@ -124,7 +124,7 @@ def decode_continuation_from_tool_call_id(
     goal = payload.get("g")
     current_brief = payload.get("c")
     decision_history = payload.get("h", [])
-    workflow_outputs = payload.get("o", [])
+    workroom_outputs = payload.get("o", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
     if participant_label is not None and not isinstance(participant_label, str):
@@ -137,26 +137,26 @@ def decode_continuation_from_tool_call_id(
     normalized_delivery_evidence = normalize_delivery_requirements(delivery_evidence)
     if normalized_delivery_evidence is None:
         return None
-    if workflow_id is not None and not isinstance(workflow_id, str):
+    if workroom_id is not None and not isinstance(workroom_id, str):
         return None
-    if not isinstance(workflow_specialists, list) or not all(
-        isinstance(item, str) for item in workflow_specialists
+    if not isinstance(workroom_specialists, list) or not all(
+        isinstance(item, str) for item in workroom_specialists
     ):
         return None
-    workflow_specialist_counts = _decode_specialist_counts(
-        workflow_specialist_counts_payload
+    workroom_specialist_counts = _decode_specialist_counts(
+        workroom_specialist_counts_payload
     )
     if (
-        workflow_specialist_counts_payload is not None
-        and workflow_specialist_counts_payload != {}
-        and workflow_specialist_counts is None
+        workroom_specialist_counts_payload is not None
+        and workroom_specialist_counts_payload != {}
+        and workroom_specialist_counts is None
     ):
         return None
     if not isinstance(last_stage_outputs, list) or not all(
         isinstance(item, str) for item in last_stage_outputs
     ):
         return None
-    if workflow_request is not None and not isinstance(workflow_request, str):
+    if workroom_request is not None and not isinstance(workroom_request, str):
         return None
     if not isinstance(last_stage_parallel_attempts, bool):
         return None
@@ -174,8 +174,8 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in decision_history
     ):
         return None
-    if not isinstance(workflow_outputs, list) or not all(
-        isinstance(item, str) for item in workflow_outputs
+    if not isinstance(workroom_outputs, list) or not all(
+        isinstance(item, str) for item in workroom_outputs
     ):
         return None
     return ContinuationState(
@@ -184,10 +184,10 @@ def decode_continuation_from_tool_call_id(
         participant_label=participant_label,
         delivery_requirements=normalized_delivery_requirements,
         delivery_evidence=normalized_delivery_evidence,
-        workflow_id=workflow_id,
-        workflow_specialists=tuple(workflow_specialists),
-        workflow_specialist_counts=workflow_specialist_counts or (),
-        workflow_request=workflow_request,
+        workroom_id=workroom_id,
+        workroom_specialists=tuple(workroom_specialists),
+        workroom_specialist_counts=workroom_specialist_counts or (),
+        workroom_request=workroom_request,
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
         step_index=step_index,
@@ -196,7 +196,7 @@ def decode_continuation_from_tool_call_id(
         goal=goal,
         current_brief=current_brief,
         decision_history=tuple(decision_history),
-        workflow_outputs=tuple(workflow_outputs),
+        workroom_outputs=tuple(workroom_outputs),
     )
 
 

@@ -65,7 +65,7 @@ class ProxyGroupChatWorkflowExecutor:
         goal: str,
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
-        workflow_request: str | None = None,
+        workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -73,12 +73,12 @@ class ProxyGroupChatWorkflowExecutor:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         staffed_specialists = (
-            continuation.workflow_specialists
+            continuation.workroom_specialists
             if continuation is not None
             else specialists
         )
         staffed_specialist_counts = (
-            continuation.workflow_specialist_counts
+            continuation.workroom_specialist_counts
             if continuation is not None
             else specialist_counts
         )
@@ -115,26 +115,26 @@ class ProxyGroupChatWorkflowExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
-        workflow_request = (
-            continuation.workflow_request
-            if continuation is not None and continuation.workflow_request is not None
-            else workflow_request
-            if workflow_request is not None
+        workroom_request = (
+            continuation.workroom_request
+            if continuation is not None and continuation.workroom_request is not None
+            else workroom_request
+            if workroom_request is not None
             else (
-                loop_state.current_playbook_request
+                loop_state.current_workroom_request
                 if loop_state is not None
                 else None
             )
         )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
+        workroom_outputs: list[str] = (
+            list(continuation.workroom_outputs) if continuation is not None else []
         )
         for turn_index in range(start_turn, len(sequence)):
             participant = participant_by_label(participants, sequence[turn_index])
             if participant is None:
                 continue
             prompt = group_chat_turn_prompt(
-                workflow_id=definition.id,
+                workroom_id=definition.id,
                 agent_id=participant.agent_id,
                 role_instance_label=(
                     participant.label
@@ -145,8 +145,8 @@ class ProxyGroupChatWorkflowExecutor:
                 goal=goal,
                 transcript_summary=summarize_conversation(request.messages),
                 current_brief=current_brief,
-                playbook_request=workflow_request,
-                prior_outputs=tuple(workflow_outputs),
+                workroom_request=workroom_request,
+                prior_outputs=tuple(workroom_outputs),
                 move_rationale=(
                     loop_state.current_move_rationale
                     if loop_state is not None
@@ -182,11 +182,11 @@ class ProxyGroupChatWorkflowExecutor:
                     response=response,
                     request=request,
                     continuation=ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        workflow_specialists=staffed_specialists,
-                        workflow_specialist_counts=staffed_specialist_counts,
-                        workflow_request=workflow_request,
+                        mode="workroom",
+                        workroom_id=definition.id,
+                        workroom_specialists=staffed_specialists,
+                        workroom_specialist_counts=staffed_specialist_counts,
+                        workroom_request=workroom_request,
                         delivery_requirements=(
                             loop_state.delivery_requirements
                             if loop_state is not None
@@ -205,7 +205,7 @@ class ProxyGroupChatWorkflowExecutor:
                         decision_history=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
-                        workflow_outputs=tuple(workflow_outputs),
+                        workroom_outputs=tuple(workroom_outputs),
                     ),
                     state=state,
                 )
@@ -213,23 +213,23 @@ class ProxyGroupChatWorkflowExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workflow_outputs.append(f"{participant.label}: {agent_text.strip()}")
+            workroom_outputs.append(f"{participant.label}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             if result_sink is not None:
                 round_evidence = delivery_evidence_for_agent(participant.agent_id)
                 next_turn = turn_index + 1
-                workflow_progress = None
+                workroom_progress = None
                 if next_turn < len(sequence):
                     next_participant = participant_by_label(
                         participants,
                         sequence[next_turn],
                     )
-                    workflow_progress = ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        workflow_specialists=staffed_specialists,
-                        workflow_specialist_counts=staffed_specialist_counts,
-                        workflow_request=workflow_request,
+                    workroom_progress = ContinuationState(
+                        mode="workroom",
+                        workroom_id=definition.id,
+                        workroom_specialists=staffed_specialists,
+                        workroom_specialist_counts=staffed_specialist_counts,
+                        workroom_request=workroom_request,
                         delivery_requirements=(
                             loop_state.delivery_requirements
                             if loop_state is not None
@@ -259,14 +259,14 @@ class ProxyGroupChatWorkflowExecutor:
                         decision_history=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
-                        workflow_outputs=tuple(workflow_outputs),
+                        workroom_outputs=tuple(workroom_outputs),
                     )
                 result_sink(
                     ProxyMoveResult(
-                        worklog_lines=(workflow_outputs[-1],),
+                        worklog_lines=(workroom_outputs[-1],),
                         current_brief=current_brief,
                         delivery_evidence=round_evidence,
-                        workflow_progress=workflow_progress,
+                        workroom_progress=workroom_progress,
                     )
                 )
                 return
@@ -283,7 +283,7 @@ class ProxyGroupChatWorkflowExecutor:
             definition=definition,
             goal=goal,
             current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
+            workroom_outputs=tuple(workroom_outputs),
             state=state,
         ):
             yield summary_event

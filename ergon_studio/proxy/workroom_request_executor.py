@@ -27,11 +27,11 @@ ProxyEvent = (
 )
 
 
-class ProxyWorkflowRequestExecutor:
+class ProxyWorkroomRequestExecutor:
     def __init__(self, workflow_dispatcher: ProxyWorkflowDispatcher) -> None:
         self._workflow_dispatcher = workflow_dispatcher
 
-    async def execute_active_workflow(
+    async def execute_active_workroom(
         self,
         *,
         request: ProxyTurnRequest,
@@ -40,22 +40,22 @@ class ProxyWorkflowRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        workflow_progress = (
-            loop_state.workflow_progress
+        workroom_progress = (
+            loop_state.workroom_progress
             if loop_state is not None
             else None
         )
-        if workflow_progress is None:
+        if workroom_progress is None:
             state.finish_reason = "error"
-            error_text = "No active playbook is available to continue."
+            error_text = "No active workroom is available to continue."
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
         active_continuation = _override_active_staffing(
-            workflow_progress,
+            workroom_progress,
             plan=plan,
         )
-        async for event in self._workflow_dispatcher.execute_workflow_continuation(
+        async for event in self._workflow_dispatcher.execute_workroom_continuation(
             request=request,
             continuation=active_continuation,
             pending=None,
@@ -65,7 +65,7 @@ class ProxyWorkflowRequestExecutor:
         ):
             yield event
 
-    async def execute_workflow(
+    async def execute_workroom(
         self,
         *,
         request: ProxyTurnRequest,
@@ -74,12 +74,12 @@ class ProxyWorkflowRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workflow(
+        async for event in self._workflow_dispatcher.execute_workroom(
             request=request,
-            workflow_id=plan.workflow_id,
+            workroom_id=plan.workroom_id,
             specialists=plan.specialists,
             specialist_counts=plan.specialist_counts,
-            workflow_request=plan.playbook_request,
+            workroom_request=plan.workroom_request,
             goal=(
                 loop_state.goal
                 if loop_state is not None
@@ -91,7 +91,7 @@ class ProxyWorkflowRequestExecutor:
         ):
             yield event
 
-    async def execute_workflow_continuation(
+    async def execute_workroom_continuation(
         self,
         *,
         request: ProxyTurnRequest,
@@ -101,7 +101,7 @@ class ProxyWorkflowRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workflow_continuation(
+        async for event in self._workflow_dispatcher.execute_workroom_continuation(
             request=request,
             continuation=continuation,
             pending=pending,
@@ -120,25 +120,25 @@ def _override_active_staffing(
     if plan is None:
         return continuation
     if plan.specialists or plan.specialist_counts:
-        workflow_specialists = tuple(plan.specialists)
-        workflow_specialist_counts = tuple(plan.specialist_counts)
+        workroom_specialists = tuple(plan.specialists)
+        workroom_specialist_counts = tuple(plan.specialist_counts)
     else:
-        workflow_specialists = continuation.workflow_specialists
-        workflow_specialist_counts = continuation.workflow_specialist_counts
-    workflow_request = (
-        plan.playbook_request
-        if plan is not None and plan.playbook_request
-        else continuation.workflow_request
+        workroom_specialists = continuation.workroom_specialists
+        workroom_specialist_counts = continuation.workroom_specialist_counts
+    workroom_request = (
+        plan.workroom_request
+        if plan is not None and plan.workroom_request
+        else continuation.workroom_request
     )
     if (
-        workflow_specialists == continuation.workflow_specialists
-        and workflow_specialist_counts == continuation.workflow_specialist_counts
-        and workflow_request == continuation.workflow_request
+        workroom_specialists == continuation.workroom_specialists
+        and workroom_specialist_counts == continuation.workroom_specialist_counts
+        and workroom_request == continuation.workroom_request
     ):
         return continuation
     return replace(
         continuation,
-        workflow_specialists=workflow_specialists,
-        workflow_specialist_counts=workflow_specialist_counts,
-        workflow_request=workflow_request,
+        workroom_specialists=workroom_specialists,
+        workroom_specialist_counts=workroom_specialist_counts,
+        workroom_request=workroom_request,
     )

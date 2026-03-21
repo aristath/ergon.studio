@@ -31,7 +31,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
@@ -79,7 +79,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
@@ -138,7 +138,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
@@ -197,7 +197,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
@@ -254,7 +254,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
@@ -329,9 +329,9 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             goal="Pick the best one",
             state=state,
             continuation=ContinuationState(
-                mode="workflow",
-                workflow_id="best-of-n",
-                workflow_specialists=("coder", "reviewer"),
+                mode="workroom",
+                workroom_id="best-of-n",
+                workroom_specialists=("coder", "reviewer"),
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 step_index=1,
@@ -339,7 +339,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
                 agent_id="reviewer",
                 goal="Pick the best one",
                 current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
-                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                workroom_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
             ),
         )]
 
@@ -379,12 +379,12 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             request=request,
             definition=_best_of_n_review_definition(),
             goal="Pick the best one",
-            workflow_request="Compare the two alternatives and choose one winner.",
+            workroom_request="Compare the two alternatives and choose one winner.",
             state=state,
             continuation=ContinuationState(
-                mode="workflow",
-                workflow_id="best-of-n",
-                workflow_specialists=("coder", "reviewer"),
+                mode="workroom",
+                workroom_id="best-of-n",
+                workroom_specialists=("coder", "reviewer"),
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 step_index=1,
@@ -392,7 +392,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
                 agent_id="reviewer",
                 goal="Pick the best one",
                 current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
-                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                workroom_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
             ),
         )]
 

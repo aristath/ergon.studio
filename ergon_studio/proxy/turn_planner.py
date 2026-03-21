@@ -41,28 +41,28 @@ class ProxyTurnPlanner:
                     loop_state.current_brief if loop_state is not None else None
                 ),
                 worklog=loop_state.worklog if loop_state is not None else (),
-                active_workflow_id=(
-                    loop_state.workflow_progress.workflow_id
+                active_workroom_id=(
+                    loop_state.workroom_progress.workroom_id
                     if loop_state is not None
-                    and loop_state.workflow_progress is not None
+                    and loop_state.workroom_progress is not None
                     else None
                 ),
                 active_specialists=(
-                    loop_state.workflow_progress.workflow_specialists
+                    loop_state.workroom_progress.workroom_specialists
                     if loop_state is not None
-                    and loop_state.workflow_progress is not None
+                    and loop_state.workroom_progress is not None
                     else ()
                 ),
                 active_specialist_counts=(
-                    loop_state.workflow_progress.workflow_specialist_counts
+                    loop_state.workroom_progress.workroom_specialist_counts
                     if loop_state is not None
-                    and loop_state.workflow_progress is not None
+                    and loop_state.workroom_progress is not None
                     else ()
                 ),
-                active_playbook_request=(
-                    loop_state.workflow_progress.workflow_request
+                active_workroom_request=(
+                    loop_state.workroom_progress.workroom_request
                     if loop_state is not None
-                    and loop_state.workflow_progress is not None
+                    and loop_state.workroom_progress is not None
                     else None
                 ),
                 active_delivery_requirements=(
@@ -94,24 +94,24 @@ class ProxyTurnPlanner:
         *,
         loop_state: ProxyDecisionLoopState | None,
     ) -> ProxyTurnPlan:
-        active_workflow_id = (
-            loop_state.workflow_progress.workflow_id
+        active_workroom_id = (
+            loop_state.workroom_progress.workroom_id
             if loop_state is not None
-            and loop_state.workflow_progress is not None
+            and loop_state.workroom_progress is not None
             else None
         )
-        if active_workflow_id is None:
-            if plan.mode == "continue_playbook":
-                return replace(plan, mode="act", workflow_id=None)
+        if active_workroom_id is None:
+            if plan.mode == "continue_workroom":
+                return replace(plan, mode="act", workroom_id=None)
             return plan
 
-        if plan.mode == "continue_playbook":
-            if plan.workflow_id is None:
-                return replace(plan, workflow_id=active_workflow_id)
-            if plan.workflow_id != active_workflow_id:
-                return replace(plan, mode="workflow")
+        if plan.mode == "continue_workroom":
+            if plan.workroom_id is None:
+                return replace(plan, workroom_id=active_workroom_id)
+            if plan.workroom_id != active_workroom_id:
+                return replace(plan, mode="workroom")
             return plan
 
-        if plan.mode == "workflow" and plan.workflow_id == active_workflow_id:
-            return replace(plan, mode="continue_playbook")
+        if plan.mode == "workroom" and plan.workroom_id == active_workroom_id:
+            return replace(plan, mode="continue_workroom")
         return plan

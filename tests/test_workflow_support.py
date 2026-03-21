@@ -37,7 +37,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
                 definition=_definition(),
                 goal="Build it",
                 current_brief="Coder done",
-                workflow_outputs=("architect: plan", "coder: built"),
+                workroom_outputs=("architect: plan", "coder: built"),
                 state=state,
             )
         ]
@@ -55,7 +55,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
         support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
 
         selected = await support.select_manager_agent(
-            workflow_id="dynamic-open-ended",
+            workroom_id="dynamic-open-ended",
             goal="Build it",
             current_brief="Need implementation",
             participants=("architect", "coder"),
@@ -75,7 +75,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
         support = ProxyWorkflowSupport(run_text_agent=_run_text_agent)
 
         selected = await support.select_handoff_target(
-            workflow_id="specialist-handoff",
+            workroom_id="specialist-handoff",
             current_agent="coder",
             goal="Ship it",
             current_brief="Done",

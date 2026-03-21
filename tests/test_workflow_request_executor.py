@@ -13,28 +13,28 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
-from ergon_studio.proxy.workflow_request_executor import (
-    ProxyWorkflowRequestExecutor,
+from ergon_studio.proxy.workroom_request_executor import (
+    ProxyWorkroomRequestExecutor,
 )
 
 
 class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_workflow_uses_plan_goal_or_latest_user_text(self) -> None:
+    async def test_execute_workroom_uses_plan_goal_or_latest_user_text(self) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("workflow")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -45,15 +45,15 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in executor.execute_workflow(
+            async for event in executor.execute_workroom(
                 request=request,
-                plan=ProxyTurnPlan(mode="workflow", workflow_id="standard-build"),
+                plan=ProxyTurnPlan(mode="workroom", workroom_id="standard-build"),
                 state=ProxyTurnState(),
             )
         ]
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["workflow_id"], "standard-build")
+        self.assertEqual(calls[0]["workroom_id"], "standard-build")
         self.assertEqual(calls[0]["specialists"], ())
         self.assertEqual(calls[0]["goal"], "Build it")
         first_event = events[0]
@@ -62,22 +62,22 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "workflow")
 
-    async def test_execute_workflow_forwards_staffed_specialists(self) -> None:
+    async def test_execute_workroom_forwards_staffed_specialists(self) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("workflow")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -86,11 +86,11 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Build it"),),
         )
 
-        [event async for event in executor.execute_workflow(
+        [event async for event in executor.execute_workroom(
             request=request,
             plan=ProxyTurnPlan(
-                mode="workflow",
-                workflow_id="standard-build",
+                mode="workroom",
+                workroom_id="standard-build",
                 specialists=("coder", "reviewer"),
                 specialist_counts=(("coder", 3),),
             ),
@@ -100,22 +100,22 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["specialists"], ("coder", "reviewer"))
         self.assertEqual(calls[0]["specialist_counts"], (("coder", 3),))
 
-    async def test_execute_workflow_forwards_playbook_request(self) -> None:
+    async def test_execute_workroom_forwards_workroom_request(self) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("workflow")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -124,39 +124,39 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Build it"),),
         )
 
-        [event async for event in executor.execute_workflow(
+        [event async for event in executor.execute_workroom(
             request=request,
             plan=ProxyTurnPlan(
-                mode="workflow",
-                workflow_id="best-of-n",
-                playbook_request="Compare three implementations and pick one.",
+                mode="workroom",
+                workroom_id="best-of-n",
+                workroom_request="Compare three implementations and pick one.",
             ),
             state=ProxyTurnState(),
         )]
 
         self.assertEqual(
-            calls[0]["workflow_request"],
+            calls[0]["workroom_request"],
             "Compare three implementations and pick one.",
         )
 
-    async def test_execute_workflow_continuation_forwards_pending_state(
+    async def test_execute_workroom_continuation_forwards_pending_state(
         self,
     ) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             raise AssertionError("not expected")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("continued")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -166,9 +166,9 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         )
         pending = PendingContinuation(
             state=ContinuationState(
-                mode="workflow",
+                mode="workroom",
                 agent_id="coder",
-                workflow_id="standard-build",
+                workroom_id="standard-build",
             ),
             assistant_message=None,
             tool_results=(),
@@ -176,7 +176,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in executor.execute_workflow_continuation(
+            async for event in executor.execute_workroom_continuation(
                 request=request,
                 continuation=pending.state,
                 pending=pending,
@@ -192,22 +192,22 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "continued")
 
-    async def test_execute_active_workflow_uses_loop_state_progress(self) -> None:
+    async def test_execute_active_workroom_uses_loop_state_progress(self) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             raise AssertionError("not expected")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("continued")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -218,16 +218,16 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         loop_state = ProxyDecisionLoopState(
             goal="Build calculator",
             current_brief="Architecture ready",
-            workflow_progress=ContinuationState(
-                mode="workflow",
+            workroom_progress=ContinuationState(
+                mode="workroom",
                 agent_id="architect",
-                workflow_id="standard-build",
+                workroom_id="standard-build",
             ),
         )
 
         events = [
             event
-            async for event in executor.execute_active_workflow(
+            async for event in executor.execute_active_workroom(
                 request=request,
                 state=ProxyTurnState(),
                 loop_state=loop_state,
@@ -235,7 +235,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["continuation"], loop_state.workflow_progress)
+        self.assertEqual(calls[0]["continuation"], loop_state.workroom_progress)
         self.assertIsNone(calls[0]["pending"])
         first_event = events[0]
         self.assertIsInstance(first_event, ProxyContentDeltaEvent)
@@ -243,24 +243,24 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "continued")
 
-    async def test_execute_active_workflow_can_override_staffing_from_plan(
+    async def test_execute_active_workroom_can_override_staffing_from_plan(
         self,
     ) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             raise AssertionError("not expected")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("continued")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -271,19 +271,19 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         loop_state = ProxyDecisionLoopState(
             goal="Build calculator",
             current_brief="Architecture ready",
-            workflow_progress=ContinuationState(
-                mode="workflow",
+            workroom_progress=ContinuationState(
+                mode="workroom",
                 agent_id="architect",
-                workflow_id="standard-build",
-                workflow_specialists=("architect", "coder"),
+                workroom_id="standard-build",
+                workroom_specialists=("architect", "coder"),
             ),
         )
 
-        [event async for event in executor.execute_active_workflow(
+        [event async for event in executor.execute_active_workroom(
             request=request,
             plan=ProxyTurnPlan(
-                mode="continue_playbook",
-                workflow_id="standard-build",
+                mode="continue_workroom",
+                workroom_id="standard-build",
                 specialists=("coder",),
                 specialist_counts=(("coder", 3),),
             ),
@@ -292,27 +292,27 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         )]
 
         continuation = calls[0]["continuation"]
-        self.assertEqual(continuation.workflow_specialists, ("coder",))
-        self.assertEqual(continuation.workflow_specialist_counts, (("coder", 3),))
+        self.assertEqual(continuation.workroom_specialists, ("coder",))
+        self.assertEqual(continuation.workroom_specialist_counts, (("coder", 3),))
 
-    async def test_execute_active_workflow_can_override_playbook_request(
+    async def test_execute_active_workroom_can_override_workroom_request(
         self,
     ) -> None:
         calls: list[dict[str, object]] = []
 
-        async def _execute_workflow(**kwargs):
+        async def _execute_workroom(**kwargs):
             raise AssertionError("not expected")
 
-        async def _execute_workflow_continuation(**kwargs):
+        async def _execute_workroom_continuation(**kwargs):
             calls.append(kwargs)
             yield ProxyContentDeltaEvent("continued")
 
-        executor = ProxyWorkflowRequestExecutor(
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_execute_workflow,
-                    execute_workflow_continuation=_execute_workflow_continuation,
+                    execute_workroom=_execute_workroom,
+                    execute_workroom_continuation=_execute_workroom_continuation,
                 ),
             )
         )
@@ -323,20 +323,20 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         loop_state = ProxyDecisionLoopState(
             goal="Build calculator",
             current_brief="Architecture ready",
-            workflow_progress=ContinuationState(
-                mode="workflow",
+            workroom_progress=ContinuationState(
+                mode="workroom",
                 agent_id="architect",
-                workflow_id="standard-build",
-                workflow_request="Old assignment",
+                workroom_id="standard-build",
+                workroom_request="Old assignment",
             ),
         )
 
-        [event async for event in executor.execute_active_workflow(
+        [event async for event in executor.execute_active_workroom(
             request=request,
             plan=ProxyTurnPlan(
-                mode="continue_playbook",
-                workflow_id="standard-build",
-                playbook_request="Polish the selected candidate into a final draft.",
+                mode="continue_workroom",
+                workroom_id="standard-build",
+                workroom_request="Polish the selected candidate into a final draft.",
             ),
             state=ProxyTurnState(),
             loop_state=loop_state,
@@ -344,17 +344,17 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         continuation = calls[0]["continuation"]
         self.assertEqual(
-            continuation.workflow_request,
+            continuation.workroom_request,
             "Polish the selected candidate into a final draft.",
         )
 
-    async def test_execute_active_workflow_errors_without_progress(self) -> None:
-        executor = ProxyWorkflowRequestExecutor(
+    async def test_execute_active_workroom_errors_without_progress(self) -> None:
+        executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkflowDispatcher,
                 _FakeWorkflowDispatcher(
-                    execute_workflow=_unexpected_workflow,
-                    execute_workflow_continuation=_unexpected_workflow,
+                    execute_workroom=_unexpected_workroom,
+                    execute_workroom_continuation=_unexpected_workroom,
                 ),
             )
         )
@@ -366,7 +366,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in executor.execute_active_workflow(
+            async for event in executor.execute_active_workroom(
                 request=request,
                 state=state,
             )
@@ -377,29 +377,29 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(first_event, ProxyContentDeltaEvent)
         if not isinstance(first_event, ProxyContentDeltaEvent):
             raise AssertionError("expected ProxyContentDeltaEvent")
-        self.assertIn("No active playbook", first_event.delta)
+        self.assertIn("No active workroom", first_event.delta)
 
 
 class _FakeWorkflowDispatcher:
     def __init__(
         self,
         *,
-        execute_workflow: Callable[..., AsyncIterator[ProxyContentDeltaEvent]],
-        execute_workflow_continuation: Callable[
+        execute_workroom: Callable[..., AsyncIterator[ProxyContentDeltaEvent]],
+        execute_workroom_continuation: Callable[
             ..., AsyncIterator[ProxyContentDeltaEvent]
         ],
     ) -> None:
-        self._execute_workflow = execute_workflow
-        self._execute_workflow_continuation = execute_workflow_continuation
+        self._execute_workroom = execute_workroom
+        self._execute_workroom_continuation = execute_workroom_continuation
 
-    async def execute_workflow(self, **kwargs):
-        async for event in self._execute_workflow(**kwargs):
+    async def execute_workroom(self, **kwargs):
+        async for event in self._execute_workroom(**kwargs):
             yield event
 
-    async def execute_workflow_continuation(self, **kwargs):
-        async for event in self._execute_workflow_continuation(**kwargs):
+    async def execute_workroom_continuation(self, **kwargs):
+        async for event in self._execute_workroom_continuation(**kwargs):
             yield event
 
 
-async def _unexpected_workflow(**_kwargs):
+async def _unexpected_workroom(**_kwargs):
     raise AssertionError("not expected")

@@ -66,7 +66,7 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
-        workflow_request: str | None = None,
+        workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -74,12 +74,12 @@ class ProxyGroupedWorkflowExecutor:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         staffed_specialists = (
-            continuation.workflow_specialists
+            continuation.workroom_specialists
             if continuation is not None
             else specialists
         )
         staffed_specialist_counts = (
-            continuation.workflow_specialist_counts
+            continuation.workroom_specialist_counts
             if continuation is not None
             else specialist_counts
         )
@@ -113,19 +113,19 @@ class ProxyGroupedWorkflowExecutor:
             if continuation is not None
             else False
         )
-        workflow_request = (
-            continuation.workflow_request
-            if continuation is not None and continuation.workflow_request is not None
-            else workflow_request
-            if workflow_request is not None
+        workroom_request = (
+            continuation.workroom_request
+            if continuation is not None and continuation.workroom_request is not None
+            else workroom_request
+            if workroom_request is not None
             else (
-                loop_state.current_playbook_request
+                loop_state.current_workroom_request
                 if loop_state is not None
                 else None
             )
         )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
+        workroom_outputs: list[str] = (
+            list(continuation.workroom_outputs) if continuation is not None else []
         )
         for step_index in range(start_index, len(step_groups)):
             group = step_groups[step_index]
@@ -147,7 +147,7 @@ class ProxyGroupedWorkflowExecutor:
                     goal=goal,
                     current_brief=stage_entry_brief,
                     loop_state=loop_state,
-                    workflow_request=workflow_request,
+                    workroom_request=workroom_request,
                 )
                 if any(
                     extract_tool_calls(result.response)
@@ -167,7 +167,7 @@ class ProxyGroupedWorkflowExecutor:
                         state.append_reasoning(reasoning_delta)
                         yield ProxyReasoningDeltaEvent(reasoning_delta)
                         stage_outputs.append(reasoning_delta)
-                    workflow_outputs.extend(stage_outputs)
+                    workroom_outputs.extend(stage_outputs)
                     current_brief = _stage_brief(
                         stage_outputs=stage_outputs,
                         fallback=stage_entry_brief,
@@ -181,14 +181,14 @@ class ProxyGroupedWorkflowExecutor:
                                 worklog_lines=tuple(stage_outputs),
                                 current_brief=current_brief,
                                 delivery_evidence=stage_evidence,
-                                workflow_progress=self._next_workflow_progress(
+                                workroom_progress=self._next_workroom_progress(
                                     definition=definition,
                                     step_groups=step_groups,
                                     staffed_specialists=staffed_specialists,
                                     staffed_specialist_counts=(
                                         staffed_specialist_counts
                                     ),
-                                    workflow_request=workflow_request,
+                                    workroom_request=workroom_request,
                                     delivery_requirements=(
                                         loop_state.delivery_requirements
                                         if loop_state is not None
@@ -206,7 +206,7 @@ class ProxyGroupedWorkflowExecutor:
                                     goal=goal,
                                     current_brief=current_brief,
                                     loop_state=loop_state,
-                                    workflow_outputs=workflow_outputs,
+                                    workroom_outputs=workroom_outputs,
                                     last_stage_outputs=last_stage_outputs,
                                     last_stage_parallel_attempts=(
                                         last_stage_parallel_attempts
@@ -220,7 +220,7 @@ class ProxyGroupedWorkflowExecutor:
                 agent_id = group[agent_index]
                 agent_label = _agent_instance_label(group, agent_index)
                 prompt = workflow_step_prompt(
-                    workflow_id=definition.id,
+                    workroom_id=definition.id,
                     agent_id=agent_id,
                     role_instance_label=(
                         agent_label if agent_label != agent_id else None
@@ -232,9 +232,9 @@ class ProxyGroupedWorkflowExecutor:
                         if _is_parallel_attempt_group(group)
                         else current_brief
                     ),
-                    playbook_request=workflow_request,
+                    workroom_request=workroom_request,
                     transcript_summary=summarize_conversation(request.messages),
-                    prior_outputs=tuple(workflow_outputs),
+                    prior_outputs=tuple(workroom_outputs),
                     comparison_candidates=comparison_candidates,
                     move_rationale=(
                         loop_state.current_move_rationale
@@ -269,11 +269,11 @@ class ProxyGroupedWorkflowExecutor:
                         response=response,
                         request=request,
                         continuation=ContinuationState(
-                            mode="workflow",
-                            workflow_id=definition.id,
-                            workflow_specialists=staffed_specialists,
-                            workflow_specialist_counts=staffed_specialist_counts,
-                            workflow_request=workflow_request,
+                            mode="workroom",
+                            workroom_id=definition.id,
+                            workroom_specialists=staffed_specialists,
+                            workroom_specialist_counts=staffed_specialist_counts,
+                            workroom_request=workroom_request,
                             delivery_requirements=(
                                 loop_state.delivery_requirements
                                 if loop_state is not None
@@ -296,7 +296,7 @@ class ProxyGroupedWorkflowExecutor:
                             decision_history=(
                                 loop_state.worklog if loop_state is not None else ()
                             ),
-                            workflow_outputs=tuple(workflow_outputs),
+                            workroom_outputs=tuple(workroom_outputs),
                         ),
                         state=state,
                     )
@@ -305,7 +305,7 @@ class ProxyGroupedWorkflowExecutor:
                             yield event
                         return
                 stage_outputs.append(f"{agent_label}: {agent_text.strip()}")
-                workflow_outputs.append(stage_outputs[-1])
+                workroom_outputs.append(stage_outputs[-1])
                 if not _is_parallel_attempt_group(group):
                     current_brief = agent_text.strip() or current_brief
             if _is_parallel_attempt_group(group):
@@ -322,12 +322,12 @@ class ProxyGroupedWorkflowExecutor:
                         worklog_lines=tuple(stage_outputs),
                         current_brief=current_brief,
                         delivery_evidence=stage_evidence,
-                        workflow_progress=self._next_workflow_progress(
+                        workroom_progress=self._next_workroom_progress(
                             definition=definition,
                             step_groups=step_groups,
                             staffed_specialists=staffed_specialists,
                             staffed_specialist_counts=staffed_specialist_counts,
-                            workflow_request=workflow_request,
+                            workroom_request=workroom_request,
                             delivery_requirements=(
                                 loop_state.delivery_requirements
                                 if loop_state is not None
@@ -345,7 +345,7 @@ class ProxyGroupedWorkflowExecutor:
                             goal=goal,
                             current_brief=current_brief,
                             loop_state=loop_state,
-                            workflow_outputs=workflow_outputs,
+                            workroom_outputs=workroom_outputs,
                             last_stage_outputs=last_stage_outputs,
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
@@ -359,7 +359,7 @@ class ProxyGroupedWorkflowExecutor:
             definition=definition,
             goal=goal,
             current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
+            workroom_outputs=tuple(workroom_outputs),
             state=state,
         ):
             yield summary_event
@@ -386,7 +386,7 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
-        workflow_request: str | None,
+        workroom_request: str | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
             asyncio.create_task(
@@ -398,7 +398,7 @@ class ProxyGroupedWorkflowExecutor:
                     goal=goal,
                     current_brief=current_brief,
                     loop_state=loop_state,
-                    workflow_request=workflow_request,
+                    workroom_request=workroom_request,
                 )
             )
             for agent_index in range(len(group))
@@ -415,18 +415,18 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
-        workflow_request: str | None,
+        workroom_request: str | None,
     ) -> _AgentAttemptResult:
         agent_id = group[agent_index]
         agent_label = _agent_instance_label(group, agent_index)
         prompt = workflow_step_prompt(
-            workflow_id=definition.id,
+            workroom_id=definition.id,
             agent_id=agent_id,
             role_instance_label=(agent_label if agent_label != agent_id else None),
             role_instance_context=_agent_instance_context(group, agent_index),
             goal=goal,
             current_brief=current_brief,
-            playbook_request=workflow_request,
+            workroom_request=workroom_request,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
             comparison_candidates=(),
@@ -454,7 +454,7 @@ class ProxyGroupedWorkflowExecutor:
             response=response_holder.get("response"),
         )
 
-    def _next_workflow_progress(
+    def _next_workroom_progress(
         self,
         *,
         definition: DefinitionDocument,
@@ -467,21 +467,21 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
-        workflow_outputs: list[str],
+        workroom_outputs: list[str],
         last_stage_outputs: list[str],
         last_stage_parallel_attempts: bool,
-        workflow_request: str | None,
+        workroom_request: str | None,
     ) -> ContinuationState | None:
         next_step_index = step_index + 1
         if next_step_index >= len(step_groups):
             return None
         next_group = step_groups[next_step_index]
         return ContinuationState(
-            mode="workflow",
-            workflow_id=definition.id,
-            workflow_specialists=staffed_specialists,
-            workflow_specialist_counts=staffed_specialist_counts,
-            workflow_request=workflow_request,
+            mode="workroom",
+            workroom_id=definition.id,
+            workroom_specialists=staffed_specialists,
+            workroom_specialist_counts=staffed_specialist_counts,
+            workroom_request=workroom_request,
             delivery_requirements=delivery_requirements,
             delivery_evidence=delivery_evidence,
             last_stage_outputs=tuple(last_stage_outputs),
@@ -494,7 +494,7 @@ class ProxyGroupedWorkflowExecutor:
             decision_history=(
                 loop_state.worklog if loop_state is not None else ()
             ),
-            workflow_outputs=tuple(workflow_outputs),
+            workroom_outputs=tuple(workroom_outputs),
         )
 
 
@@ -575,6 +575,6 @@ def _agent_instance_context(group: tuple[str, ...], agent_index: int) -> str | N
     )
     return (
         f"You are instance {current_instance} of {total_instances} for the "
-        f"{agent_id} role in this staffed playbook stage. Add an independently "
+        f"{agent_id} role in this staffed workroom round. Add an independently "
         "useful attempt instead of repeating the other instances."
     )

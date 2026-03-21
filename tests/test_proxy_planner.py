@@ -8,7 +8,7 @@ from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall, ProxyTur
 from ergon_studio.proxy.planner import (
     build_turn_planner_prompt,
     parse_turn_plan,
-    resolve_workflow_reference,
+    resolve_workroom_reference,
 )
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
@@ -68,7 +68,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
         prompt = build_turn_planner_prompt(
             request,
-            active_workflow_id="best-of-n",
+            active_workroom_id="best-of-n",
             active_specialists=("coder", "reviewer"),
             active_specialist_counts=(("coder", 3),),
         )
@@ -80,7 +80,7 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("Current role instance counts:", prompt)
         self.assertIn("coder x3", prompt)
 
-    def test_build_turn_planner_prompt_includes_active_playbook_request(self) -> None:
+    def test_build_turn_planner_prompt_includes_active_workroom_request(self) -> None:
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Keep going"),),
@@ -88,8 +88,8 @@ class ProxyPlannerTests(unittest.TestCase):
 
         prompt = build_turn_planner_prompt(
             request,
-            active_workflow_id="best-of-n",
-            active_playbook_request="Compare the two alternatives and pick one.",
+            active_workroom_id="best-of-n",
+            active_workroom_request="Compare the two alternatives and pick one.",
         )
 
         self.assertIn("Current workroom assignment:", prompt)
@@ -118,7 +118,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must include action"):
             parse_turn_plan(
-                '{"mode":"workflow","workflow_id":"standard-build"}',
+                '{"mode":"workflow","workroom_id":"standard-build"}',
                 registry=registry,
             )
 
@@ -151,9 +151,9 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.mode, "workflow")
-        self.assertEqual(plan.workflow_id, "standard-build")
-        self.assertEqual(plan.playbook_request, "Build the feature safely")
+        self.assertEqual(plan.mode, "workroom")
+        self.assertEqual(plan.workroom_id, "standard-build")
+        self.assertEqual(plan.workroom_request, "Build the feature safely")
         self.assertEqual(plan.specialists, ("coder", "reviewer"))
         self.assertEqual(plan.specialist_counts, (("coder", 2),))
         self.assertEqual(plan.delivery_requirements, ("review",))
@@ -169,9 +169,9 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.mode, "continue_playbook")
-        self.assertIsNone(plan.workflow_id)
-        self.assertEqual(plan.playbook_request, "Run one more review pass")
+        self.assertEqual(plan.mode, "continue_workroom")
+        self.assertIsNone(plan.workroom_id)
+        self.assertEqual(plan.workroom_request, "Run one more review pass")
         self.assertEqual(plan.specialists, ("reviewer",))
 
     def test_parse_turn_plan_drops_unknown_agent(self) -> None:
@@ -193,7 +193,7 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.workroom_id, "standard-build")
 
     def test_parse_turn_plan_resolves_workflow_by_selection_hint(self) -> None:
         registry = _make_registry()
@@ -203,7 +203,7 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.workroom_id, "standard-build")
 
     def test_parse_turn_plan_normalizes_staffing_list(self) -> None:
         registry = _make_registry()
@@ -230,8 +230,8 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.mode, "workflow")
-        self.assertEqual(plan.workflow_id, "ad-hoc-workroom")
+        self.assertEqual(plan.mode, "workroom")
+        self.assertEqual(plan.workroom_id, "ad-hoc-workroom")
         self.assertEqual(plan.specialists, ("architect", "coder", "critic"))
 
     def test_parse_turn_plan_allows_dense_staffing_list(self) -> None:
@@ -261,9 +261,9 @@ class ProxyPlannerTests(unittest.TestCase):
             registry=registry,
         )
 
-        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertEqual(plan.mode, "continue_workroom")
         self.assertEqual(
-            plan.playbook_request,
+            plan.workroom_request,
             "Compare the current options and pick one.",
         )
 
@@ -281,7 +281,7 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.mode, "finish")
         self.assertEqual(plan.delivery_requirements, ("review", "verify"))
 
-    def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:
+    def test_resolve_workroom_reference_returns_none_for_ambiguous_hint(self) -> None:
         registry = _make_registry()
         registry.workflow_definitions["other-build"] = DefinitionDocument(
             id="other-build",
@@ -296,7 +296,7 @@ class ProxyPlannerTests(unittest.TestCase):
             sections={"Purpose": "Build something else."},
         )
 
-        self.assertIsNone(resolve_workflow_reference(registry, "staged_delivery"))
+        self.assertIsNone(resolve_workroom_reference(registry, "staged_delivery"))
 
 
 def _make_registry():

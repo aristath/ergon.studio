@@ -31,7 +31,7 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Delivered")
 
@@ -90,7 +90,7 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _emit_workflow_summary(**kwargs):
             summary_calls.append(
-                (kwargs["current_brief"], kwargs["workflow_outputs"])
+                (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Delivered")
 

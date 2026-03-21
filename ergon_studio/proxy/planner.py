@@ -22,11 +22,11 @@ from ergon_studio.workflow_policy import (
 @dataclass(frozen=True)
 class ProxyTurnPlan:
     mode: str
-    workflow_id: str | None = None
+    workroom_id: str | None = None
     agent_id: str | None = None
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
-    playbook_request: str | None = None
+    workroom_request: str | None = None
     delivery_requirements: tuple[str, ...] | None = None
     request: str | None = None
     rationale: str | None = None
@@ -34,14 +34,14 @@ class ProxyTurnPlan:
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
     delivery_values = ", ".join(DELIVERY_REQUIREMENT_VALUES)
-    workflow_lines = []
-    for workflow_id, definition in sorted(registry.workflow_definitions.items()):
+    workroom_lines = []
+    for workroom_id, definition in sorted(registry.workflow_definitions.items()):
         hints = ", ".join(selection_hints_for_metadata(definition.metadata)) or "none"
         orchestration = definition.metadata.get("orchestration", "unknown")
         delivery_candidate = delivery_candidate_for_metadata(definition.metadata)
         acceptance_mode = acceptance_mode_for_metadata(definition.metadata)
-        workflow_lines.append(
-            f"- {workflow_id}: orchestration={orchestration} "
+        workroom_lines.append(
+            f"- {workroom_id}: orchestration={orchestration} "
             f"delivery_candidate={delivery_candidate} "
             f"acceptance={acceptance_mode} "
             f"selection_hints={hints}"
@@ -139,7 +139,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             ),
             "",
             "Available workroom templates:",
-            *workflow_lines,
+            *workroom_lines,
             "",
             "Available specialists:",
             *specialist_lines,
@@ -156,10 +156,10 @@ def build_turn_planner_prompt(
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
-    active_workflow_id: str | None = None,
+    active_workroom_id: str | None = None,
     active_specialists: tuple[str, ...] = (),
     active_specialist_counts: tuple[tuple[str, int], ...] = (),
-    active_playbook_request: str | None = None,
+    active_workroom_request: str | None = None,
     active_delivery_requirements: tuple[str, ...] = (),
     satisfied_delivery_evidence: tuple[str, ...] = (),
 ) -> str:
@@ -194,20 +194,20 @@ def build_turn_planner_prompt(
                 *worklog[-12:],
             ]
         )
-    if active_workflow_id:
+    if active_workroom_id:
         lines.extend(
             [
                 "",
                 "Workroom currently in progress:",
-                active_workflow_id,
+                active_workroom_id,
             ]
         )
-    if active_playbook_request:
+    if active_workroom_request:
         lines.extend(
             [
                 "",
                 "Current workroom assignment:",
-                active_playbook_request,
+                active_workroom_request,
             ]
         )
     if active_delivery_requirements:
@@ -300,32 +300,32 @@ def _parse_action_plan(
         )
 
     if action == "open_workroom":
-        workroom_id = resolve_workflow_reference(registry, target)
+        workroom_id = resolve_workroom_reference(registry, target)
         if workroom_id is None and (specialists or specialist_counts):
             workroom_id = AD_HOC_WORKROOM_ID
         return ProxyTurnPlan(
-            mode="workflow",
-            workflow_id=workroom_id,
+            mode="workroom",
+            workroom_id=workroom_id,
             specialists=specialists,
             specialist_counts=specialist_counts,
-            playbook_request=assignment,
+            workroom_request=assignment,
             delivery_requirements=delivery_requirements,
             rationale=rationale,
         )
 
     if action == "continue_workroom":
-        workflow_id = None if target == "current" else resolve_workflow_reference(
+        workroom_id = None if target == "current" else resolve_workroom_reference(
             registry,
             target,
         )
-        if workflow_id is None and target == AD_HOC_WORKROOM_ID:
-            workflow_id = AD_HOC_WORKROOM_ID
+        if workroom_id is None and target == AD_HOC_WORKROOM_ID:
+            workroom_id = AD_HOC_WORKROOM_ID
         return ProxyTurnPlan(
-            mode="continue_playbook",
-            workflow_id=workflow_id,
+            mode="continue_workroom",
+            workroom_id=workroom_id,
             specialists=specialists,
             specialist_counts=specialist_counts,
-            playbook_request=assignment,
+            workroom_request=assignment,
             delivery_requirements=delivery_requirements,
             rationale=rationale,
         )
@@ -344,7 +344,7 @@ def _parse_action_plan(
     )
 
 
-def resolve_workflow_reference(
+def resolve_workroom_reference(
     registry: RuntimeRegistry, value: str | None
 ) -> str | None:
     candidate = _optional_text(value)
@@ -355,16 +355,16 @@ def resolve_workflow_reference(
 
     lowered = candidate.casefold()
     by_name = [
-        workflow_id
-        for workflow_id, definition in registry.workflow_definitions.items()
+        workroom_id
+        for workroom_id, definition in registry.workflow_definitions.items()
         if str(definition.metadata.get("name", "")).strip().casefold() == lowered
     ]
     if len(by_name) == 1:
         return by_name[0]
 
     by_hint = [
-        workflow_id
-        for workflow_id, definition in registry.workflow_definitions.items()
+        workroom_id
+        for workroom_id, definition in registry.workflow_definitions.items()
         if lowered
         in {
             hint.casefold()
@@ -418,10 +418,6 @@ def _normalize_action(value: object) -> str:
         "deliver",
     }:
         return normalized
-    if normalized == "start_playbook":
-        return "open_workroom"
-    if normalized == "continue_playbook":
-        return "continue_workroom"
     return "reply"
 
 

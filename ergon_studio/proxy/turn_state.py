@@ -11,7 +11,7 @@ from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 class ProxyMoveResult:
     worklog_lines: tuple[str, ...]
     current_brief: str
-    workflow_progress: ContinuationState | None = None
+    workroom_progress: ContinuationState | None = None
     delivery_evidence: tuple[str, ...] = ()
 
 
@@ -20,10 +20,10 @@ class ProxyDecisionLoopState:
     goal: str
     current_brief: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
-    workflow_progress: ContinuationState | None = None
+    workroom_progress: ContinuationState | None = None
     delivery_requirements: tuple[str, ...] = field(default_factory=tuple)
     delivery_evidence: tuple[str, ...] = field(default_factory=tuple)
-    current_playbook_request: str | None = None
+    current_workroom_request: str | None = None
     current_move_rationale: str | None = None
 
     def absorb_result(
@@ -35,12 +35,12 @@ class ProxyDecisionLoopState:
             self.worklog = (*self.worklog, *result.worklog_lines)
         if result.current_brief:
             self.current_brief = result.current_brief
-        self.workflow_progress = result.workflow_progress
+        self.workroom_progress = result.workroom_progress
         self.delivery_evidence = merge_delivery_evidence(
             self.delivery_evidence,
             result.delivery_evidence,
         )
-        self.current_playbook_request = None
+        self.current_workroom_request = None
         self.current_move_rationale = None
 
 

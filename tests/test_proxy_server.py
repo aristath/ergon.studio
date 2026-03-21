@@ -584,10 +584,10 @@ class ProxyServerTests(unittest.TestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"standard-build",'
+                            '{"action":"open_workroom","target":"standard-build",'
                             '"assignment":"Build calculator"}'
                         ),
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
                         "Workflow final summary",
                     ],

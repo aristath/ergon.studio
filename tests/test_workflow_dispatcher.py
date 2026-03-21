@@ -33,9 +33,9 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in dispatcher.execute_workflow(
+            async for event in dispatcher.execute_workroom(
                 request=request,
-                workflow_id="missing",
+                workroom_id="missing",
                 goal="Build it",
                 state=state,
             )
@@ -70,9 +70,9 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in dispatcher.execute_workflow(
+            async for event in dispatcher.execute_workroom(
                 request=request,
-                workflow_id="standard-build",
+                workroom_id="standard-build",
                 goal="Build it",
                 state=state,
             )
@@ -114,9 +114,9 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in dispatcher.execute_workflow(
+            async for event in dispatcher.execute_workroom(
                 request=request,
-                workflow_id="ad-hoc-workroom",
+                workroom_id="ad-hoc-workroom",
                 specialists=("architect", "coder", "critic"),
                 goal="Brainstorm it",
                 state=state,
@@ -167,9 +167,9 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         events = [
             event
-            async for event in dispatcher.execute_workflow(
+            async for event in dispatcher.execute_workroom(
                 request=request,
-                workflow_id="ad-hoc-workroom",
+                workroom_id="ad-hoc-workroom",
                 specialists=("coder",),
                 specialist_counts=(("coder", 3),),
                 goal="Try three implementations",

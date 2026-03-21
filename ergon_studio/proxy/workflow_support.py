@@ -46,15 +46,15 @@ class ProxyWorkflowSupport:
         definition: DefinitionDocument,
         goal: str,
         current_brief: str,
-        workflow_outputs: tuple[str, ...],
+        workroom_outputs: tuple[str, ...],
         state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
             prompt=workflow_summary_prompt(
-                workflow_id=definition.id,
+                workroom_id=definition.id,
                 goal=goal,
-                outputs=workflow_outputs,
+                outputs=workroom_outputs,
             ),
             preamble=summary_instructions(),
             session_id=f"proxy-workflow-summary-{uuid4().hex}",
@@ -69,10 +69,10 @@ class ProxyWorkflowSupport:
     async def select_manager_agent(
         self,
         *,
-        workflow_id: str,
+        workroom_id: str,
         goal: str,
         current_brief: str,
-        playbook_request: str | None = None,
+        workroom_request: str | None = None,
         participants: tuple[str, ...],
         prior_outputs: tuple[str, ...],
         move_rationale: str | None = None,
@@ -81,10 +81,10 @@ class ProxyWorkflowSupport:
         raw = await self._run_text_agent(
             agent_id="orchestrator",
             prompt=workflow_manager_prompt(
-                workflow_id=workflow_id,
+                workroom_id=workroom_id,
                 goal=goal,
                 current_brief=current_brief,
-                playbook_request=playbook_request,
+                workroom_request=workroom_request,
                 participants=participants,
                 prior_outputs=prior_outputs,
                 move_rationale=move_rationale,
@@ -98,11 +98,11 @@ class ProxyWorkflowSupport:
     async def select_handoff_target(
         self,
         *,
-        workflow_id: str,
+        workroom_id: str,
         current_agent: str,
         goal: str,
         current_brief: str,
-        playbook_request: str | None = None,
+        workroom_request: str | None = None,
         prior_outputs: tuple[str, ...],
         allowed: tuple[str, ...],
         move_rationale: str | None = None,
@@ -113,11 +113,11 @@ class ProxyWorkflowSupport:
         raw = await self._run_text_agent(
             agent_id=current_agent,
             prompt=handoff_selection_prompt(
-                workflow_id=workflow_id,
+                workroom_id=workroom_id,
                 current_agent=current_agent,
                 goal=goal,
                 current_brief=current_brief,
-                playbook_request=playbook_request,
+                workroom_request=workroom_request,
                 prior_outputs=prior_outputs,
                 allowed=allowed,
                 move_rationale=move_rationale,

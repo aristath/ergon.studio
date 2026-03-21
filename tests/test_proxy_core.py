@@ -148,10 +148,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"standard-build",'
+                            '{"action":"open_workroom","target":"standard-build",'
                             '"assignment":"Build calculator"}'
                         ),
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
@@ -262,7 +262,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"reviewed-build",'
+                            '{"action":"open_workroom","target":"reviewed-build",'
                             '"assignment":"Build calculator",'
                             '"delivery_requirements":["review"]}'
                         ),
@@ -304,7 +304,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"standard-build",'
+                            '{"action":"open_workroom","target":"standard-build",'
                             '"assignment":"Build calculator","staffing":["coder"]}'
                         ),
                         '{"action":"deliver"}',
@@ -381,7 +381,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"standard-build",'
+                            '{"action":"open_workroom","target":"standard-build",'
                             '"assignment":"Build calculator"}'
                         ),
                     ],
@@ -421,7 +421,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "orchestrator": [
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
@@ -511,7 +511,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"grouped-build",'
+                            '{"action":"open_workroom","target":"grouped-build",'
                             '"assignment":"Build calculator"}'
                         ),
                     ],
@@ -592,12 +592,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook","target":"debate",'
+                            '{"action":"open_workroom","target":"debate",'
                             '"assignment":"Choose an approach"}'
                         ),
-                        '{"action":"continue_playbook","target":"current"}',
-                        '{"action":"continue_playbook","target":"current"}',
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
                         "Debate final summary",
                     ],
@@ -634,13 +634,13 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook",'
+                            '{"action":"open_workroom",'
                             '"target":"dynamic-open-ended","assignment":"Build it"}'
                         ),
                         '{"agent_id":"architect"}',
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"agent_id":"reviewer"}',
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"agent_id":null}',
                         '{"action":"deliver"}',
                         "Dynamic final summary",
@@ -676,11 +676,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"action":"start_playbook",'
+                            '{"action":"open_workroom",'
                             '"target":"specialist-handoff",'
                             '"assignment":"Research and decide"}'
                         ),
-                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
                         "Handoff final summary",
                     ],

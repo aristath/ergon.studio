@@ -71,7 +71,7 @@ class ProxyHandoffWorkflowExecutor:
         goal: str,
         specialists: tuple[str, ...] = (),
         specialist_counts: tuple[tuple[str, int], ...] = (),
-        workflow_request: str | None = None,
+        workroom_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -79,12 +79,12 @@ class ProxyHandoffWorkflowExecutor:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         staffed_specialists = (
-            continuation.workflow_specialists
+            continuation.workroom_specialists
             if continuation is not None
             else specialists
         )
         staffed_specialist_counts = (
-            continuation.workflow_specialist_counts
+            continuation.workroom_specialist_counts
             if continuation is not None
             else specialist_counts
         )
@@ -106,19 +106,19 @@ class ProxyHandoffWorkflowExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
-        workflow_request = (
-            continuation.workflow_request
-            if continuation is not None and continuation.workflow_request is not None
-            else workflow_request
-            if workflow_request is not None
+        workroom_request = (
+            continuation.workroom_request
+            if continuation is not None and continuation.workroom_request is not None
+            else workroom_request
+            if workroom_request is not None
             else (
-                loop_state.current_playbook_request
+                loop_state.current_workroom_request
                 if loop_state is not None
                 else None
             )
         )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
+        workroom_outputs: list[str] = (
+            list(continuation.workroom_outputs) if continuation is not None else []
         )
         round_index = (
             continuation.step_index
@@ -137,12 +137,12 @@ class ProxyHandoffWorkflowExecutor:
             ) or participant_for_agent(participants, continuation.agent_id)
             if current_participant is not None:
                 next_label = await self._select_handoff_target(
-                    workflow_id=definition.id,
+                    workroom_id=definition.id,
                     current_agent=current_participant.label,
                     goal=goal,
                     current_brief=current_brief,
-                    playbook_request=workflow_request,
-                    prior_outputs=tuple(workflow_outputs),
+                    workroom_request=workroom_request,
+                    prior_outputs=tuple(workroom_outputs),
                     allowed=handoffs.get(
                         current_participant.label,
                         tuple(
@@ -170,7 +170,7 @@ class ProxyHandoffWorkflowExecutor:
 
         while round_index < max_rounds and current_participant is not None:
             prompt = workflow_step_prompt(
-                workflow_id=definition.id,
+                workroom_id=definition.id,
                 agent_id=current_participant.agent_id,
                 role_instance_label=(
                     current_participant.label
@@ -180,9 +180,9 @@ class ProxyHandoffWorkflowExecutor:
                 role_instance_context=participant_context(current_participant),
                 goal=goal,
                 current_brief=current_brief,
-                playbook_request=workflow_request,
+                workroom_request=workroom_request,
                 transcript_summary=summarize_conversation(request.messages),
-                prior_outputs=tuple(workflow_outputs),
+                prior_outputs=tuple(workroom_outputs),
                 move_rationale=(
                     loop_state.current_move_rationale
                     if loop_state is not None
@@ -222,11 +222,11 @@ class ProxyHandoffWorkflowExecutor:
                     response=response,
                     request=request,
                     continuation=ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        workflow_specialists=staffed_specialists,
-                        workflow_specialist_counts=staffed_specialist_counts,
-                        workflow_request=workflow_request,
+                        mode="workroom",
+                        workroom_id=definition.id,
+                        workroom_specialists=staffed_specialists,
+                        workroom_specialist_counts=staffed_specialist_counts,
+                        workroom_request=workroom_request,
                         delivery_requirements=(
                             loop_state.delivery_requirements
                             if loop_state is not None
@@ -245,7 +245,7 @@ class ProxyHandoffWorkflowExecutor:
                         decision_history=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
-                        workflow_outputs=tuple(workflow_outputs),
+                        workroom_outputs=tuple(workroom_outputs),
                     ),
                     state=state,
                 )
@@ -253,7 +253,7 @@ class ProxyHandoffWorkflowExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workflow_outputs.append(
+            workroom_outputs.append(
                 f"{current_participant.label}: {agent_text.strip()}"
             )
             current_brief = agent_text.strip() or current_brief
@@ -262,7 +262,7 @@ class ProxyHandoffWorkflowExecutor:
                 if result_sink is not None:
                     result_sink(
                         ProxyMoveResult(
-                            worklog_lines=(workflow_outputs[-1],),
+                            worklog_lines=(workroom_outputs[-1],),
                             current_brief=current_brief,
                             delivery_evidence=round_evidence,
                         )
@@ -273,15 +273,15 @@ class ProxyHandoffWorkflowExecutor:
             if result_sink is not None:
                 result_sink(
                     ProxyMoveResult(
-                        worklog_lines=(workflow_outputs[-1],),
+                        worklog_lines=(workroom_outputs[-1],),
                         current_brief=current_brief,
                         delivery_evidence=round_evidence,
-                        workflow_progress=ContinuationState(
-                            mode="workflow",
-                            workflow_id=definition.id,
-                            workflow_specialists=staffed_specialists,
-                            workflow_specialist_counts=staffed_specialist_counts,
-                            workflow_request=workflow_request,
+                        workroom_progress=ContinuationState(
+                            mode="workroom",
+                            workroom_id=definition.id,
+                            workroom_specialists=staffed_specialists,
+                            workroom_specialist_counts=staffed_specialist_counts,
+                            workroom_request=workroom_request,
                             delivery_requirements=(
                                 loop_state.delivery_requirements
                                 if loop_state is not None
@@ -303,7 +303,7 @@ class ProxyHandoffWorkflowExecutor:
                             decision_history=(
                                 loop_state.worklog if loop_state is not None else ()
                             ),
-                            workflow_outputs=tuple(workflow_outputs),
+                            workroom_outputs=tuple(workroom_outputs),
                         )
                         if next_round < max_rounds
                         else None,
@@ -311,12 +311,12 @@ class ProxyHandoffWorkflowExecutor:
                 )
                 return
             next_label = await self._select_handoff_target(
-                workflow_id=definition.id,
+                workroom_id=definition.id,
                 current_agent=current_participant.label,
                 goal=goal,
                 current_brief=current_brief,
-                playbook_request=workflow_request,
-                prior_outputs=tuple(workflow_outputs),
+                workroom_request=workroom_request,
+                prior_outputs=tuple(workroom_outputs),
                 allowed=handoffs.get(
                     current_participant.label,
                     tuple(
@@ -347,7 +347,7 @@ class ProxyHandoffWorkflowExecutor:
             definition=definition,
             goal=goal,
             current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
+            workroom_outputs=tuple(workroom_outputs),
             state=state,
         ):
             yield summary_event

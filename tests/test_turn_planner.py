@@ -59,14 +59,14 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
 
         plan = await planner.plan_turn(request)
 
-        self.assertEqual(plan.mode, "workflow")
-        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.mode, "workroom")
+        self.assertEqual(plan.workroom_id, "standard-build")
         self.assertEqual(
-            plan.playbook_request,
+            plan.workroom_request,
             "Build the calculator with the standard tactic",
         )
 
-    async def test_plan_turn_parses_continue_playbook_decision(self) -> None:
+    async def test_plan_turn_parses_continue_workroom_decision(self) -> None:
         async def _run_text_agent(**_kwargs):
             return '{"action":"continue_workroom","target":"current"}'
 
@@ -81,18 +81,18 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
             loop_state=ProxyDecisionLoopState(
                 goal="Build calculator",
                 current_brief="Architecture ready",
-                workflow_progress=ContinuationState(
-                    mode="workflow",
+                workroom_progress=ContinuationState(
+                    mode="workroom",
                     agent_id="architect",
-                    workflow_id="standard-build",
+                    workroom_id="standard-build",
                 ),
             ),
         )
 
-        self.assertEqual(plan.mode, "continue_playbook")
-        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.mode, "continue_workroom")
+        self.assertEqual(plan.workroom_id, "standard-build")
 
-    async def test_plan_turn_normalizes_same_workflow_id_to_continue_playbook(
+    async def test_plan_turn_normalizes_same_workroom_id_to_continue_workroom(
         self,
     ) -> None:
         async def _run_text_agent(**_kwargs):
@@ -109,16 +109,16 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
             loop_state=ProxyDecisionLoopState(
                 goal="Build calculator",
                 current_brief="Architecture ready",
-                workflow_progress=ContinuationState(
-                    mode="workflow",
+                workroom_progress=ContinuationState(
+                    mode="workroom",
                     agent_id="architect",
-                    workflow_id="standard-build",
+                    workroom_id="standard-build",
                 ),
             ),
         )
 
-        self.assertEqual(plan.mode, "continue_playbook")
-        self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.mode, "continue_workroom")
+        self.assertEqual(plan.workroom_id, "standard-build")
 
 
 def _registry() -> RuntimeRegistry:

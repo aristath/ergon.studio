@@ -365,9 +365,9 @@ class ProxyConfigApp(App[None]):
                     directory=self.definitions_dir / "agents",
                     apply_mutation=self._apply_definition_mutation,
                 )
-            with TabPane("Workflows", id="workflows-tab"):
+            with TabPane("Workroom Templates", id="workflows-tab"):
                 yield DefinitionEditor(
-                    title="Workflows",
+                    title="Workroom Templates",
                     definition_kind="workflow",
                     directory=self.definitions_dir / "workflows",
                     apply_mutation=self._apply_definition_mutation,
@@ -714,11 +714,11 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         "acceptance_mode: delivery\n"
         "---\n\n"
         "## Purpose\n"
-        "Describe what this playbook is for.\n\n"
+        "Describe what this workroom template is for.\n\n"
         "## Use When\n"
         "Describe when the lead developer should reach for it.\n\n"
         "## Notes\n"
-        "Playbooks are tactics for the orchestrator, not rigid scripts.\n"
+        "Workroom templates are tactics for the orchestrator, not rigid scripts.\n"
     )
 
 

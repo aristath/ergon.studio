@@ -23,9 +23,9 @@ class ProxyContinuationTests(unittest.TestCase):
                 arguments_json='{"path":"main.py"}',
             ),
             state=ContinuationState(
-                mode="workflow",
+                mode="workroom",
                 agent_id="architect",
-                workflow_id="standard-build",
+                workroom_id="standard-build",
                 step_index=2,
             ),
         )
@@ -33,10 +33,10 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.mode, "workflow")
+        self.assertEqual(decoded.mode, "workroom")
         self.assertEqual(decoded.agent_id, "architect")
-        self.assertEqual(decoded.workflow_id, "standard-build")
-        self.assertEqual(decoded.workflow_specialists, ())
+        self.assertEqual(decoded.workroom_id, "standard-build")
+        self.assertEqual(decoded.workroom_specialists, ())
         self.assertEqual(decoded.last_stage_outputs, ())
         self.assertFalse(decoded.last_stage_parallel_attempts)
         self.assertEqual(decoded.step_index, 2)
@@ -44,7 +44,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.request_text, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
-        self.assertEqual(decoded.workflow_outputs, ())
+        self.assertEqual(decoded.workroom_outputs, ())
 
     def test_encode_and_decode_round_trip_with_context(self) -> None:
         encoded = encode_continuation_tool_call(
@@ -54,14 +54,14 @@ class ProxyContinuationTests(unittest.TestCase):
                 arguments_json='{"path":"main.py"}',
             ),
             state=ContinuationState(
-                mode="workflow",
+                mode="workroom",
                 agent_id="coder",
                 delivery_requirements=("review", "verify"),
                 delivery_evidence=("review",),
-                workflow_id="standard-build",
-                workflow_specialists=("coder", "reviewer"),
-                workflow_specialist_counts=(("coder", 3),),
-                workflow_request="Polish the selected candidate.",
+                workroom_id="standard-build",
+                workroom_specialists=("coder", "reviewer"),
+                workroom_specialist_counts=(("coder", 3),),
+                workroom_request="Polish the selected candidate.",
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 step_index=1,
@@ -69,7 +69,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 request_text="Implement A",
                 goal="Build calculator",
                 current_brief="Updating main.py",
-                workflow_outputs=("architect: use main.py",),
+                workroom_outputs=("architect: use main.py",),
             ),
         )
 
@@ -81,15 +81,15 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.request_text, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
-        self.assertEqual(decoded.workflow_specialists, ("coder", "reviewer"))
-        self.assertEqual(decoded.workflow_specialist_counts, (("coder", 3),))
-        self.assertEqual(decoded.workflow_request, "Polish the selected candidate.")
+        self.assertEqual(decoded.workroom_specialists, ("coder", "reviewer"))
+        self.assertEqual(decoded.workroom_specialist_counts, (("coder", 3),))
+        self.assertEqual(decoded.workroom_request, "Polish the selected candidate.")
         self.assertEqual(
             decoded.last_stage_outputs,
             ("coder[1]: Idea A", "coder[2]: Idea B"),
         )
         self.assertTrue(decoded.last_stage_parallel_attempts)
-        self.assertEqual(decoded.workflow_outputs, ("architect: use main.py",))
+        self.assertEqual(decoded.workroom_outputs, ("architect: use main.py",))
         self.assertEqual(decoded.agent_index, 0)
 
     def test_latest_continuation_uses_latest_tool_message(self) -> None:

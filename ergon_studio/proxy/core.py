@@ -42,10 +42,8 @@ from ergon_studio.proxy.turn_state import (
     ProxyTurnState,
 )
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
-from ergon_studio.proxy.workflow_request_executor import (
-    ProxyWorkflowRequestExecutor,
-)
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
+from ergon_studio.proxy.workroom_request_executor import ProxyWorkroomRequestExecutor
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -105,26 +103,26 @@ class ProxyOrchestrationCore:
             emit_workflow_summary=workflow_support.emit_summary,
             select_handoff_target=workflow_support.select_handoff_target,
         )
-        workflow_dispatcher = ProxyWorkflowDispatcher(
+        workroom_dispatcher = ProxyWorkflowDispatcher(
             registry,
             execute_grouped_workflow=grouped_workflow_executor.execute,
             execute_group_chat_workflow=group_chat_workflow_executor.execute,
             execute_magentic_workflow=magentic_workflow_executor.execute,
             execute_handoff_workflow=handoff_workflow_executor.execute,
         )
-        workflow_request_executor = ProxyWorkflowRequestExecutor(
-            workflow_dispatcher,
+        workroom_request_executor = ProxyWorkroomRequestExecutor(
+            workroom_dispatcher
         )
         self._turn_router = ProxyTurnRouter(
             execute_direct=turn_executor.execute_direct,
             execute_finish=turn_executor.execute_finish,
             execute_delegation=turn_executor.execute_delegation,
-            execute_workflow=workflow_request_executor.execute_workflow,
-            execute_playbook_continuation=(
-                workflow_request_executor.execute_active_workflow
+            execute_workroom=workroom_request_executor.execute_workroom,
+            execute_active_workroom=(
+                workroom_request_executor.execute_active_workroom
             ),
-            execute_workflow_continuation=(
-                workflow_request_executor.execute_workflow_continuation
+            execute_workroom_continuation=(
+                workroom_request_executor.execute_workroom_continuation
             ),
         )
 
@@ -210,7 +208,7 @@ class ProxyOrchestrationCore:
             if plan.delivery_requirements is not None:
                 loop_state.delivery_requirements = plan.delivery_requirements
             loop_state.current_move_rationale = plan.rationale
-            loop_state.current_playbook_request = plan.playbook_request
+            loop_state.current_workroom_request = plan.workroom_request
             if plan.mode == "finish":
                 unmet = unmet_delivery_requirements(
                     loop_state.delivery_requirements,
@@ -225,7 +223,7 @@ class ProxyOrchestrationCore:
                     loop_state.worklog = (*loop_state.worklog, note)
                     yield ProxyReasoningDeltaEvent(note)
                     loop_state.current_move_rationale = None
-                    loop_state.current_playbook_request = None
+                    loop_state.current_workroom_request = None
                     continue
             result_holder: dict[str, object] = {}
             async for event in self._turn_router.execute_plan(
@@ -240,11 +238,11 @@ class ProxyOrchestrationCore:
                 return
             if plan.mode in {"act", "finish"}:
                 loop_state.current_move_rationale = None
-                loop_state.current_playbook_request = None
+                loop_state.current_workroom_request = None
                 return
             if not result_holder:
                 loop_state.current_move_rationale = None
-                loop_state.current_playbook_request = None
+                loop_state.current_workroom_request = None
                 return
             loop_state.absorb_result(result=_result(result_holder, loop_state))
 
@@ -277,7 +275,7 @@ class ProxyOrchestrationCore:
             worklog=continuation.decision_history,
             delivery_requirements=continuation.delivery_requirements,
             delivery_evidence=continuation.delivery_evidence,
-            current_playbook_request=continuation.workflow_request,
+            current_workroom_request=continuation.workroom_request,
         )
 
 

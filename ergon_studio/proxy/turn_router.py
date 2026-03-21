@@ -34,16 +34,16 @@ class ProxyTurnRouter:
         execute_direct: TurnHandler,
         execute_finish: TurnHandler,
         execute_delegation: TurnHandler,
-        execute_workflow: TurnHandler,
-        execute_playbook_continuation: TurnHandler,
-        execute_workflow_continuation: TurnHandler,
+        execute_workroom: TurnHandler,
+        execute_active_workroom: TurnHandler,
+        execute_workroom_continuation: TurnHandler,
     ) -> None:
         self._execute_direct = execute_direct
         self._execute_finish = execute_finish
         self._execute_delegation = execute_delegation
-        self._execute_workflow = execute_workflow
-        self._execute_playbook_continuation = execute_playbook_continuation
-        self._execute_workflow_continuation = execute_workflow_continuation
+        self._execute_workroom = execute_workroom
+        self._execute_active_workroom = execute_active_workroom
+        self._execute_workroom_continuation = execute_workroom_continuation
 
     async def execute_plan(
         self,
@@ -72,8 +72,8 @@ class ProxyTurnRouter:
             ):
                 yield event
             return
-        if plan.mode == "workflow" and plan.workflow_id is not None:
-            async for event in self._execute_workflow(
+        if plan.mode == "workroom" and plan.workroom_id is not None:
+            async for event in self._execute_workroom(
                 request=request,
                 plan=plan,
                 state=state,
@@ -82,8 +82,8 @@ class ProxyTurnRouter:
             ):
                 yield event
             return
-        if plan.mode == "continue_playbook":
-            async for event in self._execute_playbook_continuation(
+        if plan.mode == "continue_workroom":
+            async for event in self._execute_active_workroom(
                 request=request,
                 plan=plan,
                 state=state,
@@ -109,8 +109,8 @@ class ProxyTurnRouter:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
-        if continuation.mode == "workflow" and continuation.workflow_id is not None:
-            async for event in self._execute_workflow_continuation(
+        if continuation.mode == "workroom" and continuation.workroom_id is not None:
+            async for event in self._execute_workroom_continuation(
                 request=request,
                 continuation=continuation,
                 pending=pending,

@@ -170,20 +170,20 @@ def specialist_prompt(
 
 def workflow_step_prompt(
     *,
-    workflow_id: str,
+    workroom_id: str,
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
     goal: str,
     current_brief: str,
-    playbook_request: str | None = None,
+    workroom_request: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
     comparison_candidates: tuple[str, ...] = (),
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"You are {agent_id} working inside workroom {workflow_id}.",
+        f"You are {agent_id} working inside workroom {workroom_id}.",
         (
             "The lead developer is using this workroom for collaboration, not as "
             "a rigid script."
@@ -216,12 +216,12 @@ def workflow_step_prompt(
         current_brief or "(none)",
         ]
     )
-    if playbook_request:
+    if workroom_request:
         lines.extend(
             [
                 "",
                 "Current workroom assignment:",
-                playbook_request,
+                workroom_request,
             ]
         )
     if prior_outputs:
@@ -258,19 +258,19 @@ def workflow_step_prompt(
 
 def group_chat_turn_prompt(
     *,
-    workflow_id: str,
+    workroom_id: str,
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
     goal: str,
     transcript_summary: str,
     current_brief: str,
-    playbook_request: str | None = None,
+    workroom_request: str | None = None,
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"You are {agent_id} speaking in workroom {workflow_id}.",
+        f"You are {agent_id} speaking in workroom {workroom_id}.",
         "Respond to the current discussion and move the decision forward.",
         "Add real value from your role instead of repeating the room.",
     ]
@@ -301,12 +301,12 @@ def group_chat_turn_prompt(
             current_brief or "(none)",
         ]
     )
-    if playbook_request:
+    if workroom_request:
         lines.extend(
             [
                 "",
                 "Current workroom assignment:",
-                playbook_request,
+                workroom_request,
             ]
         )
     if prior_outputs:
@@ -347,22 +347,22 @@ def workflow_manager_instructions(participants: tuple[str, ...]) -> str:
 
 def workflow_manager_prompt(
     *,
-    workflow_id: str,
+    workroom_id: str,
     goal: str,
     current_brief: str,
-    playbook_request: str | None,
+    workroom_request: str | None,
     participants: tuple[str, ...],
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"Workroom: {workflow_id}",
+        f"Workroom: {workroom_id}",
         f"Goal: {goal or '(none)'}",
         f"Current brief: {current_brief or '(none)'}",
         f"Available specialists: {', '.join(participants) or '(none)'}",
     ]
-    if playbook_request:
-        lines.append(f"Current round assignment: {playbook_request}")
+    if workroom_request:
+        lines.append(f"Current round assignment: {workroom_request}")
     if move_rationale:
         lines.append(f"Why continue this workroom now: {move_rationale}")
     lines.extend(
@@ -391,24 +391,24 @@ def handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
 
 def handoff_selection_prompt(
     *,
-    workflow_id: str,
+    workroom_id: str,
     current_agent: str,
     goal: str,
     current_brief: str,
-    playbook_request: str | None,
+    workroom_request: str | None,
     prior_outputs: tuple[str, ...],
     allowed: tuple[str, ...],
     move_rationale: str | None = None,
 ) -> str:
     lines = [
-        f"Workroom: {workflow_id}",
+        f"Workroom: {workroom_id}",
         f"You are {current_agent}.",
         f"Goal: {goal or '(none)'}",
         f"Current brief: {current_brief or '(none)'}",
         f"You may hand off to: {', '.join(allowed) or '(none)'}",
     ]
-    if playbook_request:
-        lines.append(f"Current round assignment: {playbook_request}")
+    if workroom_request:
+        lines.append(f"Current round assignment: {workroom_request}")
     if move_rationale:
         lines.append(
             f"Why the lead developer is continuing this handoff now: {move_rationale}"
@@ -486,13 +486,13 @@ def delegation_summary_prompt(
 
 def workflow_summary_prompt(
     *,
-    workflow_id: str,
+    workroom_id: str,
     goal: str,
     outputs: tuple[str, ...],
 ) -> str:
     return "\n".join(
         [
-            f"The workroom {workflow_id} completed.",
+            f"The workroom {workroom_id} completed.",
             "",
             "Goal:",
             goal or "(none)",

@@ -33,9 +33,9 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append("workflow")
             yield ProxyContentDeltaEvent("workflow")
 
-        async def _playbook_continuation(**_kwargs):
-            calls.append("playbook_continuation")
-            yield ProxyContentDeltaEvent("playbook_continuation")
+        async def _active_workroom(**_kwargs):
+            calls.append("active_workroom")
+            yield ProxyContentDeltaEvent("active_workroom")
 
         async def _workflow_continuation(**_kwargs):
             calls.append("workflow_continuation")
@@ -45,9 +45,9 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workflow=_workflow,
-            execute_playbook_continuation=_playbook_continuation,
-            execute_workflow_continuation=_workflow_continuation,
+            execute_workroom=_workflow,
+            execute_active_workroom=_active_workroom,
+            execute_workroom_continuation=_workflow_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -70,7 +70,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "delegate")
 
-    async def test_execute_plan_routes_continue_playbook_mode(self) -> None:
+    async def test_execute_plan_routes_continue_workroom_mode(self) -> None:
         calls: list[dict[str, object]] = []
 
         async def _direct(**kwargs):
@@ -86,12 +86,12 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             yield ProxyContentDeltaEvent("finish")
 
         async def _workflow(**kwargs):
-            calls.append({"kind": "workflow", **kwargs})
-            yield ProxyContentDeltaEvent("workflow")
+            calls.append({"kind": "workroom", **kwargs})
+            yield ProxyContentDeltaEvent("workroom")
 
-        async def _playbook_continuation(**kwargs):
-            calls.append({"kind": "playbook_continuation", **kwargs})
-            yield ProxyContentDeltaEvent("playbook_continuation")
+        async def _active_workroom(**kwargs):
+            calls.append({"kind": "active_workroom", **kwargs})
+            yield ProxyContentDeltaEvent("active_workroom")
 
         async def _workflow_continuation(**kwargs):
             calls.append({"kind": "workflow_continuation", **kwargs})
@@ -101,9 +101,9 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workflow=_workflow,
-            execute_playbook_continuation=_playbook_continuation,
-            execute_workflow_continuation=_workflow_continuation,
+            execute_workroom=_workflow,
+            execute_active_workroom=_active_workroom,
+            execute_workroom_continuation=_workflow_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -112,10 +112,10 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
         loop_state = ProxyDecisionLoopState(
             goal="Build calculator",
             current_brief="Architecture ready",
-            workflow_progress=ContinuationState(
-                mode="workflow",
+            workroom_progress=ContinuationState(
+                mode="workroom",
                 agent_id="architect",
-                workflow_id="standard-build",
+                workroom_id="standard-build",
             ),
         )
 
@@ -124,8 +124,8 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             async for event in router.execute_plan(
                 request=request,
                 plan=ProxyTurnPlan(
-                    mode="continue_playbook",
-                    workflow_id="standard-build",
+                    mode="continue_workroom",
+                    workroom_id="standard-build",
                 ),
                 state=ProxyTurnState(),
                 loop_state=loop_state,
@@ -133,15 +133,15 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["kind"], "playbook_continuation")
+        self.assertEqual(calls[0]["kind"], "active_workroom")
         self.assertIs(calls[0]["loop_state"], loop_state)
         self.assertEqual(calls[0]["plan"].specialist_counts, ())
-        self.assertIsNone(calls[0]["plan"].playbook_request)
+        self.assertIsNone(calls[0]["plan"].workroom_request)
         first_event = events[0]
         self.assertIsInstance(first_event, ProxyContentDeltaEvent)
         if not isinstance(first_event, ProxyContentDeltaEvent):
             raise AssertionError("expected ProxyContentDeltaEvent")
-        self.assertEqual(first_event.delta, "playbook_continuation")
+        self.assertEqual(first_event.delta, "active_workroom")
 
     async def test_execute_continuation_routes_delegate_mode(self) -> None:
         calls: list[dict[str, object]] = []
@@ -159,12 +159,12 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             yield ProxyContentDeltaEvent("finish")
 
         async def _workflow(**kwargs):
-            calls.append({"kind": "workflow", **kwargs})
-            yield ProxyContentDeltaEvent("workflow")
+            calls.append({"kind": "workroom", **kwargs})
+            yield ProxyContentDeltaEvent("workroom")
 
-        async def _playbook_continuation(**kwargs):
-            calls.append({"kind": "playbook_continuation", **kwargs})
-            yield ProxyContentDeltaEvent("playbook_continuation")
+        async def _active_workroom(**kwargs):
+            calls.append({"kind": "active_workroom", **kwargs})
+            yield ProxyContentDeltaEvent("active_workroom")
 
         async def _workflow_continuation(**kwargs):
             calls.append({"kind": "workflow_continuation", **kwargs})
@@ -174,9 +174,9 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workflow=_workflow,
-            execute_playbook_continuation=_playbook_continuation,
-            execute_workflow_continuation=_workflow_continuation,
+            execute_workroom=_workflow,
+            execute_active_workroom=_active_workroom,
+            execute_workroom_continuation=_workflow_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",

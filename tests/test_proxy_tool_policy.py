@@ -42,7 +42,7 @@ class ProxyToolPolicyTests(unittest.TestCase):
             )
 
     def test_resolve_agent_tool_policy_filters_to_required_function(self) -> None:
-        tools, options = resolve_agent_tool_policy(
+        tools, tool_choice, parallel_tool_calls = resolve_agent_tool_policy(
             tools=(_tool("read_file"), _tool("write_file")),
             tool_choice={"type": "function", "function": {"name": "write_file"}},
             parallel_tool_calls=False,
@@ -50,25 +50,21 @@ class ProxyToolPolicyTests(unittest.TestCase):
 
         self.assertEqual(tuple(tool.name for tool in tools), ("write_file",))
         self.assertEqual(
-            options,
-            {
-                "tool_choice": {
-                    "mode": "required",
-                    "required_function_name": "write_file",
-                },
-                "allow_multiple_tool_calls": False,
-            },
+            tool_choice,
+            {"type": "function", "function": {"name": "write_file"}},
         )
+        self.assertFalse(parallel_tool_calls)
 
     def test_resolve_agent_tool_policy_disables_tools_for_none(self) -> None:
-        tools, options = resolve_agent_tool_policy(
+        tools, tool_choice, parallel_tool_calls = resolve_agent_tool_policy(
             tools=(_tool("read_file"),),
             tool_choice="none",
             parallel_tool_calls=None,
         )
 
         self.assertEqual(tools, ())
-        self.assertEqual(options, {"tool_choice": "none"})
+        self.assertEqual(tool_choice, "none")
+        self.assertIsNone(parallel_tool_calls)
 
     def test_resolve_agent_tool_policy_rejects_malformed_function_selector(
         self,

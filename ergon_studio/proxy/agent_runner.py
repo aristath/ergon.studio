@@ -186,21 +186,24 @@ class ProxyAgentRunner:
         pending_continuation: PendingContinuation | None,
     ) -> AgentInvocation:
         agent = build_runtime_agent(self.registry, agent_id)
-        allowed_tools, tool_options = resolve_agent_tool_policy(
+        (
+            allowed_tools,
+            resolved_tool_choice,
+            resolved_parallel,
+        ) = resolve_agent_tool_policy(
             tools=tuple(host_tools),
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
         )
         declared_tools = tuple(allowed_tools) + tuple(extra_tools)
         if declared_tools and not self.registry.upstream.tool_calling:
-            if tool_options.get("tool_choice") not in (None, "auto", "none"):
+            if resolved_tool_choice not in (None, "auto", "none"):
                 raise ValueError(
                     f"provider for agent '{agent_id}' does not support tool calling"
                 )
             declared_tools = ()
-            tool_options = {}
-        translated_tool_choice = _translate_tool_choice(tool_options.get("tool_choice"))
-        translated_parallel = _translate_parallel_tool_calls(tool_options)
+            resolved_tool_choice = None
+            resolved_parallel = None
         messages = tuple(
             build_agent_messages(
                 registry=self.registry,
@@ -214,8 +217,8 @@ class ProxyAgentRunner:
             model=model_id_override,
             messages=messages,
             tools=declared_tools,
-            tool_choice=translated_tool_choice,
-            parallel_tool_calls=translated_parallel,
+            tool_choice=resolved_tool_choice,
+            parallel_tool_calls=resolved_parallel,
         )
 
     def _invoke_upstream(
@@ -425,37 +428,6 @@ def _tool_to_openai(tool: ProxyFunctionTool) -> dict[str, Any]:
         "type": "function",
         "function": function,
     }
-
-
-def _translate_tool_choice(
-    tool_choice: object,
-) -> str | dict[str, Any] | None:
-    if tool_choice is None:
-        return None
-    if isinstance(tool_choice, str) and tool_choice in {
-        "auto",
-        "required",
-        "none",
-    }:
-        return tool_choice
-    if not isinstance(tool_choice, dict):
-        return None
-    if tool_choice.get("mode") != "required":
-        return None
-    function_name = tool_choice.get("required_function_name")
-    if not isinstance(function_name, str) or not function_name:
-        return None
-    return {
-        "type": "function",
-        "function": {"name": function_name},
-    }
-
-
-def _translate_parallel_tool_calls(tool_options: dict[str, Any]) -> bool | None:
-    value = tool_options.get("allow_multiple_tool_calls")
-    if type(value) is bool:
-        return value
-    return None
 
 
 def _metadata_number(value: object) -> float | int | None:

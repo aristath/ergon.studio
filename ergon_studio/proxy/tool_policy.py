@@ -48,24 +48,17 @@ def resolve_agent_tool_policy(
     tools: tuple[ProxyFunctionTool, ...],
     tool_choice: str | dict[str, Any] | None,
     parallel_tool_calls: bool | None,
-) -> tuple[tuple[ProxyFunctionTool, ...], dict[str, Any]]:
+) -> tuple[
+    tuple[ProxyFunctionTool, ...],
+    str | dict[str, Any] | None,
+    bool | None,
+]:
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
     resolved_tools = tools
-    run_options: dict[str, Any] = {}
+    resolved_tool_choice = tool_choice
     if tool_choice == "none":
         resolved_tools = ()
-        run_options["tool_choice"] = "none"
-    elif tool_choice == "required":
-        run_options["tool_choice"] = "required"
-    elif tool_choice == "auto":
-        run_options["tool_choice"] = "auto"
     elif isinstance(tool_choice, dict):
         name = tool_choice["function"]["name"]
         resolved_tools = tuple(tool for tool in tools if tool.name == name)
-        run_options["tool_choice"] = {
-            "mode": "required",
-            "required_function_name": name,
-        }
-    if parallel_tool_calls is not None:
-        run_options["allow_multiple_tool_calls"] = parallel_tool_calls
-    return resolved_tools, run_options
+    return resolved_tools, resolved_tool_choice, parallel_tool_calls

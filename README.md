@@ -18,14 +18,51 @@ The proxy uses:
 - markdown-defined agents
 - markdown-defined workflows
 
-It does not create local project state on startup.
-Point it at a definitions directory containing:
-- `agents/orchestrator.md`
-- `workflows/*.md`
+## Running ergon
 
-Required startup inputs:
-- `--definitions-dir` or `ERGON_DEFINITIONS_DIR`
-- `--upstream-base-url` or `ERGON_UPSTREAM_BASE_URL`
+Default mode launches the configuration TUI and the local proxy server together:
+
+```bash
+ergon
+```
+
+Headless mode runs just the server:
+
+```bash
+ergon --serve
+```
+
+The configuration TUI has separate tabs for:
+- upstream endpoint settings
+- agent definitions
+- workflow definitions
+
+The UI uses standard navigation:
+- `Tab` / `Shift+Tab` to move focus
+- arrow keys inside lists, tabs, and editors
+
+## Local workspace
+
+The first TUI launch creates a local workspace under:
+
+```text
+~/.config/ergon/
+```
+
+That workspace contains:
+- `config.json`
+- `definitions/agents/*.md`
+- `definitions/workflows/*.md`
+
+The upstream API key may be left blank. In that case, ergon uses `not-needed` for the upstream client.
+
+You can override the defaults if needed:
+- `--app-dir /path/to/workspace`
+- `--definitions-dir /path/to/definitions`
+- `--upstream-base-url http://localhost:8080/v1`
+- `--upstream-api-key your-key`
+- `--host 127.0.0.1`
+- `--port 4000`
 
 ## Development checks
 
@@ -46,6 +83,7 @@ Available commands:
 - `.venv/bin/ruff check .`
 - `.venv/bin/mypy`
 - `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+- `./scripts/check-real-e2e`
 
 ## Real model E2E
 

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.continuation import ContinuationState
 from ergon_studio.proxy.grouped_workflow_executor import ProxyGroupedWorkflowExecutor
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -236,6 +237,58 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_next_stage_receives_parallel_attempts_as_comparison_candidates(
+        self,
+    ) -> None:
+        streamed_prompts: list[str] = []
+
+        async def _stream_text_agent(**kwargs):
+            streamed_prompts.append(kwargs["prompt"])
+            yield "Selected best option"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Pick the best one"),),
+        )
+        state = ProxyTurnState()
+
+        [event async for event in executor.execute(
+            request=request,
+            definition=_best_of_n_review_definition(),
+            goal="Pick the best one",
+            state=state,
+            continuation=ContinuationState(
+                mode="workflow",
+                workflow_id="best-of-n",
+                workflow_specialists=("coder", "reviewer"),
+                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                last_stage_parallel_attempts=True,
+                step_index=1,
+                agent_index=0,
+                agent_id="reviewer",
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+            ),
+        )]
+
+        reviewer_prompt = streamed_prompts[0]
+        self.assertIn("Alternative attempts from the previous stage", reviewer_prompt)
+        self.assertIn("coder[1]: Idea A", reviewer_prompt)
+        self.assertIn("coder[2]: Idea B", reviewer_prompt)
+        self.assertIn("Treat these as competing options", reviewer_prompt)
+
 
 def _definition() -> DefinitionDocument:
     return DefinitionDocument(
@@ -259,6 +312,20 @@ def _best_of_n_definition() -> DefinitionDocument:
             "id": "best-of-n",
             "orchestration": "grouped",
             "step_groups": [["coder", "coder", "coder"]],
+        },
+        body="## Purpose\nCompare attempts.",
+        sections={"Purpose": "Compare attempts."},
+    )
+
+
+def _best_of_n_review_definition() -> DefinitionDocument:
+    return DefinitionDocument(
+        id="best-of-n",
+        path=Path("best-of-n.md"),
+        metadata={
+            "id": "best-of-n",
+            "orchestration": "grouped",
+            "step_groups": [["coder", "coder"], ["reviewer"]],
         },
         body="## Purpose\nCompare attempts.",
         sections={"Purpose": "Compare attempts."},

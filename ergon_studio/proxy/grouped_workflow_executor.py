@@ -88,6 +88,16 @@ class ProxyGroupedWorkflowExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
+        last_stage_outputs = (
+            list(continuation.last_stage_outputs)
+            if continuation is not None
+            else []
+        )
+        last_stage_parallel_attempts = (
+            continuation.last_stage_parallel_attempts
+            if continuation is not None
+            else False
+        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -132,6 +142,8 @@ class ProxyGroupedWorkflowExecutor:
                         stage_outputs=stage_outputs,
                         fallback=stage_entry_brief,
                     )
+                    last_stage_outputs = list(stage_outputs)
+                    last_stage_parallel_attempts = True
                     if result_sink is not None:
                         result_sink(
                             ProxyMoveResult(
@@ -146,6 +158,10 @@ class ProxyGroupedWorkflowExecutor:
                                     current_brief=current_brief,
                                     loop_state=loop_state,
                                     workflow_outputs=workflow_outputs,
+                                    last_stage_outputs=last_stage_outputs,
+                                    last_stage_parallel_attempts=(
+                                        last_stage_parallel_attempts
+                                    ),
                                 ),
                             )
                         )
@@ -169,6 +185,11 @@ class ProxyGroupedWorkflowExecutor:
                     ),
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workflow_outputs),
+                    comparison_candidates=(
+                        tuple(last_stage_outputs)
+                        if last_stage_parallel_attempts
+                        else ()
+                    ),
                     move_rationale=(
                         loop_state.current_move_rationale
                         if loop_state is not None
@@ -210,6 +231,10 @@ class ProxyGroupedWorkflowExecutor:
                             mode="workflow",
                             workflow_id=definition.id,
                             workflow_specialists=staffed_specialists,
+                            last_stage_outputs=tuple(last_stage_outputs),
+                            last_stage_parallel_attempts=(
+                                last_stage_parallel_attempts
+                            ),
                             step_index=step_index,
                             agent_index=agent_index,
                             agent_id=agent_id,
@@ -235,6 +260,8 @@ class ProxyGroupedWorkflowExecutor:
                     stage_outputs=stage_outputs,
                     fallback=stage_entry_brief,
                 )
+            last_stage_outputs = list(stage_outputs)
+            last_stage_parallel_attempts = _is_parallel_attempt_group(group)
             if result_sink is not None:
                 result_sink(
                     ProxyMoveResult(
@@ -249,6 +276,10 @@ class ProxyGroupedWorkflowExecutor:
                             current_brief=current_brief,
                             loop_state=loop_state,
                             workflow_outputs=workflow_outputs,
+                            last_stage_outputs=last_stage_outputs,
+                            last_stage_parallel_attempts=(
+                                last_stage_parallel_attempts
+                            ),
                         ),
                     )
                 )
@@ -324,6 +355,7 @@ class ProxyGroupedWorkflowExecutor:
             current_brief=current_brief,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
+            comparison_candidates=(),
             move_rationale=(
                 loop_state.current_move_rationale if loop_state is not None else None
             ),
@@ -364,6 +396,8 @@ class ProxyGroupedWorkflowExecutor:
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
         workflow_outputs: list[str],
+        last_stage_outputs: list[str],
+        last_stage_parallel_attempts: bool,
     ) -> ContinuationState | None:
         next_step_index = step_index + 1
         if next_step_index >= len(step_groups):
@@ -373,6 +407,8 @@ class ProxyGroupedWorkflowExecutor:
             mode="workflow",
             workflow_id=definition.id,
             workflow_specialists=staffed_specialists,
+            last_stage_outputs=tuple(last_stage_outputs),
+            last_stage_parallel_attempts=last_stage_parallel_attempts,
             step_index=next_step_index,
             agent_index=0,
             agent_id=next_group[0],

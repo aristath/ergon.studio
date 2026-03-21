@@ -188,6 +188,7 @@ def workflow_step_prompt(
     current_brief: str,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
+    comparison_candidates: tuple[str, ...] = (),
     move_rationale: str | None = None,
     success_criteria: str | None = None,
 ) -> str:
@@ -228,6 +229,19 @@ def workflow_step_prompt(
                 "",
                 "Prior workflow outputs:",
                 *prior_outputs[-6:],
+            ]
+        )
+    if comparison_candidates:
+        lines.extend(
+            [
+                "",
+                "Alternative attempts from the previous stage:",
+                *comparison_candidates[-8:],
+                "",
+                (
+                    "Treat these as competing options to compare, select, or "
+                    "build on deliberately."
+                ),
             ]
         )
     if move_rationale:

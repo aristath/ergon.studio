@@ -17,6 +17,8 @@ class ContinuationState:
     agent_id: str
     workflow_id: str | None = None
     workflow_specialists: tuple[str, ...] = ()
+    last_stage_outputs: tuple[str, ...] = ()
+    last_stage_parallel_attempts: bool = False
     step_index: int | None = None
     agent_index: int | None = None
     request_text: str | None = None
@@ -47,6 +49,10 @@ def encode_continuation_tool_call(
         payload["w"] = state.workflow_id
     if state.workflow_specialists:
         payload["p"] = list(state.workflow_specialists)
+    if state.last_stage_outputs:
+        payload["ls"] = list(state.last_stage_outputs)
+    if state.last_stage_parallel_attempts:
+        payload["lp"] = True
     if state.step_index is not None:
         payload["s"] = state.step_index
     if state.agent_index is not None:
@@ -87,6 +93,8 @@ def decode_continuation_from_tool_call_id(
     agent_id = payload.get("a")
     workflow_id = payload.get("w")
     workflow_specialists = payload.get("p", [])
+    last_stage_outputs = payload.get("ls", [])
+    last_stage_parallel_attempts = payload.get("lp", False)
     step_index = payload.get("s")
     agent_index = payload.get("i")
     request_text = payload.get("r")
@@ -101,6 +109,12 @@ def decode_continuation_from_tool_call_id(
     if not isinstance(workflow_specialists, list) or not all(
         isinstance(item, str) for item in workflow_specialists
     ):
+        return None
+    if not isinstance(last_stage_outputs, list) or not all(
+        isinstance(item, str) for item in last_stage_outputs
+    ):
+        return None
+    if not isinstance(last_stage_parallel_attempts, bool):
         return None
     if step_index is not None and not isinstance(step_index, int):
         return None
@@ -125,6 +139,8 @@ def decode_continuation_from_tool_call_id(
         agent_id=agent_id,
         workflow_id=workflow_id,
         workflow_specialists=tuple(workflow_specialists),
+        last_stage_outputs=tuple(last_stage_outputs),
+        last_stage_parallel_attempts=last_stage_parallel_attempts,
         step_index=step_index,
         agent_index=agent_index,
         request_text=request_text,

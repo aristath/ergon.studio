@@ -7,7 +7,6 @@ from typing import Any
 from agent_framework import ResponseStream
 
 from ergon_studio.agent_factory import build_agent
-from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
     ContinuationState,
@@ -63,13 +62,6 @@ class ProxyOrchestrationCore:
             agent_builder=agent_builder,
         )
         self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
-        self._workflow_dispatcher = ProxyWorkflowDispatcher(
-            registry,
-            execute_grouped_workflow=self._execute_grouped_workflow,
-            execute_group_chat_workflow=self._execute_group_chat_workflow,
-            execute_magentic_workflow=self._execute_magentic_workflow,
-            execute_handoff_workflow=self._execute_handoff_workflow,
-        )
         self._workflow_support = ProxyWorkflowSupport(
             run_text_agent=self._agent_runner.run_text_agent,
         )
@@ -109,6 +101,13 @@ class ProxyOrchestrationCore:
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=self._workflow_support.emit_summary,
             select_handoff_target=self._workflow_support.select_handoff_target,
+        )
+        self._workflow_dispatcher = ProxyWorkflowDispatcher(
+            registry,
+            execute_grouped_workflow=self._grouped_workflow_executor.execute,
+            execute_group_chat_workflow=self._group_chat_workflow_executor.execute,
+            execute_magentic_workflow=self._magentic_workflow_executor.execute,
+            execute_handoff_workflow=self._handoff_workflow_executor.execute,
         )
 
     def stream_turn(
@@ -225,83 +224,3 @@ class ProxyOrchestrationCore:
             state=state,
         ):
             yield event
-
-    async def _execute_grouped_workflow(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        definition: DefinitionDocument,
-        goal: str,
-        state: ProxyTurnState,
-        continuation: ContinuationState | None = None,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._grouped_workflow_executor.execute(
-            request=request,
-            definition=definition,
-            goal=goal,
-            state=state,
-            continuation=continuation,
-            pending=pending,
-        ):
-            yield event
-
-    async def _execute_group_chat_workflow(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        definition: DefinitionDocument,
-        goal: str,
-        state: ProxyTurnState,
-        continuation: ContinuationState | None = None,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for summary_event in self._group_chat_workflow_executor.execute(
-            request=request,
-            definition=definition,
-            goal=goal,
-            state=state,
-            continuation=continuation,
-            pending=pending,
-        ):
-            yield summary_event
-
-    async def _execute_magentic_workflow(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        definition: DefinitionDocument,
-        goal: str,
-        state: ProxyTurnState,
-        continuation: ContinuationState | None = None,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for summary_event in self._magentic_workflow_executor.execute(
-            request=request,
-            definition=definition,
-            goal=goal,
-            state=state,
-            continuation=continuation,
-            pending=pending,
-        ):
-            yield summary_event
-
-    async def _execute_handoff_workflow(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        definition: DefinitionDocument,
-        goal: str,
-        state: ProxyTurnState,
-        continuation: ContinuationState | None = None,
-        pending: PendingContinuation | None = None,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for summary_event in self._handoff_workflow_executor.execute(
-            request=request,
-            definition=definition,
-            goal=goal,
-            state=state,
-            continuation=continuation,
-            pending=pending,
-        ):
-            yield summary_event

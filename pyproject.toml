@@ -2,6 +2,11 @@
 requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+include = [
+  "ergon_studio/default_definitions/**/*.md",
+]
+
 [project]
 name = "ergon-studio"
 version = "0.1.0"

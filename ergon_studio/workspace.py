@@ -1,104 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from ergon_studio.app_config import config_path, definitions_dir
 from ergon_studio.file_ops import atomic_write_text
-
-DEFAULT_AGENT_TEMPLATES: dict[str, str] = {
-    "orchestrator.md": """---
-id: orchestrator
-role: orchestrator
-temperature: 0
----
-
-## Identity
-You are the orchestration lead for an OpenAI-compatible proxy.
-
-## Responsibilities
-Choose the best next action for the host turn.
-Delegate when specialist work will improve the result.
-Summarize the final result clearly for the host.
-
-## Rules
-Use host tools when they are needed.
-Respect tool constraints.
-Do not expose hidden chain-of-thought.
-""",
-    "architect.md": """---
-id: architect
-role: architect
-temperature: 0
----
-
-## Identity
-You are the architecture specialist.
-
-## Responsibilities
-Create short, concrete plans for implementation work.
-""",
-    "coder.md": """---
-id: coder
-role: coder
-temperature: 0
----
-
-## Identity
-You are the coding specialist.
-
-## Responsibilities
-Produce concrete implementation work and code-oriented answers.
-""",
-    "reviewer.md": """---
-id: reviewer
-role: reviewer
-temperature: 0
----
-
-## Identity
-You are the review specialist.
-
-## Responsibilities
-Check work for correctness and clarity.
-""",
-}
-
-DEFAULT_WORKFLOW_TEMPLATES: dict[str, str] = {
-    "standard-build.md": """---
-id: standard-build
-name: Standard Build
-orchestration: sequential
-steps:
-  - architect
-  - coder
-  - reviewer
-selection_hints:
-  - build
-  - implementation
-delivery_candidate: true
-acceptance_mode: delivery
----
-
-## Purpose
-Run a straightforward architecture, implementation, and review flow.
-""",
-    "research-then-decide.md": """---
-id: research-then-decide
-name: Research Then Decide
-orchestration: sequential
-steps:
-  - architect
-  - reviewer
-selection_hints:
-  - research
-  - investigate
----
-
-## Purpose
-Gather information and then make a recommendation.
-""",
-}
 
 
 @dataclass(frozen=True)
@@ -115,8 +23,8 @@ def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     workflows_dir = definitions_dir(app_dir) / "workflows"
     agents_dir.mkdir(parents=True, exist_ok=True)
     workflows_dir.mkdir(parents=True, exist_ok=True)
-    _seed_templates(agents_dir, DEFAULT_AGENT_TEMPLATES)
-    _seed_templates(workflows_dir, DEFAULT_WORKFLOW_TEMPLATES)
+    _seed_templates(agents_dir, _bundled_templates("agents"))
+    _seed_templates(workflows_dir, _bundled_templates("workflows"))
     return WorkspacePaths(
         app_dir=app_dir,
         config_path=config_path(app_dir),
@@ -126,9 +34,27 @@ def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     )
 
 
-def _seed_templates(directory: Path, templates: dict[str, str]) -> None:
-    for filename, content in templates.items():
+def _seed_templates(
+    directory: Path,
+    templates: list[tuple[str, str]],
+) -> None:
+    for filename, content in templates:
         path = directory / filename
         if path.exists():
             continue
         atomic_write_text(path, content)
+
+
+def _bundled_templates(kind: str) -> list[tuple[str, str]]:
+    template_dir = _bundled_definition_root().joinpath(kind)
+    if not template_dir.is_dir():
+        raise ValueError(f"missing bundled definitions directory: {template_dir}")
+    return [
+        (entry.name, entry.read_text(encoding="utf-8"))
+        for entry in sorted(template_dir.iterdir(), key=lambda item: item.name)
+        if entry.is_file() and entry.name.endswith(".md")
+    ]
+
+
+def _bundled_definition_root() -> Traversable:
+    return files("ergon_studio").joinpath("default_definitions")

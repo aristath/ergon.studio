@@ -44,7 +44,6 @@ class RuntimeAgent:
 class AgentInvocation:
     agent: RuntimeAgent
     model: str
-    session_id: str
     prompt: str
     messages: tuple[dict[str, Any], ...]
     tools: tuple[ProxyFunctionTool, ...]
@@ -81,7 +80,6 @@ class ProxyAgentRunner:
         *,
         agent_id: str,
         prompt: str,
-        session_id: str,
         model_id_override: str,
         preamble: str = "",
         host_tools: tuple[ProxyFunctionTool, ...] = (),
@@ -93,7 +91,6 @@ class ProxyAgentRunner:
         invocation = self._build_invocation(
             agent_id=agent_id,
             prompt=_merge_preamble(preamble, prompt),
-            session_id=session_id,
             model_id_override=model_id_override,
             host_tools=host_tools,
             extra_tools=extra_tools,
@@ -214,7 +211,6 @@ class ProxyAgentRunner:
         *,
         agent_id: str,
         prompt: str,
-        session_id: str,
         model_id_override: str,
         host_tools: tuple[ProxyFunctionTool, ...],
         extra_tools: tuple[ProxyFunctionTool, ...],
@@ -249,7 +245,6 @@ class ProxyAgentRunner:
         return AgentInvocation(
             agent=agent,
             model=model_id_override,
-            session_id=session_id,
             prompt=prompt,
             messages=messages,
             tools=declared_tools,

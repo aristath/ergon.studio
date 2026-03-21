@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
-from uuid import uuid4
 
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
@@ -145,7 +144,6 @@ class ProxyOrchestrationCore:
                     request,
                     worklog=tuple(worklog),
                 ),
-                session_id=f"proxy-orchestrator-{uuid4().hex}",
                 model_id_override=request.model,
                 host_tools=request.tools,
                 extra_tools=internal_tools,

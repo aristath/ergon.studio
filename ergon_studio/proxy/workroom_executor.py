@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from uuid import uuid4
 
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
@@ -146,9 +145,6 @@ class ProxyWorkroomExecutor:
                     stream = self._stream_text_agent(
                         agent_id=participant.agent_id,
                         prompt=prompt,
-                        session_id=(
-                            f"proxy-workroom-{participant.label}-{uuid4().hex}"
-                        ),
                         model_id_override=request.model,
                         host_tools=request.tools,
                         extra_tools=build_workroom_internal_tools(),
@@ -292,7 +288,6 @@ class ProxyWorkroomExecutor:
         stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
-            session_id=f"proxy-workroom-{participant.label}-{uuid4().hex}",
             model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,

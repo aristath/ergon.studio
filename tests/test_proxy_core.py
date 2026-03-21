@@ -141,7 +141,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Final summary")
         self.assertEqual(result.mode, "finish")
 
-    async def test_stream_turn_handles_workflow_mode(self) -> None:
+    async def test_stream_turn_handles_workroom_mode(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
@@ -153,7 +153,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
-                        "Workflow final summary",
+                        "Workroom final summary",
                     ],
                     "architect": ["Plan"],
                     "coder": ["Built"],
@@ -177,7 +177,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("workroom template standard-build", reasoning)
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Workflow final summary")
+        self.assertEqual(result.content, "Workroom final summary")
         self.assertEqual(result.mode, "finish")
 
     async def test_stream_turn_blocks_finish_until_required_review_exists(self) -> None:
@@ -234,7 +234,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Reviewed delivery")
         self.assertEqual(result.mode, "finish")
 
-    async def test_stream_turn_allows_finish_after_workflow_satisfies_review_gate(
+    async def test_stream_turn_allows_finish_after_workroom_satisfies_review_gate(
         self,
     ) -> None:
         registry = _advanced_workflow_registry()
@@ -267,7 +267,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"delivery_requirements":["review"]}'
                         ),
                         '{"action":"deliver"}',
-                        "Reviewed workflow delivery",
+                        "Reviewed workroom delivery",
                     ],
                     "architect": ["Plan the build"],
                     "coder": ["Implement the build"],
@@ -294,10 +294,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             reasoning,
         )
         self.assertIn("reviewer: Review", reasoning)
-        self.assertEqual(result.content, "Reviewed workflow delivery")
+        self.assertEqual(result.content, "Reviewed workroom delivery")
         self.assertEqual(result.mode, "finish")
 
-    async def test_stream_turn_workflow_can_staff_specific_specialists(self) -> None:
+    async def test_stream_turn_workroom_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
@@ -308,7 +308,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"assignment":"Build calculator","staffing":["coder"]}'
                         ),
                         '{"action":"deliver"}',
-                        "Workflow final summary",
+                        "Workroom final summary",
                     ],
                     "coder": ["Built"],
                 }
@@ -330,7 +330,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("architect:", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Workflow final summary")
+        self.assertEqual(result.content, "Workroom final summary")
 
     async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
         core = ProxyOrchestrationCore(
@@ -374,7 +374,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(continuation)
         self.assertEqual(continuation.mode, "act")
 
-    async def test_stream_turn_resumes_workflow_from_tool_result(self) -> None:
+    async def test_stream_turn_resumes_workroom_from_tool_result(self) -> None:
         first_core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
@@ -423,7 +423,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
-                        "Workflow final summary",
+                        "Workroom final summary",
                     ],
                 }
             ),
@@ -457,7 +457,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("continuing workroom standard-build with architect", reasoning)
         self.assertIn("architect: Architecture", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(resumed_result.content, "Workflow final summary")
+        self.assertEqual(resumed_result.content, "Workroom final summary")
         self.assertEqual(resumed_result.finish_reason, "stop")
 
     async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
@@ -501,7 +501,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("handling this turn directly", reasoning.lower())
         self.assertEqual(result.content, "Fresh reply")
 
-    async def test_workflow_continuation_keeps_remaining_agents_in_same_group(
+    async def test_workroom_continuation_keeps_remaining_agents_in_same_group(
         self,
     ) -> None:
         registry = _grouped_workflow_registry()
@@ -550,7 +550,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "reviewer": ["Reviewed result"],
-                    "orchestrator": ['{"action":"reply"}', "Workflow final summary"],
+                    "orchestrator": ['{"action":"reply"}', "Workroom final summary"],
                 }
             ),
         )
@@ -582,9 +582,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Architecture", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertIn("reviewer: Reviewed", reasoning)
-        self.assertEqual(resumed_result.content, "Workflow final summary")
+        self.assertEqual(resumed_result.content, "Workroom final summary")
 
-    async def test_group_chat_workflow_uses_selection_sequence(self) -> None:
+    async def test_group_chat_workroom_uses_selection_sequence(self) -> None:
         registry = _advanced_workflow_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -626,7 +626,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Decision-ready", reasoning)
         self.assertEqual(result.content, "Debate final summary")
 
-    async def test_magentic_workflow_uses_manager_agent_selection(self) -> None:
+    async def test_magentic_workroom_uses_manager_agent_selection(self) -> None:
         registry = _advanced_workflow_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -668,7 +668,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Review", reasoning)
         self.assertEqual(result.content, "Dynamic final summary")
 
-    async def test_handoff_workflow_uses_specialist_handoff_selection(self) -> None:
+    async def test_handoff_workroom_uses_specialist_handoff_selection(self) -> None:
         registry = _advanced_workflow_registry()
         core = ProxyOrchestrationCore(
             registry,

@@ -497,7 +497,7 @@ def workroom_summary_prompt(
             "Goal:",
             goal or "(none)",
             "",
-            "Workflow outputs:",
+            "Workroom outputs:",
             *(outputs or ("(none)",)),
             "",
             "Write the final host-facing answer.",

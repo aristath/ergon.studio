@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState
-from ergon_studio.proxy.grouped_workflow_executor import ProxyGroupedWorkflowExecutor
+from ergon_studio.proxy.grouped_workroom_executor import ProxyGroupedWorkroomExecutor
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyInputMessage,
@@ -17,7 +17,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 
-class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
+class GroupedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_steps_and_emits_summary(self) -> None:
         streamed_agents: list[str] = []
         summary_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -29,16 +29,16 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -77,16 +77,16 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -136,16 +136,16 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -195,16 +195,16 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -252,16 +252,16 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -309,13 +309,13 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -361,13 +361,13 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             yield ProxyContentDeltaEvent("Final summary")
 
-        executor = ProxyGroupedWorkflowExecutor(
+        executor = ProxyGroupedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",

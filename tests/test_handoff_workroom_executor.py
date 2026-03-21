@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.handoff_workflow_executor import (
-    ProxyHandoffWorkflowExecutor,
+from ergon_studio.proxy.handoff_workroom_executor import (
+    ProxyHandoffWorkroomExecutor,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -16,7 +16,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 
-class HandoffWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
+class HandoffWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_hands_off_until_finalizer(self) -> None:
         streamed_agents: list[str] = []
         handoff_calls: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
@@ -29,7 +29,7 @@ class HandoffWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
@@ -45,10 +45,10 @@ class HandoffWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             )
             return "coder"
 
-        executor = ProxyHandoffWorkflowExecutor(
+        executor = ProxyHandoffWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
             select_handoff_target=_select_handoff_target,
         )
         request = ProxyTurnRequest(
@@ -94,7 +94,7 @@ class HandoffWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
@@ -114,10 +114,10 @@ class HandoffWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
                 else "coder"
             )
 
-        executor = ProxyHandoffWorkflowExecutor(
+        executor = ProxyHandoffWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
             select_handoff_target=_select_handoff_target,
         )
         request = ProxyTurnRequest(

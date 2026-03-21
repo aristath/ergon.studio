@@ -18,13 +18,13 @@ from ergon_studio.proxy.workroom_request_executor import (
 )
 
 
-class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
+class WorkroomRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_uses_plan_goal_or_latest_user_text(self) -> None:
         calls: list[dict[str, object]] = []
 
         async def _execute_workroom(**kwargs):
             calls.append(kwargs)
-            yield ProxyContentDeltaEvent("workflow")
+            yield ProxyContentDeltaEvent("workroom")
 
         async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
@@ -32,7 +32,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -60,14 +60,14 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(first_event, ProxyContentDeltaEvent)
         if not isinstance(first_event, ProxyContentDeltaEvent):
             raise AssertionError("expected ProxyContentDeltaEvent")
-        self.assertEqual(first_event.delta, "workflow")
+        self.assertEqual(first_event.delta, "workroom")
 
     async def test_execute_workroom_forwards_staffed_specialists(self) -> None:
         calls: list[dict[str, object]] = []
 
         async def _execute_workroom(**kwargs):
             calls.append(kwargs)
-            yield ProxyContentDeltaEvent("workflow")
+            yield ProxyContentDeltaEvent("workroom")
 
         async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
@@ -75,7 +75,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -105,7 +105,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         async def _execute_workroom(**kwargs):
             calls.append(kwargs)
-            yield ProxyContentDeltaEvent("workflow")
+            yield ProxyContentDeltaEvent("workroom")
 
         async def _execute_workroom_continuation(**kwargs):
             raise AssertionError("not expected")
@@ -113,7 +113,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -154,7 +154,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -205,7 +205,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -258,7 +258,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -310,7 +310,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_execute_workroom,
                     execute_workroom_continuation=_execute_workroom_continuation,
                 ),
@@ -352,7 +352,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyWorkroomRequestExecutor(
             cast(
                 ProxyWorkroomDispatcher,
-                _FakeWorkflowDispatcher(
+                _FakeWorkroomDispatcher(
                     execute_workroom=_unexpected_workroom,
                     execute_workroom_continuation=_unexpected_workroom,
                 ),
@@ -380,7 +380,7 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No active workroom", first_event.delta)
 
 
-class _FakeWorkflowDispatcher:
+class _FakeWorkroomDispatcher:
     def __init__(
         self,
         *,

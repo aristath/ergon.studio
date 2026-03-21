@@ -13,7 +13,7 @@ from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_support import ProxyWorkroomSupport
 
 
-class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
+class WorkroomSupportTests(unittest.IsolatedAsyncioTestCase):
     async def test_emit_summary_uses_orchestrator_summary_and_sets_content(
         self,
     ) -> None:
@@ -21,7 +21,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
 
         async def _run_text_agent(**kwargs):
             captured.update(kwargs)
-            return "Final workflow answer"
+            return "Final workroom answer"
 
         support = ProxyWorkroomSupport(run_text_agent=_run_text_agent)
         request = ProxyTurnRequest(
@@ -44,7 +44,7 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "qwen")
-        self.assertEqual(state.content, "Final workflow answer")
+        self.assertEqual(state.content, "Final workroom answer")
         self.assertEqual(len(events), 1)
         self.assertIsInstance(events[0], ProxyContentDeltaEvent)
 

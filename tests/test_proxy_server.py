@@ -589,7 +589,7 @@ class ProxyServerTests(unittest.TestCase):
                         ),
                         '{"action":"continue_workroom","target":"current"}',
                         '{"action":"deliver"}',
-                        "Workflow final summary",
+                        "Workroom final summary",
                     ],
                     "architect": [
                         {
@@ -676,7 +676,7 @@ class ProxyServerTests(unittest.TestCase):
 
         self.assertEqual(second_payload["choices"][0]["finish_reason"], "stop")
         self.assertEqual(
-            second_payload["choices"][0]["message"]["content"], "Workflow final summary"
+            second_payload["choices"][0]["message"]["content"], "Workroom final summary"
         )
 
     def test_chat_completions_streams_tool_calls_with_separate_finish_chunk(

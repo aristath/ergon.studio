@@ -15,7 +15,7 @@ from ergon_studio.proxy.workroom_metadata import (
 )
 
 
-class ProxyWorkflowMetadataTests(unittest.TestCase):
+class ProxyWorkroomMetadataTests(unittest.TestCase):
     def test_workroom_metadata_helpers_normalize_values(self) -> None:
         definition = DefinitionDocument(
             id="specialist-handoff",

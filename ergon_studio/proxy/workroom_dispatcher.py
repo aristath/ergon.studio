@@ -30,7 +30,7 @@ ProxyEvent = (
     | ProxyFinishEvent
 )
 
-WorkflowHandler = Callable[
+WorkroomHandler = Callable[
     ...,
     AsyncIterator[ProxyEvent],
 ]
@@ -41,16 +41,16 @@ class ProxyWorkroomDispatcher:
         self,
         registry: RuntimeRegistry,
         *,
-        execute_grouped_workflow: WorkflowHandler,
-        execute_group_chat_workflow: WorkflowHandler,
-        execute_magentic_workflow: WorkflowHandler,
-        execute_handoff_workflow: WorkflowHandler,
+        execute_grouped_workroom: WorkroomHandler,
+        execute_group_chat_workroom: WorkroomHandler,
+        execute_magentic_workroom: WorkroomHandler,
+        execute_handoff_workroom: WorkroomHandler,
     ) -> None:
         self.registry = registry
-        self._execute_grouped_workflow = execute_grouped_workflow
-        self._execute_group_chat_workflow = execute_group_chat_workflow
-        self._execute_magentic_workflow = execute_magentic_workflow
-        self._execute_handoff_workflow = execute_handoff_workflow
+        self._execute_grouped_workroom = execute_grouped_workroom
+        self._execute_group_chat_workroom = execute_group_chat_workroom
+        self._execute_magentic_workroom = execute_magentic_workroom
+        self._execute_handoff_workroom = execute_handoff_workroom
 
     async def execute_workroom(
         self,
@@ -76,13 +76,13 @@ class ProxyWorkroomDispatcher:
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
-        intro = _workflow_notice(
+        intro = _workroom_notice(
             base=_workroom_intro(definition),
             loop_state=loop_state,
         )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
-        async for event in self._dispatch_workflow(
+        async for event in self._dispatch_workroom(
             request=request,
             definition=definition,
             goal=goal,
@@ -119,7 +119,7 @@ class ProxyWorkroomDispatcher:
             yield ProxyContentDeltaEvent(error_text)
             return
         agent_name = continuation.agent_id or "(unknown)"
-        intro = _workflow_notice(
+        intro = _workroom_notice(
             base=(
                 f"Orchestrator: continuing workroom {definition.id} with "
                 f"{agent_name}."
@@ -128,7 +128,7 @@ class ProxyWorkroomDispatcher:
         )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
-        async for event in self._dispatch_workflow(
+        async for event in self._dispatch_workroom(
             request=request,
             definition=definition,
             goal=continuation.goal or request.latest_user_text() or "",
@@ -143,7 +143,7 @@ class ProxyWorkroomDispatcher:
         ):
             yield event
 
-    async def _dispatch_workflow(
+    async def _dispatch_workroom(
         self,
         *,
         request: ProxyTurnRequest,
@@ -160,7 +160,7 @@ class ProxyWorkroomDispatcher:
     ) -> AsyncIterator[ProxyEvent]:
         orchestration = workroom_orchestration_for_definition(definition)
         if orchestration in {"sequential", "grouped", "concurrent"}:
-            async for event in self._execute_grouped_workflow(
+            async for event in self._execute_grouped_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,
@@ -176,7 +176,7 @@ class ProxyWorkroomDispatcher:
                 yield event
             return
         if orchestration == "group_chat":
-            async for event in self._execute_group_chat_workflow(
+            async for event in self._execute_group_chat_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,
@@ -192,7 +192,7 @@ class ProxyWorkroomDispatcher:
                 yield event
             return
         if orchestration == "magentic":
-            async for event in self._execute_magentic_workflow(
+            async for event in self._execute_magentic_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,
@@ -208,7 +208,7 @@ class ProxyWorkroomDispatcher:
                 yield event
             return
         if orchestration == "handoff":
-            async for event in self._execute_handoff_workflow(
+            async for event in self._execute_handoff_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,
@@ -242,7 +242,7 @@ class ProxyWorkroomDispatcher:
         return self.registry.workflow_definitions.get(workroom_id or "")
 
 
-def _workflow_notice(
+def _workroom_notice(
     *,
     base: str,
     loop_state: ProxyDecisionLoopState | None,

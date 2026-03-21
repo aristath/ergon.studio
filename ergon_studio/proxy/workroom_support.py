@@ -57,7 +57,7 @@ class ProxyWorkroomSupport:
                 outputs=workroom_outputs,
             ),
             preamble=summary_instructions(),
-            session_id=f"proxy-workflow-summary-{uuid4().hex}",
+            session_id=f"proxy-workroom-summary-{uuid4().hex}",
             model_id_override=request.model,
         )
         if not final_text:
@@ -90,7 +90,7 @@ class ProxyWorkroomSupport:
                 move_rationale=move_rationale,
             ),
             preamble=workroom_manager_instructions(participants),
-            session_id=f"proxy-workflow-manager-{uuid4().hex}",
+            session_id=f"proxy-workroom-manager-{uuid4().hex}",
             model_id_override=model_id_override,
         )
         return parse_agent_selection(raw, participants=participants)

@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.magentic_workflow_executor import (
-    ProxyMagenticWorkflowExecutor,
+from ergon_studio.proxy.magentic_workroom_executor import (
+    ProxyMagenticWorkroomExecutor,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -16,7 +16,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 
-class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
+class MagenticWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_selects_agents_and_emits_summary(self) -> None:
         streamed_agents: list[str] = []
         manager_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -29,7 +29,7 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
@@ -39,10 +39,10 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             manager_calls.append((kwargs["current_brief"], kwargs["prior_outputs"]))
             return "architect" if not kwargs["prior_outputs"] else "coder"
 
-        executor = ProxyMagenticWorkflowExecutor(
+        executor = ProxyMagenticWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
             select_manager_agent=_select_manager_agent,
         )
         request = ProxyTurnRequest(
@@ -88,7 +88,7 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
@@ -98,10 +98,10 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             manager_calls.append(kwargs["participants"])
             return "coder[2]"
 
-        executor = ProxyMagenticWorkflowExecutor(
+        executor = ProxyMagenticWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
             select_manager_agent=_select_manager_agent,
         )
         request = ProxyTurnRequest(

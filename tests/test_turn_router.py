@@ -29,25 +29,25 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append("finish")
             yield ProxyContentDeltaEvent("finish")
 
-        async def _workflow(**_kwargs):
-            calls.append("workflow")
-            yield ProxyContentDeltaEvent("workflow")
+        async def _workroom(**_kwargs):
+            calls.append("workroom")
+            yield ProxyContentDeltaEvent("workroom")
 
         async def _active_workroom(**_kwargs):
             calls.append("active_workroom")
             yield ProxyContentDeltaEvent("active_workroom")
 
-        async def _workflow_continuation(**_kwargs):
-            calls.append("workflow_continuation")
-            yield ProxyContentDeltaEvent("workflow_continuation")
+        async def _workroom_continuation(**_kwargs):
+            calls.append("workroom_continuation")
+            yield ProxyContentDeltaEvent("workroom_continuation")
 
         router = ProxyTurnRouter(
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workroom=_workflow,
+            execute_workroom=_workroom,
             execute_active_workroom=_active_workroom,
-            execute_workroom_continuation=_workflow_continuation,
+            execute_workroom_continuation=_workroom_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -85,7 +85,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append({"kind": "finish", **kwargs})
             yield ProxyContentDeltaEvent("finish")
 
-        async def _workflow(**kwargs):
+        async def _workroom(**kwargs):
             calls.append({"kind": "workroom", **kwargs})
             yield ProxyContentDeltaEvent("workroom")
 
@@ -93,17 +93,17 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append({"kind": "active_workroom", **kwargs})
             yield ProxyContentDeltaEvent("active_workroom")
 
-        async def _workflow_continuation(**kwargs):
-            calls.append({"kind": "workflow_continuation", **kwargs})
-            yield ProxyContentDeltaEvent("workflow_continuation")
+        async def _workroom_continuation(**kwargs):
+            calls.append({"kind": "workroom_continuation", **kwargs})
+            yield ProxyContentDeltaEvent("workroom_continuation")
 
         router = ProxyTurnRouter(
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workroom=_workflow,
+            execute_workroom=_workroom,
             execute_active_workroom=_active_workroom,
-            execute_workroom_continuation=_workflow_continuation,
+            execute_workroom_continuation=_workroom_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -158,7 +158,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append({"kind": "finish", **kwargs})
             yield ProxyContentDeltaEvent("finish")
 
-        async def _workflow(**kwargs):
+        async def _workroom(**kwargs):
             calls.append({"kind": "workroom", **kwargs})
             yield ProxyContentDeltaEvent("workroom")
 
@@ -166,17 +166,17 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append({"kind": "active_workroom", **kwargs})
             yield ProxyContentDeltaEvent("active_workroom")
 
-        async def _workflow_continuation(**kwargs):
-            calls.append({"kind": "workflow_continuation", **kwargs})
-            yield ProxyContentDeltaEvent("workflow_continuation")
+        async def _workroom_continuation(**kwargs):
+            calls.append({"kind": "workroom_continuation", **kwargs})
+            yield ProxyContentDeltaEvent("workroom_continuation")
 
         router = ProxyTurnRouter(
             execute_direct=_direct,
             execute_finish=_finish,
             execute_delegation=_delegate,
-            execute_workroom=_workflow,
+            execute_workroom=_workroom,
             execute_active_workroom=_active_workroom,
-            execute_workroom_continuation=_workflow_continuation,
+            execute_workroom_continuation=_workroom_continuation,
         )
         request = ProxyTurnRequest(
             model="qwen",

@@ -44,7 +44,7 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan.mode, "finish")
         self.assertEqual(plan.rationale, "The result is ready to hand back")
 
-    async def test_plan_turn_parses_valid_workflow_plan(self) -> None:
+    async def test_plan_turn_parses_valid_workroom_plan(self) -> None:
         async def _run_text_agent(**_kwargs):
             return (
                 '{"action":"open_workroom","target":"standard-build",'

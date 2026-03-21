@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.group_chat_workflow_executor import (
-    ProxyGroupChatWorkflowExecutor,
+from ergon_studio.proxy.group_chat_workroom_executor import (
+    ProxyGroupChatWorkroomExecutor,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -16,7 +16,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 
-class GroupChatWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
+class GroupChatWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_sequence_and_emits_summary(self) -> None:
         streamed_agents: list[str] = []
         summary_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -28,16 +28,16 @@ class GroupChatWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Shared result")
 
-        executor = ProxyGroupChatWorkflowExecutor(
+        executor = ProxyGroupChatWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -80,16 +80,16 @@ class GroupChatWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workflow_summary(**kwargs):
+        async def _emit_workroom_summary(**kwargs):
             summary_calls.append(
                 (kwargs["current_brief"], kwargs["workroom_outputs"])
             )
             yield ProxyContentDeltaEvent("Shared result")
 
-        executor = ProxyGroupChatWorkflowExecutor(
+        executor = ProxyGroupChatWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workflow_summary=_emit_workflow_summary,
+            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",

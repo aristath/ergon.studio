@@ -46,17 +46,17 @@ class _AgentAttemptResult:
     response: Any
 
 
-class ProxyGroupedWorkflowExecutor:
+class ProxyGroupedWorkroomExecutor:
     def __init__(
         self,
         *,
         stream_text_agent: Callable[..., Any],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
-        emit_workflow_summary: Callable[..., AsyncIterator[ProxyEvent]],
+        emit_workroom_summary: Callable[..., AsyncIterator[ProxyEvent]],
     ) -> None:
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
-        self._emit_workflow_summary = emit_workflow_summary
+        self._emit_workroom_summary = emit_workroom_summary
 
     async def execute(
         self,
@@ -248,7 +248,7 @@ class ProxyGroupedWorkflowExecutor:
                 async for delta in self._stream_text_agent(
                     agent_id=agent_id,
                     prompt=prompt,
-                    session_id=f"proxy-workflow-{definition.id}-{agent_id}-{uuid4().hex}",
+                    session_id=f"proxy-workroom-{definition.id}-{agent_id}-{uuid4().hex}",
                     model_id_override=request.model,
                     host_tools=request.tools,
                     tool_choice=request.tool_choice,
@@ -354,7 +354,7 @@ class ProxyGroupedWorkflowExecutor:
                     )
                 )
                 return
-        async for summary_event in self._emit_workflow_summary(
+        async for summary_event in self._emit_workroom_summary(
             request=request,
             definition=definition,
             goal=goal,
@@ -439,7 +439,7 @@ class ProxyGroupedWorkflowExecutor:
         async for delta in self._stream_text_agent(
             agent_id=agent_id,
             prompt=prompt,
-            session_id=f"proxy-workflow-{definition.id}-{agent_label}-{uuid4().hex}",
+            session_id=f"proxy-workroom-{definition.id}-{agent_label}-{uuid4().hex}",
             model_id_override=request.model,
             host_tools=request.tools,
             tool_choice=request.tool_choice,

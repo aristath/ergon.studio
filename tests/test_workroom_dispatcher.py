@@ -16,14 +16,14 @@ from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
 
-class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_workflow_reports_unknown_workflow(self) -> None:
+class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execute_workroom_reports_unknown_workroom(self) -> None:
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workflow=_empty_handler,
-            execute_group_chat_workflow=_empty_handler,
-            execute_magentic_workflow=_empty_handler,
-            execute_handoff_workflow=_empty_handler,
+            execute_grouped_workroom=_empty_handler,
+            execute_group_chat_workroom=_empty_handler,
+            execute_magentic_workroom=_empty_handler,
+            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -48,7 +48,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
             [ProxyContentDeltaEvent],
         )
 
-    async def test_execute_workflow_dispatches_grouped_handler(self) -> None:
+    async def test_execute_workroom_dispatches_grouped_handler(self) -> None:
         calls: list[tuple[str, str]] = []
 
         async def _grouped_handler(**kwargs):
@@ -57,10 +57,10 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workflow=_grouped_handler,
-            execute_group_chat_workflow=_empty_handler,
-            execute_magentic_workflow=_empty_handler,
-            execute_handoff_workflow=_empty_handler,
+            execute_grouped_workroom=_grouped_handler,
+            execute_group_chat_workroom=_empty_handler,
+            execute_magentic_workroom=_empty_handler,
+            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -86,7 +86,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
             state.reasoning.lower(),
         )
 
-    async def test_execute_workflow_builds_ad_hoc_workroom_definition(self) -> None:
+    async def test_execute_workroom_builds_ad_hoc_workroom_definition(self) -> None:
         calls: list[tuple[str, str, tuple[str, ...]]] = []
 
         async def _group_chat_handler(**kwargs):
@@ -101,10 +101,10 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workflow=_empty_handler,
-            execute_group_chat_workflow=_group_chat_handler,
-            execute_magentic_workflow=_empty_handler,
-            execute_handoff_workflow=_empty_handler,
+            execute_grouped_workroom=_empty_handler,
+            execute_group_chat_workroom=_group_chat_handler,
+            execute_magentic_workroom=_empty_handler,
+            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -131,7 +131,7 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[1], ProxyContentDeltaEvent)
         self.assertIn("opening an ad hoc workroom", state.reasoning.lower())
 
-    async def test_execute_workflow_builds_parallel_attempt_ad_hoc_workroom(
+    async def test_execute_workroom_builds_parallel_attempt_ad_hoc_workroom(
         self,
     ) -> None:
         calls: list[tuple[str, str, tuple[str, ...], str]] = []
@@ -149,10 +149,10 @@ class WorkflowDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workflow=_grouped_handler,
-            execute_group_chat_workflow=_empty_handler,
-            execute_magentic_workflow=_empty_handler,
-            execute_handoff_workflow=_empty_handler,
+            execute_grouped_workroom=_grouped_handler,
+            execute_group_chat_workroom=_empty_handler,
+            execute_magentic_workroom=_empty_handler,
+            execute_handoff_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",

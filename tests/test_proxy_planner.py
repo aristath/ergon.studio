@@ -185,7 +185,7 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.mode, "delegate")
         self.assertIsNone(plan.agent_id)
 
-    def test_parse_turn_plan_resolves_workflow_by_name(self) -> None:
+    def test_parse_turn_plan_resolves_workroom_by_name(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
@@ -195,7 +195,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.workroom_id, "standard-build")
 
-    def test_parse_turn_plan_resolves_workflow_by_selection_hint(self) -> None:
+    def test_parse_turn_plan_resolves_workroom_by_selection_hint(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(

@@ -27,10 +27,7 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_message_workroom_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
-from ergon_studio.proxy.turn_state import (
-    ProxyDecisionLoopState,
-    ProxyTurnState,
-)
+from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
@@ -77,7 +74,7 @@ class ProxyOrchestrationCore:
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
                 pending = latest_pending_continuation(request.messages)
-                loop_state = self._initial_loop_state(pending=pending)
+                worklog = list(pending.state.worklog if pending is not None else ())
                 if pending is not None:
                     if pending.state.workroom_name is not None:
                         result_holder: dict[str, object] = {}
@@ -85,27 +82,25 @@ class ProxyOrchestrationCore:
                             request=request,
                             pending=pending,
                             state=state,
-                            loop_state=loop_state,
+                            worklog=tuple(worklog),
                             result_holder=result_holder,
                         ):
                             yield event
                         if state.finish_reason == "tool_calls":
                             return
                         if result_holder:
-                            loop_state.extend_worklog(
-                                worklog_lines=_result(result_holder)
-                            )
+                            worklog.extend(_result(result_holder))
                         async for event in self._run_orchestrator_loop(
                             request=request,
                             state=state,
-                            loop_state=loop_state,
+                            worklog=worklog,
                         ):
                             yield event
                         return
                     async for event in self._run_orchestrator_loop(
                         request=request,
                         state=state,
-                        loop_state=loop_state,
+                        worklog=worklog,
                         pending_orchestrator=pending,
                     ):
                         yield event
@@ -114,7 +109,7 @@ class ProxyOrchestrationCore:
                 async for event in self._run_orchestrator_loop(
                     request=request,
                     state=state,
-                    loop_state=loop_state,
+                    worklog=worklog,
                 ):
                     yield event
             except ValueError as exc:
@@ -144,7 +139,7 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
-        loop_state: ProxyDecisionLoopState,
+        worklog: list[str],
         pending_orchestrator: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
@@ -155,7 +150,7 @@ class ProxyOrchestrationCore:
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
-                    worklog=loop_state.worklog,
+                    worklog=tuple(worklog),
                 ),
                 session_id=f"proxy-orchestrator-{uuid4().hex}",
                 model_id_override=request.model,
@@ -195,7 +190,7 @@ class ProxyOrchestrationCore:
                 for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
                     request=request,
-                    continuation=_orchestrator_continuation_state(loop_state),
+                    continuation=_orchestrator_continuation_state(tuple(worklog)),
                     state=state,
                 ):
                     yield tool_event
@@ -210,14 +205,14 @@ class ProxyOrchestrationCore:
                     request=request,
                     action=action,
                     state=state,
-                    loop_state=loop_state,
+                    worklog=tuple(worklog),
                     result_holder=result_holder,
                 ):
                     yield internal_event
                 if state.finish_reason == "tool_calls":
                     return
                 if result_holder:
-                    loop_state.extend_worklog(worklog_lines=_result(result_holder))
+                    worklog.extend(_result(result_holder))
                 else:
                     return
                 continue
@@ -235,7 +230,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         action: Any,
         state: ProxyTurnState,
-        loop_state: ProxyDecisionLoopState,
+        worklog: tuple[str, ...],
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
         if isinstance(action, MessageWorkroomAction):
@@ -253,7 +248,7 @@ class ProxyOrchestrationCore:
                 workroom_message=action.message,
                 state=state,
                 result_sink=partial(_store_result, result_holder),
-                loop_state=loop_state,
+                worklog=worklog,
             ):
                 yield event
             return
@@ -265,7 +260,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         pending: PendingContinuation,
         state: ProxyTurnState,
-        loop_state: ProxyDecisionLoopState,
+        worklog: tuple[str, ...],
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
@@ -277,7 +272,7 @@ class ProxyOrchestrationCore:
                 pending=pending,
                 state=state,
                 result_sink=partial(_store_result, result_holder),
-                loop_state=loop_state,
+                worklog=worklog,
             ):
                 yield event
             return
@@ -294,7 +289,7 @@ class ProxyOrchestrationCore:
         result_sink: Any,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        loop_state: ProxyDecisionLoopState | None = None,
+        worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
         if continuation is not None:
             workroom_name = continuation.workroom_name or "ad hoc"
@@ -329,28 +324,17 @@ class ProxyOrchestrationCore:
             continuation=continuation,
             pending=pending,
             result_sink=result_sink,
-            worklog=loop_state.worklog if loop_state is not None else (),
+            worklog=worklog,
         ):
             yield event
 
-    def _initial_loop_state(
-        self,
-        *,
-        pending: PendingContinuation | None,
-    ) -> ProxyDecisionLoopState:
-        if pending is None:
-            return ProxyDecisionLoopState()
-        return ProxyDecisionLoopState(
-            worklog=pending.state.worklog,
-        )
-
 
 def _orchestrator_continuation_state(
-    loop_state: ProxyDecisionLoopState,
+    worklog: tuple[str, ...],
 ) -> ContinuationState:
     return ContinuationState(
         agent_id="orchestrator",
-        worklog=loop_state.worklog,
+        worklog=worklog,
     )
 
 

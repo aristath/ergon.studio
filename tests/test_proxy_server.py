@@ -1074,7 +1074,7 @@ class _FakeCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workflow_definitions": {},
+                "workroom_definitions": {},
             },
         )()
 
@@ -1114,7 +1114,7 @@ class _FailingCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workflow_definitions": {},
+                "workroom_definitions": {},
             },
         )()
 
@@ -1146,7 +1146,7 @@ class _LateFailingCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workflow_definitions": {},
+                "workroom_definitions": {},
             },
         )()
 
@@ -1238,7 +1238,7 @@ def _proxy_registry() -> RuntimeRegistry:
                 sections={"Identity": "Coder."},
             ),
         },
-        workflow_definitions={
+        workroom_definitions={
             "standard-build": DefinitionDocument(
                 id="standard-build",
                 path=Path("standard-build.md"),

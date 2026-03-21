@@ -238,7 +238,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         registry = _advanced_workflow_registry()
-        registry.workflow_definitions["reviewed-build"] = DefinitionDocument(
+        registry.workroom_definitions["reviewed-build"] = DefinitionDocument(
             id="reviewed-build",
             path=Path("reviewed-build.md"),
             metadata={
@@ -1037,7 +1037,7 @@ class _FakeRegistry:
                     sections={"Identity": "Coder."},
                 ),
             },
-            workflow_definitions={
+            workroom_definitions={
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=Path("standard-build.md"),
@@ -1104,7 +1104,7 @@ def _fake_registry():
 
 def _grouped_workflow_registry():
     registry = _FakeRegistry()
-    registry.workflow_definitions["grouped-build"] = DefinitionDocument(
+    registry.workroom_definitions["grouped-build"] = DefinitionDocument(
         id="grouped-build",
         path=Path("grouped-build.md"),
         metadata={
@@ -1132,7 +1132,7 @@ def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
                 sections={"Identity": "Lead engineer."},
             ),
         },
-        workflow_definitions={},
+        workroom_definitions={},
     )
 
 
@@ -1169,7 +1169,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 sections={"Identity": "Reviewer."},
             ),
         },
-        workflow_definitions={
+        workroom_definitions={
             "debate": DefinitionDocument(
                 id="debate",
                 path=Path("debate.md"),

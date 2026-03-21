@@ -239,7 +239,7 @@ class ProxyWorkroomDispatcher:
                 specialists=specialists,
                 specialist_counts=specialist_counts,
             )
-        return self.registry.workflow_definitions.get(workroom_id or "")
+        return self.registry.workroom_definitions.get(workroom_id or "")
 
 
 def _workroom_notice(

@@ -42,7 +42,7 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
                     sections={},
                 ),
             },
-            workflow_definitions={
+            workroom_definitions={
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=None,
@@ -64,4 +64,4 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
         payload = context.instructions[0][1]
         self.assertIn("Agent profile: orchestrator", payload)
         self.assertIn("Available specialists: coder(coder)", payload)
-        self.assertIn("Available workflows: standard-build(sequential)", payload)
+        self.assertIn("Available workrooms: standard-build(sequential)", payload)

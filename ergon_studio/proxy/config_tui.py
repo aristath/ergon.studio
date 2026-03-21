@@ -312,14 +312,14 @@ class ProxyConfigApp(App[None]):
 
     #endpoint-form,
     #agent-sidebar,
-    #workflow-sidebar,
+    #workroom-sidebar,
     #agent-editor-pane,
-    #workflow-editor-pane {
+    #workroom-editor-pane {
         padding: 1;
     }
 
     #agent-sidebar,
-    #workflow-sidebar {
+    #workroom-sidebar {
         width: 30;
     }
 
@@ -365,11 +365,11 @@ class ProxyConfigApp(App[None]):
                     directory=self.definitions_dir / "agents",
                     apply_mutation=self._apply_definition_mutation,
                 )
-            with TabPane("Workroom Templates", id="workflows-tab"):
+            with TabPane("Workroom Templates", id="workrooms-tab"):
                 yield DefinitionEditor(
                     title="Workroom Templates",
-                    definition_kind="workflow",
-                    directory=self.definitions_dir / "workflows",
+                    definition_kind="workroom",
+                    directory=self.definitions_dir / "workrooms",
                     apply_mutation=self._apply_definition_mutation,
                 )
         yield Footer()

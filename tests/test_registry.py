@@ -13,9 +13,9 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workflows_dir = root_dir / "workflows"
+            workrooms_dir = root_dir / "workrooms"
             agents_dir.mkdir(parents=True)
-            workflows_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -71,7 +71,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workflows_dir / "standard-build.md").write_text(
+            (workrooms_dir / "standard-build.md").write_text(
                 (
                     "---\n"
                     "id: standard-build\n"
@@ -85,7 +85,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workflows_dir / "research-then-decide.md").write_text(
+            (workrooms_dir / "research-then-decide.md").write_text(
                 (
                     "---\n"
                     "id: research-then-decide\n"
@@ -98,7 +98,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workflows_dir / "debate.md").write_text(
+            (workrooms_dir / "debate.md").write_text(
                 (
                     "---\n"
                     "id: debate\n"
@@ -118,9 +118,9 @@ class RegistryTests(unittest.TestCase):
             )
 
             self.assertIn("orchestrator", registry.agent_definitions)
-            self.assertIn("standard-build", registry.workflow_definitions)
-            self.assertIn("research-then-decide", registry.workflow_definitions)
-            self.assertIn("debate", registry.workflow_definitions)
+            self.assertIn("standard-build", registry.workroom_definitions)
+            self.assertIn("research-then-decide", registry.workroom_definitions)
+            self.assertIn("debate", registry.workroom_definitions)
             self.assertEqual(registry.upstream.base_url, "http://localhost:8080/v1")
 
     def test_load_registry_requires_agents_directory(self) -> None:
@@ -137,7 +137,7 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             (root_dir / "agents").mkdir(parents=True)
-            (root_dir / "workflows").mkdir(parents=True)
+            (root_dir / "workrooms").mkdir(parents=True)
             with self.assertRaisesRegex(
                 ValueError, "missing required agent definition"
             ):
@@ -150,9 +150,9 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workflows_dir = root_dir / "workflows"
+            workrooms_dir = root_dir / "workrooms"
             agents_dir.mkdir(parents=True)
-            workflows_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -164,7 +164,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workflows_dir / "standard-build.md").write_text(
+            (workrooms_dir / "standard-build.md").write_text(
                 (
                     "---\n"
                     "id: standard-build\n"
@@ -179,7 +179,8 @@ class RegistryTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(
-                ValueError, "workflow 'standard-build' references unknown agents: coder"
+                ValueError,
+                "workroom template 'standard-build' references unknown agents: coder",
             ):
                 load_registry(
                     root_dir,

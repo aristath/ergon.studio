@@ -14,9 +14,9 @@ class WorkspaceTests(unittest.TestCase):
 
             self.assertEqual(paths.app_dir, Path(temp_dir))
             self.assertTrue(paths.agents_dir.exists())
-            self.assertTrue(paths.workflows_dir.exists())
+            self.assertTrue(paths.workrooms_dir.exists())
             self.assertTrue((paths.agents_dir / "orchestrator.md").exists())
-            self.assertTrue((paths.workflows_dir / "standard-build.md").exists())
+            self.assertTrue((paths.workrooms_dir / "standard-build.md").exists())
 
     def test_ensure_workspace_preserves_existing_definition_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

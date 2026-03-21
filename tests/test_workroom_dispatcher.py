@@ -217,7 +217,7 @@ def _registry() -> RuntimeRegistry:
                 sections={"Identity": "Architect."},
             ),
         },
-        workflow_definitions={
+        workroom_definitions={
             "standard-build": DefinitionDocument(
                 id="standard-build",
                 path=Path("standard-build.md"),

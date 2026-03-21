@@ -15,22 +15,22 @@ class WorkspacePaths:
     config_path: Path
     definitions_dir: Path
     agents_dir: Path
-    workflows_dir: Path
+    workrooms_dir: Path
 
 
 def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     agents_dir = definitions_dir(app_dir) / "agents"
-    workflows_dir = definitions_dir(app_dir) / "workflows"
+    workrooms_dir = definitions_dir(app_dir) / "workrooms"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    workflows_dir.mkdir(parents=True, exist_ok=True)
+    workrooms_dir.mkdir(parents=True, exist_ok=True)
     _seed_templates(agents_dir, _bundled_templates("agents"))
-    _seed_templates(workflows_dir, _bundled_templates("workflows"))
+    _seed_templates(workrooms_dir, _bundled_templates("workrooms"))
     return WorkspacePaths(
         app_dir=app_dir,
         config_path=config_path(app_dir),
         definitions_dir=definitions_dir(app_dir),
         agents_dir=agents_dir,
-        workflows_dir=workflows_dir,
+        workrooms_dir=workrooms_dir,
     )
 
 

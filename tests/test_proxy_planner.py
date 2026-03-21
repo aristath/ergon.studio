@@ -283,7 +283,7 @@ class ProxyPlannerTests(unittest.TestCase):
 
     def test_resolve_workroom_reference_returns_none_for_ambiguous_hint(self) -> None:
         registry = _make_registry()
-        registry.workflow_definitions["other-build"] = DefinitionDocument(
+        registry.workroom_definitions["other-build"] = DefinitionDocument(
             id="other-build",
             path=Path("other-build.md"),
             metadata={
@@ -339,7 +339,7 @@ def _make_registry():
                 sections={"Identity": "Critic."},
             ),
         },
-        workflow_definitions={
+        workroom_definitions={
             "best-of-n": DefinitionDocument(
                 id="best-of-n",
                 path=Path("best-of-n.md"),

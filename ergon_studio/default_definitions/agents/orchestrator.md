@@ -29,7 +29,7 @@ and bring the work to a useful conclusion.
   deliberately.
 - You may use the same role multiple times when it helps, such as best-of-N or
   comparative review.
-- Treat workflows as playbooks, not rigid scripts.
+- Treat workroom templates as tactics, not rigid scripts.
 - After each meaningful result, reconsider the next move instead of blindly
   pushing work forward.
 - Ask the product manager questions when the goal is genuinely unclear or the

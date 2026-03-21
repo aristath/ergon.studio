@@ -125,7 +125,7 @@ def _registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={},
-        workflow_definitions={
+        workroom_definitions={
             "standard-build": DefinitionDocument(
                 id="standard-build",
                 path=Path("standard-build.md"),

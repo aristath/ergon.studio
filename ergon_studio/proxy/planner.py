@@ -35,7 +35,7 @@ class ProxyTurnPlan:
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
     delivery_values = ", ".join(DELIVERY_REQUIREMENT_VALUES)
     workroom_lines = []
-    for workroom_id, definition in sorted(registry.workflow_definitions.items()):
+    for workroom_id, definition in sorted(registry.workroom_definitions.items()):
         hints = ", ".join(selection_hints_for_metadata(definition.metadata)) or "none"
         orchestration = definition.metadata.get("orchestration", "unknown")
         delivery_candidate = delivery_candidate_for_metadata(definition.metadata)
@@ -350,13 +350,13 @@ def resolve_workroom_reference(
     candidate = _optional_text(value)
     if candidate is None:
         return None
-    if candidate in registry.workflow_definitions:
+    if candidate in registry.workroom_definitions:
         return candidate
 
     lowered = candidate.casefold()
     by_name = [
         workroom_id
-        for workroom_id, definition in registry.workflow_definitions.items()
+        for workroom_id, definition in registry.workroom_definitions.items()
         if str(definition.metadata.get("name", "")).strip().casefold() == lowered
     ]
     if len(by_name) == 1:
@@ -364,7 +364,7 @@ def resolve_workroom_reference(
 
     by_hint = [
         workroom_id
-        for workroom_id, definition in registry.workflow_definitions.items()
+        for workroom_id, definition in registry.workroom_definitions.items()
         if lowered
         in {
             hint.casefold()

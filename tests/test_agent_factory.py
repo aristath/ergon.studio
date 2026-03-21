@@ -100,9 +100,9 @@ def _registry_with_agent(
 ):
     root_dir = home_dir / "definitions"
     agents_dir = root_dir / "agents"
-    workflows_dir = root_dir / "workflows"
+    workrooms_dir = root_dir / "workrooms"
     agents_dir.mkdir(parents=True)
-    workflows_dir.mkdir(parents=True)
+    workrooms_dir.mkdir(parents=True)
     metadata = {
         "id": "orchestrator",
         "name": "Orchestrator",

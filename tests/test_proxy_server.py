@@ -1127,7 +1127,6 @@ class _FakeCore:
                 finish_reason=finish_reason,
                 content=content,
                 reasoning="",
-                mode="orchestrator",
                 tool_calls=self._tool_calls,
                 output_items=self._output_items,
             ),
@@ -1160,7 +1159,6 @@ class _FailingCore:
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
-                mode="orchestrator",
             ),
         )
 
@@ -1194,7 +1192,6 @@ class _LateFailingCore:
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
-                mode="orchestrator",
             ),
         )
 

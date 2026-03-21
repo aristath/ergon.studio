@@ -164,7 +164,6 @@ class ProxyTurnResult:
     finish_reason: str
     content: str
     reasoning: str
-    mode: str
     tool_calls: tuple[ProxyToolCall, ...] = ()
     output_items: tuple[ProxyOutputItemRef, ...] = ()
 

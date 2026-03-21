@@ -14,15 +14,18 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
+from ergon_studio.response_stream import ResponseStream
 
 
 class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_one_full_round_and_keeps_room_open(self) -> None:
         streamed_agents: list[str] = []
 
-        async def _stream_text_agent(**kwargs):
+        def _stream_text_agent(**kwargs):
             streamed_agents.append(kwargs["agent_id"])
-            yield {"architect": "Idea", "reviewer": "Refine"}[kwargs["agent_id"]]
+            return _response_stream(
+                {"architect": "Idea", "reviewer": "Refine"}[kwargs["agent_id"]]
+            )
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -63,13 +66,15 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         streamed_agents: list[str] = []
         streamed_prompts: list[str] = []
 
-        async def _stream_text_agent(**kwargs):
+        def _stream_text_agent(**kwargs):
             streamed_agents.append(kwargs["agent_id"])
             streamed_prompts.append(kwargs["prompt"])
-            yield {
-                "architect": "Idea",
-                "reviewer": "Challenge",
-            }[kwargs["agent_id"]]
+            return _response_stream(
+                {
+                    "architect": "Idea",
+                    "reviewer": "Challenge",
+                }[kwargs["agent_id"]]
+            )
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -117,9 +122,8 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_parallel_same_role_round_concurrently(self) -> None:
         coder_outputs = iter(["Idea A", "Idea B", "Chosen"])
 
-        async def _stream_text_agent(**_kwargs):
-            await asyncio.sleep(0.05)
-            yield next(coder_outputs)
+        def _stream_text_agent(**_kwargs):
+            return _response_stream(next(coder_outputs), delay=0.05)
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -156,16 +160,17 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         call_count = 0
 
-        async def _stream_text_agent(**kwargs):
+        def _stream_text_agent(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count <= 3:
-                kwargs["final_response_sink"](
-                    _fake_response_with_tool_call(kwargs["agent_id"], call_count)
+                return _response_stream(
+                    f"Draft {call_count}",
+                    response=_fake_response_with_tool_call(
+                        kwargs["agent_id"], call_count
+                    ),
                 )
-                yield f"Draft {call_count}"
-                return
-            yield f"Final {call_count}"
+            return _response_stream(f"Final {call_count}")
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -207,24 +212,24 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         call_count = 0
 
-        async def _stream_text_agent(**kwargs):
+        def _stream_text_agent(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                yield "Checked README.md and found the current intro."
-                return
-            kwargs["final_response_sink"](
-                AgentRunResult(
+                return _response_stream(
+                    "Checked README.md and found the current intro."
+                )
+            return _response_stream(
+                "",
+                response=AgentRunResult(
                     text="",
                     tool_calls=(
                         _internal_reply_tool_call(
                             "Updated the README intro and added setup notes."
                         ),
                     ),
-                )
+                ),
             )
-            if False:
-                yield ""
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -273,9 +278,9 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         streamed_prompts: list[str] = []
 
-        async def _stream_text_agent(**kwargs):
+        def _stream_text_agent(**kwargs):
             streamed_prompts.append(kwargs["prompt"])
-            yield "Reviewer chose candidate 2"
+            return _response_stream("Reviewer chose candidate 2")
 
         executor = ProxyWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
@@ -355,3 +360,19 @@ def _internal_reply_tool_call(message: str) -> ProxyToolCall:
 
 def _no_tool_calls(**_kwargs):
     return []
+
+
+def _response_stream(
+    text: str,
+    *,
+    response: AgentRunResult | None = None,
+    delay: float = 0.0,
+) -> ResponseStream[str, AgentRunResult]:
+    async def _events():
+        if delay:
+            await asyncio.sleep(delay)
+        if text:
+            yield text
+
+    final = response or AgentRunResult(text=text, tool_calls=())
+    return ResponseStream(_events(), finalizer=lambda _updates: final)

@@ -68,7 +68,7 @@ class ProxyOrchestrationCore:
     ) -> ResponseStream[ProxyEvent, ProxyTurnResult]:
         if created_at is None:
             created_at = int(time.time())
-        state = ProxyTurnState(mode="orchestrator")
+        state = ProxyTurnState()
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
@@ -127,7 +127,6 @@ class ProxyOrchestrationCore:
                 finish_reason=state.finish_reason,
                 content=state.content,
                 reasoning=state.reasoning,
-                mode=state.mode,
                 tool_calls=state.tool_calls,
                 output_items=state.output_items,
             ),
@@ -143,9 +142,8 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
         for _ in range(self._MAX_INTERNAL_MOVES):
-            response_holder: dict[str, Any] = {}
             internal_tools = build_orchestrator_internal_tools(self.registry)
-            async for delta in self._agent_runner.stream_text_agent(
+            stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
@@ -158,14 +156,13 @@ class ProxyOrchestrationCore:
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending,
-                final_response_sink=partial(_store_response, response_holder),
-            ):
-                state.mode = "orchestrator"
+            )
+            async for delta in stream:
                 state.append_content(delta)
                 yield ProxyContentDeltaEvent(delta)
             pending = None
-            response = response_holder.get("response")
-            tool_calls = response.tool_calls if response is not None else ()
+            response = await stream.get_final_response()
+            tool_calls = response.tool_calls
             internal_tool_calls = tuple(
                 tool_call
                 for tool_call in tool_calls
@@ -185,7 +182,6 @@ class ProxyOrchestrationCore:
                     "orchestrator must use at most one internal action at a time"
                 )
             if host_tool_calls:
-                state.mode = "orchestrator"
                 for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
                     request=request,
@@ -218,7 +214,6 @@ class ProxyOrchestrationCore:
 
             if _requires_host_tool_result(request):
                 raise ValueError("model ignored required host tool choice")
-            state.mode = "orchestrator"
             return
 
         raise ValueError("orchestrator exceeded internal move limit")
@@ -233,7 +228,6 @@ class ProxyOrchestrationCore:
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
         if isinstance(action, MessageWorkroomAction):
-            state.mode = "workroom"
             if action.preset is None and not action.participants:
                 state.finish_reason = "error"
                 error_text = "message_workroom needs a preset or participants target."
@@ -264,7 +258,6 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
         if continuation.workroom_name is not None:
-            state.mode = "workroom"
             async for event in self._message_workroom(
                 request=request,
                 continuation=continuation,
@@ -350,12 +343,6 @@ def _result(holder: dict[str, object]) -> tuple[str, ...]:
     if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
         return value
     return ()
-
-
-def _store_response(holder: dict[str, Any], value: object) -> None:
-    holder["response"] = value
-
-
 def _store_result(holder: dict[str, object], result: tuple[str, ...]) -> None:
     holder["result"] = result
 

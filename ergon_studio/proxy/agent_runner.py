@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -76,7 +76,7 @@ class ProxyAgentRunner:
             base_url=registry.upstream.base_url,
         )
 
-    async def stream_text_agent(
+    def stream_text_agent(
         self,
         *,
         agent_id: str,
@@ -89,8 +89,7 @@ class ProxyAgentRunner:
         tool_choice: ProxyToolChoice = None,
         parallel_tool_calls: bool | None = None,
         pending_continuation: PendingContinuation | None = None,
-        final_response_sink: Callable[[AgentRunResult], None] | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> ResponseStream[str, AgentRunResult]:
         invocation = self._build_invocation(
             agent_id=agent_id,
             prompt=_merge_preamble(preamble, prompt),
@@ -102,18 +101,7 @@ class ProxyAgentRunner:
             parallel_tool_calls=parallel_tool_calls,
             pending_continuation=pending_continuation,
         )
-        stream = self._invoker(invocation)
-        emitted = False
-        async for delta in stream:
-            if not delta:
-                continue
-            emitted = True
-            yield delta
-        response = await stream.get_final_response()
-        if final_response_sink is not None:
-            final_response_sink(response)
-        if response.text and not emitted:
-            yield response.text
+        return self._invoker(invocation)
 
     def emit_tool_calls(
         self,

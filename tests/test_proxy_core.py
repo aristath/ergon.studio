@@ -57,7 +57,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             "Hello world",
         )
         self.assertEqual(result.content, "Hello world")
-        self.assertEqual(result.mode, "orchestrator")
         self.assertFalse(
             any(isinstance(event, ProxyReasoningDeltaEvent) for event in events)
         )
@@ -241,7 +240,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("opening an ad hoc workroom", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(result.content, "Final summary")
-        self.assertEqual(result.mode, "orchestrator")
 
     async def test_stream_turn_keeps_solo_worker_until_it_replies_to_lead_dev(
         self,
@@ -338,7 +336,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(result.content, "Workroom final summary")
-        self.assertEqual(result.mode, "orchestrator")
 
     async def test_stream_turn_workroom_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(

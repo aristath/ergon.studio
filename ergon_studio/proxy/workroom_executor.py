@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -151,8 +150,7 @@ class ProxyWorkroomExecutor:
                 )
                 agent_text = ""
                 first = True
-                response_holder: dict[str, Any] = {}
-                async for delta in self._stream_text_agent(
+                stream = self._stream_text_agent(
                     agent_id=participant.agent_id,
                     prompt=prompt,
                     session_id=(
@@ -164,8 +162,8 @@ class ProxyWorkroomExecutor:
                     tool_choice=request.tool_choice,
                     parallel_tool_calls=request.parallel_tool_calls,
                     pending_continuation=participant_pending,
-                    final_response_sink=partial(_store_response, response_holder),
-                ):
+                )
+                async for delta in stream:
                     agent_text += delta
                     reasoning_delta = (
                         f"{participant.label}: {delta}" if first else delta
@@ -174,9 +172,7 @@ class ProxyWorkroomExecutor:
                     state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                 participant_pending = None
-                response = response_holder.get("response")
-                if response is None:
-                    response = AgentRunResult(text=agent_text.strip(), tool_calls=())
+                response = await stream.get_final_response()
                 internal_tool_calls = tuple(
                     tool_call
                     for tool_call in response.tool_calls
@@ -303,8 +299,7 @@ class ProxyWorkroomExecutor:
             prior_work=(),
         )
         text = ""
-        response_holder: dict[str, Any] = {}
-        async for delta in self._stream_text_agent(
+        stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
             session_id=f"proxy-workroom-{workroom_key}-{participant.label}-{uuid4().hex}",
@@ -312,14 +307,13 @@ class ProxyWorkroomExecutor:
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
-            final_response_sink=partial(_store_response, response_holder),
-        ):
+        )
+        async for delta in stream:
             text += delta
         return _AgentAttemptResult(
             participant=participant,
             text=text.strip(),
-            response=response_holder.get("response")
-            or AgentRunResult(text=text.strip(), tool_calls=()),
+            response=await stream.get_final_response(),
         )
 
 
@@ -368,7 +362,3 @@ def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:
         return False
     agent_ids = {participant.agent_id for participant in staffed_members}
     return len(agent_ids) == 1
-
-
-def _store_response(holder: dict[str, Any], value: object) -> None:
-    holder["response"] = value

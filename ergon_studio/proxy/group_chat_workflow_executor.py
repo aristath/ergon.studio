@@ -31,10 +31,10 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_max_rounds_for_definition,
-    workflow_participants_for_definition,
-    workflow_selection_sequence_for_definition,
+from ergon_studio.proxy.workroom_metadata import (
+    workroom_max_rounds_for_definition,
+    workroom_participants_for_definition,
+    workroom_selection_sequence_for_definition,
 )
 
 ProxyEvent = (
@@ -83,15 +83,15 @@ class ProxyGroupChatWorkflowExecutor:
             else specialist_counts
         )
         participants = expand_staffed_participants(
-            workflow_participants_for_definition(definition),
+            workroom_participants_for_definition(definition),
             specialists=staffed_specialists,
             specialist_counts=staffed_specialist_counts,
         )
         sequence = expand_staffed_sequence(
-            workflow_selection_sequence_for_definition(definition),
+            workroom_selection_sequence_for_definition(definition),
             participants=participants,
         )
-        max_rounds = workflow_max_rounds_for_definition(
+        max_rounds = workroom_max_rounds_for_definition(
             definition, default=max(len(sequence), len(participants), 1)
         )
         if not sequence:

@@ -168,7 +168,7 @@ def specialist_prompt(
     return "\n".join(lines).strip()
 
 
-def workflow_step_prompt(
+def workroom_round_prompt(
     *,
     workroom_id: str,
     agent_id: str,
@@ -328,7 +328,7 @@ def group_chat_turn_prompt(
     return "\n".join(lines).strip()
 
 
-def workflow_manager_instructions(participants: tuple[str, ...]) -> str:
+def workroom_manager_instructions(participants: tuple[str, ...]) -> str:
     return "\n".join(
         [
             (
@@ -345,7 +345,7 @@ def workflow_manager_instructions(participants: tuple[str, ...]) -> str:
     )
 
 
-def workflow_manager_prompt(
+def workroom_manager_prompt(
     *,
     workroom_id: str,
     goal: str,
@@ -484,7 +484,7 @@ def delegation_summary_prompt(
     ).strip()
 
 
-def workflow_summary_prompt(
+def workroom_summary_prompt(
     *,
     workroom_id: str,
     goal: str,

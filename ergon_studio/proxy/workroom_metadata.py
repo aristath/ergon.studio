@@ -6,14 +6,14 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.workflow_compiler import workflow_step_groups_for_definition
 
 
-def workflow_orchestration_for_definition(definition: DefinitionDocument) -> str:
+def workroom_orchestration_for_definition(definition: DefinitionDocument) -> str:
     value = definition.metadata.get("orchestration", "sequential")
     if isinstance(value, str) and value.strip():
         return value.strip()
     return "sequential"
 
 
-def workflow_participants_for_definition(
+def workroom_participants_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
     participants: list[str] = []
@@ -24,7 +24,7 @@ def workflow_participants_for_definition(
     return tuple(participants)
 
 
-def workflow_max_rounds_for_definition(
+def workroom_max_rounds_for_definition(
     definition: DefinitionDocument, *, default: int = 1
 ) -> int:
     value = definition.metadata.get("max_rounds", default)
@@ -33,7 +33,7 @@ def workflow_max_rounds_for_definition(
     return default
 
 
-def workflow_selection_sequence_for_definition(
+def workroom_selection_sequence_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
     configured = definition.metadata.get("selection_sequence")
@@ -49,7 +49,7 @@ def workflow_selection_sequence_for_definition(
     return tuple(sequence)
 
 
-def workflow_start_agent_for_definition(definition: DefinitionDocument) -> str | None:
+def workroom_start_agent_for_definition(definition: DefinitionDocument) -> str | None:
     value = definition.metadata.get("start_agent")
     if not isinstance(value, str):
         return None
@@ -59,7 +59,7 @@ def workflow_start_agent_for_definition(definition: DefinitionDocument) -> str |
     return stripped
 
 
-def workflow_finalizers_for_definition(
+def workroom_finalizers_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
     configured = definition.metadata.get("finalizers")
@@ -75,7 +75,7 @@ def workflow_finalizers_for_definition(
     return tuple(finalizers)
 
 
-def workflow_handoffs_for_definition(
+def workroom_handoffs_for_definition(
     definition: DefinitionDocument,
 ) -> dict[str, tuple[str, ...]]:
     configured = definition.metadata.get("handoffs")

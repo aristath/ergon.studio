@@ -24,16 +24,16 @@ from ergon_studio.proxy.playbook_staffing import (
     participant_context,
     participant_for_agent,
 )
-from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_max_rounds_for_definition,
-    workflow_participants_for_definition,
+from ergon_studio.proxy.workroom_metadata import (
+    workroom_max_rounds_for_definition,
+    workroom_participants_for_definition,
 )
 
 ProxyEvent = (
@@ -84,11 +84,11 @@ class ProxyMagenticWorkflowExecutor:
             else specialist_counts
         )
         participants = expand_staffed_participants(
-            workflow_participants_for_definition(definition),
+            workroom_participants_for_definition(definition),
             specialists=staffed_specialists,
             specialist_counts=staffed_specialist_counts,
         )
-        max_rounds = workflow_max_rounds_for_definition(
+        max_rounds = workroom_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
         )
         current_brief = (
@@ -146,7 +146,7 @@ class ProxyMagenticWorkflowExecutor:
                 participant = participant_by_label(participants, participant_label)
             if participant is None:
                 break
-            prompt = workflow_step_prompt(
+            prompt = workroom_round_prompt(
                 workroom_id=definition.id,
                 agent_id=participant.agent_id,
                 role_instance_label=(

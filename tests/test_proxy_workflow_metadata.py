@@ -4,19 +4,19 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_finalizers_for_definition,
-    workflow_handoffs_for_definition,
-    workflow_max_rounds_for_definition,
-    workflow_orchestration_for_definition,
-    workflow_participants_for_definition,
-    workflow_selection_sequence_for_definition,
-    workflow_start_agent_for_definition,
+from ergon_studio.proxy.workroom_metadata import (
+    workroom_finalizers_for_definition,
+    workroom_handoffs_for_definition,
+    workroom_max_rounds_for_definition,
+    workroom_orchestration_for_definition,
+    workroom_participants_for_definition,
+    workroom_selection_sequence_for_definition,
+    workroom_start_agent_for_definition,
 )
 
 
 class ProxyWorkflowMetadataTests(unittest.TestCase):
-    def test_workflow_metadata_helpers_normalize_values(self) -> None:
+    def test_workroom_metadata_helpers_normalize_values(self) -> None:
         definition = DefinitionDocument(
             id="specialist-handoff",
             path=Path("specialist-handoff.md"),
@@ -39,19 +39,19 @@ class ProxyWorkflowMetadataTests(unittest.TestCase):
             sections={"Purpose": "Handoff."},
         )
 
-        self.assertEqual(workflow_orchestration_for_definition(definition), "handoff")
+        self.assertEqual(workroom_orchestration_for_definition(definition), "handoff")
         self.assertEqual(
-            workflow_participants_for_definition(definition),
+            workroom_participants_for_definition(definition),
             ("architect", "reviewer", "brainstormer"),
         )
-        self.assertEqual(workflow_max_rounds_for_definition(definition), 6)
+        self.assertEqual(workroom_max_rounds_for_definition(definition), 6)
         self.assertEqual(
-            workflow_selection_sequence_for_definition(definition),
+            workroom_selection_sequence_for_definition(definition),
             ("architect", "reviewer"),
         )
-        self.assertEqual(workflow_start_agent_for_definition(definition), "architect")
-        self.assertEqual(workflow_finalizers_for_definition(definition), ("reviewer",))
+        self.assertEqual(workroom_start_agent_for_definition(definition), "architect")
+        self.assertEqual(workroom_finalizers_for_definition(definition), ("reviewer",))
         self.assertEqual(
-            workflow_handoffs_for_definition(definition),
+            workroom_handoffs_for_definition(definition),
             {"architect": ("reviewer", "brainstormer")},
         )

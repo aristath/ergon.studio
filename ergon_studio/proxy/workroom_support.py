@@ -17,9 +17,9 @@ from ergon_studio.proxy.prompts import (
     handoff_selection_prompt,
     parse_agent_selection,
     summary_instructions,
-    workflow_manager_instructions,
-    workflow_manager_prompt,
-    workflow_summary_prompt,
+    workroom_manager_instructions,
+    workroom_manager_prompt,
+    workroom_summary_prompt,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
@@ -51,7 +51,7 @@ class ProxyWorkroomSupport:
     ) -> AsyncIterator[ProxyEvent]:
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=workflow_summary_prompt(
+            prompt=workroom_summary_prompt(
                 workroom_id=definition.id,
                 goal=goal,
                 outputs=workroom_outputs,
@@ -80,7 +80,7 @@ class ProxyWorkroomSupport:
     ) -> str | None:
         raw = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=workflow_manager_prompt(
+            prompt=workroom_manager_prompt(
                 workroom_id=workroom_id,
                 goal=goal,
                 current_brief=current_brief,
@@ -89,7 +89,7 @@ class ProxyWorkroomSupport:
                 prior_outputs=prior_outputs,
                 move_rationale=move_rationale,
             ),
-            preamble=workflow_manager_instructions(participants),
+            preamble=workroom_manager_instructions(participants),
             session_id=f"proxy-workflow-manager-{uuid4().hex}",
             model_id_override=model_id_override,
         )

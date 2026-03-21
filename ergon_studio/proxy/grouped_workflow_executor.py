@@ -20,7 +20,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import summarize_conversation
-from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
@@ -219,7 +219,7 @@ class ProxyGroupedWorkflowExecutor:
             for agent_index in range(group_start_index, len(group)):
                 agent_id = group[agent_index]
                 agent_label = _agent_instance_label(group, agent_index)
-                prompt = workflow_step_prompt(
+                prompt = workroom_round_prompt(
                     workroom_id=definition.id,
                     agent_id=agent_id,
                     role_instance_label=(
@@ -419,7 +419,7 @@ class ProxyGroupedWorkflowExecutor:
     ) -> _AgentAttemptResult:
         agent_id = group[agent_index]
         agent_label = _agent_instance_label(group, agent_index)
-        prompt = workflow_step_prompt(
+        prompt = workroom_round_prompt(
             workroom_id=definition.id,
             agent_id=agent_id,
             role_instance_label=(agent_label if agent_label != agent_id else None),

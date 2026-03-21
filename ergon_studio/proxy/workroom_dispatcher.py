@@ -17,10 +17,10 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_orchestration_for_definition,
-)
 from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
+from ergon_studio.proxy.workroom_metadata import (
+    workroom_orchestration_for_definition,
+)
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -158,7 +158,7 @@ class ProxyWorkroomDispatcher:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        orchestration = workflow_orchestration_for_definition(definition)
+        orchestration = workroom_orchestration_for_definition(definition)
         if orchestration in {"sequential", "grouped", "concurrent"}:
             async for event in self._execute_grouped_workflow(
                 request=request,

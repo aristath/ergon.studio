@@ -26,19 +26,19 @@ from ergon_studio.proxy.playbook_staffing import (
     participant_for_agent,
     participant_labels_for_agents,
 )
-from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_finalizers_for_definition,
-    workflow_handoffs_for_definition,
-    workflow_max_rounds_for_definition,
-    workflow_participants_for_definition,
-    workflow_start_agent_for_definition,
+from ergon_studio.proxy.workroom_metadata import (
+    workroom_finalizers_for_definition,
+    workroom_handoffs_for_definition,
+    workroom_max_rounds_for_definition,
+    workroom_participants_for_definition,
+    workroom_start_agent_for_definition,
 )
 
 ProxyEvent = (
@@ -89,16 +89,16 @@ class ProxyHandoffWorkflowExecutor:
             else specialist_counts
         )
         participants = expand_staffed_participants(
-            workflow_participants_for_definition(definition),
+            workroom_participants_for_definition(definition),
             specialists=staffed_specialists,
             specialist_counts=staffed_specialist_counts,
         )
         finalizers = participant_labels_for_agents(
             participants,
-            workflow_finalizers_for_definition(definition),
+            workroom_finalizers_for_definition(definition),
         )
         handoffs = _staffed_handoffs(definition, participants)
-        max_rounds = workflow_max_rounds_for_definition(
+        max_rounds = workroom_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
         )
         current_brief = (
@@ -160,7 +160,7 @@ class ProxyHandoffWorkflowExecutor:
                 )
                 current_participant = participant_by_label(participants, next_label)
         else:
-            start_agent = workflow_start_agent_for_definition(definition)
+            start_agent = workroom_start_agent_for_definition(definition)
             if start_agent is None:
                 current_participant = participants[0] if participants else None
             else:
@@ -169,7 +169,7 @@ class ProxyHandoffWorkflowExecutor:
                     current_participant = participants[0] if participants else None
 
         while round_index < max_rounds and current_participant is not None:
-            prompt = workflow_step_prompt(
+            prompt = workroom_round_prompt(
                 workroom_id=definition.id,
                 agent_id=current_participant.agent_id,
                 role_instance_label=(
@@ -357,7 +357,7 @@ def _staffed_handoffs(
     definition: DefinitionDocument,
     participants: tuple[StaffedParticipant, ...],
 ) -> dict[str, tuple[str, ...]]:
-    configured = workflow_handoffs_for_definition(definition)
+    configured = workroom_handoffs_for_definition(definition)
     if not participants:
         return {}
     allowed_agents = {participant.agent_id for participant in participants}

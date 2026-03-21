@@ -46,3 +46,22 @@ Available commands:
 - `.venv/bin/ruff check .`
 - `.venv/bin/mypy`
 - `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+
+## Real model E2E
+
+Real upstream smoke tests live in `tests/real_proxy_e2e.py`.
+
+They read their target from `.env.e2e-tests`:
+
+```bash
+UPSTREAM_BASE_URL=http://localhost:8080/v1
+MODEL=qwen3-coder-next-q6k
+```
+
+Run them with:
+
+```bash
+./scripts/check-real-e2e
+```
+
+If the local upstream is unavailable, the real E2E module skips cleanly.

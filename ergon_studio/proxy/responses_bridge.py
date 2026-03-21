@@ -84,7 +84,7 @@ def _parse_input_item(payload: Any) -> ProxyInputMessage:
         return ProxyInputMessage(
             role="tool",
             content=normalize_message_content(payload.get("output")),
-            tool_call_id=optional_non_empty_text(payload.get("call_id") or payload.get("tool_call_id")),
+            tool_call_id=_parse_function_call_output_id(payload),
         )
     if item_type != "message":
         raise ValueError(f"unsupported responses input item type: {item_type}")
@@ -103,3 +103,18 @@ def _normalize_message_role(role: str) -> str:
     if stripped.casefold() == "developer":
         return "system"
     return stripped
+
+
+def _parse_function_call_output_id(payload: dict[str, Any]) -> str:
+    for field_name in ("call_id", "tool_call_id"):
+        raw_value = payload.get(field_name)
+        if raw_value is None:
+            continue
+        if not isinstance(raw_value, str):
+            raise ValueError(f"responses function_call_output {field_name} must be a string")
+        stripped = raw_value.strip()
+        if stripped:
+            return stripped
+    if "call_id" in payload or "tool_call_id" in payload:
+        raise ValueError("responses function_call_output call_id/tool_call_id must be non-empty")
+    raise ValueError("responses function_call_output items must include call_id or tool_call_id")

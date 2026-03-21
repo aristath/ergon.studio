@@ -68,6 +68,53 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[1].role, "tool")
         self.assertEqual(request.messages[1].tool_call_id, "call_1")
 
+    def test_function_call_output_accepts_fallback_tool_call_id(self) -> None:
+        request = parse_responses_request(
+            {
+                "model": "ergon",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "   ",
+                        "tool_call_id": "call_2",
+                        "output": "ok",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(request.messages[0].tool_call_id, "call_2")
+
+    def test_function_call_output_requires_non_empty_call_identifier(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be non-empty"):
+            parse_responses_request(
+                {
+                    "model": "ergon",
+                    "input": [
+                        {
+                            "type": "function_call_output",
+                            "call_id": "   ",
+                            "tool_call_id": "",
+                            "output": "ok",
+                        },
+                    ],
+                }
+            )
+
+    def test_function_call_output_requires_identifier_field(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must include call_id or tool_call_id"):
+            parse_responses_request(
+                {
+                    "model": "ergon",
+                    "input": [
+                        {
+                            "type": "function_call_output",
+                            "output": "ok",
+                        },
+                    ],
+                }
+            )
+
     def test_parses_function_call_items_as_assistant_tool_history(self) -> None:
         request = parse_responses_request(
             {

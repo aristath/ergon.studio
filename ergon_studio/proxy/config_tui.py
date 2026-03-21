@@ -29,6 +29,7 @@ from ergon_studio.app_config import (
     validate_proxy_host,
     validate_proxy_port,
 )
+from ergon_studio.file_ops import atomic_write_text
 from ergon_studio.registry import load_registry
 from ergon_studio.server_control import ProxyServerController
 from ergon_studio.upstream import UpstreamSettings
@@ -404,8 +405,28 @@ class ProxyConfigApp(App[None]):
             )
             self._show_server_status(reason="Endpoint settings unchanged")
             return
+        previous_config = self.config
+        try:
+            save_app_config(self.config_path, candidate)
+        except OSError as exc:
+            rollback_reason = f"Could not persist endpoint settings: {exc}"
+            try:
+                self.server_controller.start(
+                    config=previous_config,
+                    definitions_dir=self.definitions_dir,
+                )
+                self._show_server_status(reason="Endpoint settings unchanged")
+            except Exception as rollback_exc:
+                self.query_one("#server-status", Static).update(
+                    _status_text(
+                        status.message,
+                        status.url,
+                        f"{rollback_reason} | rollback failed: {rollback_exc}",
+                    )
+                )
+            self.query_one("#endpoint-message", Static).update(rollback_reason)
+            return
         self.config = candidate
-        save_app_config(self.config_path, self.config)
         self.query_one("#endpoint-message", Static).update("Saved endpoint settings")
         self.query_one("#server-status", Static).update(
             _status_text(status.message, status.url, "Endpoint settings saved")
@@ -413,10 +434,13 @@ class ProxyConfigApp(App[None]):
 
     def _apply_definition_mutation(self, mutation: DefinitionMutation) -> str:
         self._validate_definition_mutation(mutation)
-        if mutation.action == "delete":
-            mutation.path.unlink()
-        else:
-            mutation.path.write_text(mutation.content or "", encoding="utf-8")
+        try:
+            if mutation.action == "delete":
+                mutation.path.unlink()
+            else:
+                atomic_write_text(mutation.path, mutation.content or "")
+        except OSError as exc:
+            raise ValueError(f"could not persist {mutation.path.name}: {exc}") from exc
         message = _mutation_message(mutation)
         self._restart_server(message)
         return message

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from textual.widgets import Input, Static, TabbedContent, TextArea
 
@@ -138,6 +139,43 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("localhost:9999", saved_text)
             self.assertEqual(len(controller.start_calls), 2)
 
+    async def test_tui_rolls_back_endpoint_when_config_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            controller = _FakeController()
+            app = ProxyConfigApp(
+                app_dir=workspace.app_dir,
+                definitions_dir=workspace.definitions_dir,
+                initial_config=ProxyAppConfig(
+                    upstream_base_url="http://localhost:8080/v1"
+                ),
+                server_controller=controller,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.query_one("#endpoint-url", Input).value = (
+                    "http://localhost:9999/v1"
+                )
+                with patch(
+                    "ergon_studio.proxy.config_tui.save_app_config",
+                    side_effect=OSError("disk full"),
+                ):
+                    app._save_endpoint()
+                    await pilot.pause()
+
+                self.assertEqual(app.config.upstream_base_url, "http://localhost:8080/v1")
+                self.assertIn(
+                    "Could not persist endpoint settings",
+                    str(app.query_one("#endpoint-message", Static).render()),
+                )
+                self.assertIn(
+                    "server running at http://127.0.0.1:4000/v1",
+                    str(app.query_one("#server-status", Static).render()),
+                )
+
+            self.assertEqual(len(controller.start_calls), 3)
+
     async def test_navigation_does_not_discard_unsaved_definition_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
@@ -214,6 +252,50 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
                 (workspace.agents_dir / "architect.md").read_text(encoding="utf-8"),
                 original,
             )
+
+    async def test_definition_save_failure_does_not_restart_server(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            controller = _FakeController()
+            app = ProxyConfigApp(
+                app_dir=workspace.app_dir,
+                definitions_dir=workspace.definitions_dir,
+                initial_config=ProxyAppConfig(
+                    upstream_base_url="http://localhost:8080/v1"
+                ),
+                server_controller=controller,
+            )
+
+            async with app.run_test() as pilot:
+                tabs = app.query_one(TabbedContent)
+                tabs.active = "agents-tab"
+                await pilot.pause()
+
+                editor_widget = app.query(DefinitionEditor).first()
+                editor_widget._handle_list_navigation(
+                    workspace.agents_dir / "architect.md"
+                )
+                app.query_one("#agent-editor", TextArea).load_text(
+                    "---\n"
+                    "id: architect\n"
+                    "role: architect\n"
+                    "---\n\n"
+                    "## Identity\n"
+                    "Architect.\n"
+                )
+                with patch(
+                    "ergon_studio.proxy.config_tui.atomic_write_text",
+                    side_effect=OSError("disk full"),
+                ):
+                    editor_widget._save_definition()
+                    await pilot.pause()
+
+                self.assertIn(
+                    "could not persist architect.md",
+                    str(app.query_one("#agent-message", Static).render()),
+                )
+
+            self.assertEqual(len(controller.start_calls), 1)
 
 
 class _FakeController:

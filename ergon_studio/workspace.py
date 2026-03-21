@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ergon_studio.app_config import config_path, definitions_dir
+from ergon_studio.file_ops import atomic_write_text
 
 DEFAULT_AGENT_TEMPLATES: dict[str, str] = {
     "orchestrator.md": """---
@@ -130,4 +131,4 @@ def _seed_templates(directory: Path, templates: dict[str, str]) -> None:
         path = directory / filename
         if path.exists():
             continue
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)

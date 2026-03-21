@@ -5,6 +5,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ergon_studio.file_ops import atomic_write_text
+
 
 @dataclass(frozen=True)
 class ProxyAppConfig:
@@ -65,10 +67,9 @@ def load_app_config(path: Path) -> ProxyAppConfig:
 
 
 def save_app_config(path: Path, config: ProxyAppConfig) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps(asdict(config), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
 
 

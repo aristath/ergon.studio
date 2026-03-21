@@ -17,14 +17,20 @@ class _FakeContext:
 
 
 class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_orchestrator_profile_includes_specialists_and_workflows(self) -> None:
+    async def test_orchestrator_profile_includes_specialists_and_workflows(
+        self,
+    ) -> None:
         registry = RuntimeRegistry(
             upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
             agent_definitions={
                 "orchestrator": DefinitionDocument(
                     id="orchestrator",
                     path=None,
-                    metadata={"id": "orchestrator", "role": "orchestrator", "tools": ["read_file"]},
+                    metadata={
+                        "id": "orchestrator",
+                        "role": "orchestrator",
+                        "tools": ["read_file"],
+                    },
                     body="",
                     sections={},
                 ),

@@ -15,7 +15,14 @@ class ProxyCliTests(unittest.TestCase):
             (definitions_dir / "agents").mkdir(parents=True)
             (definitions_dir / "workflows").mkdir(parents=True)
             (definitions_dir / "agents" / "orchestrator.md").write_text(
-                "---\nid: orchestrator\nrole: orchestrator\n---\n## Identity\nLead engineer.\n",
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
                 encoding="utf-8",
             )
 

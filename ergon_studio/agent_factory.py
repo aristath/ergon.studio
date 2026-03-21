@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from agent_framework import Agent
+from agent_framework import Agent, BaseContextProvider
 from agent_framework.openai import OpenAIChatClient
 
 from ergon_studio.context_providers import AgentProfileContextProvider
@@ -22,7 +22,9 @@ def build_agent(
     role = str(definition.metadata.get("role", definition.id))
     client = _build_client(registry, model_id_override=model_id_override)
     tools = _resolve_tools(definition, tool_registry)
-    context_providers = _build_context_providers(registry=registry, definition=definition)
+    context_providers = _build_context_providers(
+        registry=registry, definition=definition
+    )
 
     default_options: dict[str, Any] = {}
     for key in ("temperature", "max_tokens"):
@@ -101,5 +103,5 @@ def _build_context_providers(
     *,
     registry: RuntimeRegistry,
     definition: DefinitionDocument,
-) -> list[object]:
+) -> list[BaseContextProvider]:
     return [AgentProfileContextProvider(definition, registry=registry)]

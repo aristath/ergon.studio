@@ -2,8 +2,18 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
-from ergon_studio.proxy.responses_adapter import build_responses_response, encode_responses_stream_events
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyOutputItemRef,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCall,
+    ProxyToolCallEvent,
+)
+from ergon_studio.proxy.responses_adapter import (
+    build_responses_response,
+    encode_responses_stream_events,
+)
 
 
 class ProxyResponsesAdapterTests(unittest.TestCase):
@@ -70,7 +80,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
         )
@@ -89,7 +99,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
             output_items=(
@@ -98,7 +108,9 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual([item["type"] for item in payload["output"]], ["message", "function_call"])
+        self.assertEqual(
+            [item["type"] for item in payload["output"]], ["message", "function_call"]
+        )
 
     def test_encodes_tool_call_stream_events(self) -> None:
         payload = encode_responses_stream_events(
@@ -106,7 +118,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 )
             ),
             response_id="resp_1",
@@ -130,7 +142,9 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(payload[3]["output_index"], 0)
         self.assertEqual(payload[3]["item"]["id"], "fc_fixed")
 
-    def test_finish_event_can_skip_output_done_when_no_content_was_streamed(self) -> None:
+    def test_finish_event_can_skip_output_done_when_no_content_was_streamed(
+        self,
+    ) -> None:
         payload = encode_responses_stream_events(
             event=ProxyFinishEvent("tool_calls"),
             response_id="resp_1",
@@ -159,7 +173,9 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload[-1]["type"], "response.failed")
         self.assertEqual(payload[-1]["response"]["status"], "failed")
-        self.assertEqual(payload[-1]["response"]["error"]["message"], "provider exploded")
+        self.assertEqual(
+            payload[-1]["response"]["error"]["message"], "provider exploded"
+        )
 
     def test_response_stream_output_indexes_can_be_offset(self) -> None:
         reasoning = encode_responses_stream_events(
@@ -178,7 +194,7 @@ class ProxyResponsesAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
                 index=0,
             ),

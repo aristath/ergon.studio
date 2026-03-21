@@ -3,8 +3,19 @@ from __future__ import annotations
 import json
 import unittest
 
-from ergon_studio.proxy.chat_adapter import build_chat_completion_response, encode_chat_stream_done, encode_chat_stream_event, encode_chat_stream_sse
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent
+from ergon_studio.proxy.chat_adapter import (
+    build_chat_completion_response,
+    encode_chat_stream_done,
+    encode_chat_stream_event,
+    encode_chat_stream_sse,
+)
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCall,
+    ProxyToolCallEvent,
+)
 
 
 class ProxyChatAdapterTests(unittest.TestCase):
@@ -17,8 +28,13 @@ class ProxyChatAdapterTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["object"], "chat.completion.chunk")
-        self.assertEqual(payload["choices"][0]["delta"]["reasoning_content"], "Orchestrator: planning.")
-        self.assertEqual(payload["choices"][0]["delta"]["reasoning"], "Orchestrator: planning.")
+        self.assertEqual(
+            payload["choices"][0]["delta"]["reasoning_content"],
+            "Orchestrator: planning.",
+        )
+        self.assertEqual(
+            payload["choices"][0]["delta"]["reasoning"], "Orchestrator: planning."
+        )
         self.assertIsNone(payload["choices"][0]["finish_reason"])
 
     def test_content_delta_encodes_to_chat_chunk(self) -> None:
@@ -38,7 +54,7 @@ class ProxyChatAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
                 index=2,
             ),
@@ -90,7 +106,7 @@ class ProxyChatAdapterTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
         )

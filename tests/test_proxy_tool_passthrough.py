@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 
 from ergon_studio.proxy.models import ProxyFunctionTool
-from ergon_studio.proxy.tool_passthrough import build_declaration_tools, extract_tool_calls
+from ergon_studio.proxy.tool_passthrough import (
+    build_declaration_tools,
+    extract_tool_calls,
+)
 
 
 class ProxyToolPassthroughTests(unittest.TestCase):
@@ -13,7 +16,10 @@ class ProxyToolPassthroughTests(unittest.TestCase):
                 ProxyFunctionTool(
                     name="read_file",
                     description="Read a file",
-                    parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+                    parameters={
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                    },
                 ),
             )
         )
@@ -39,7 +45,7 @@ class ProxyToolPassthroughTests(unittest.TestCase):
                                         "type": "function_call",
                                         "call_id": "call_1",
                                         "name": "read_file",
-                                        "arguments": "{\"path\":\"main.py\"}",
+                                        "arguments": '{"path":"main.py"}',
                                     },
                                 )()
                             ]
@@ -53,4 +59,4 @@ class ProxyToolPassthroughTests(unittest.TestCase):
 
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(tool_calls[0].name, "read_file")
-        self.assertEqual(tool_calls[0].arguments_json, "{\"path\":\"main.py\"}")
+        self.assertEqual(tool_calls[0].arguments_json, '{"path":"main.py"}')

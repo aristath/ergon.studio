@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 _VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 _VALID_FINISH_REASONS = {"stop", "tool_calls", "length", "content_filter", "error"}
 _VALID_OUTPUT_ITEM_KINDS = {"reasoning", "content", "tool_call"}
@@ -85,7 +84,10 @@ class ProxyTurnRequest:
             raise TypeError("tools must be a tuple")
         if type(self.stream) is not bool:
             raise TypeError("stream must be a bool")
-        if self.parallel_tool_calls is not None and type(self.parallel_tool_calls) is not bool:
+        if (
+            self.parallel_tool_calls is not None
+            and type(self.parallel_tool_calls) is not bool
+        ):
             raise TypeError("parallel_tool_calls must be a bool or None")
 
     def latest_user_message(self) -> ProxyInputMessage | None:

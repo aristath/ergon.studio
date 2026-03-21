@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool, parse_function_tool_call
+from ergon_studio.proxy.parse_utils import (
+    normalize_message_content,
+    optional_non_empty_text,
+    parse_function_tool,
+    parse_function_tool_call,
+)
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 
 
@@ -26,7 +31,11 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
     messages: list[ProxyInputMessage] = []
-    instructions = optional_non_empty_text(payload.get("instructions")) if payload.get("instructions") is not None else None
+    instructions = (
+        optional_non_empty_text(payload.get("instructions"))
+        if payload.get("instructions") is not None
+        else None
+    )
     if instructions is not None:
         messages.append(
             ProxyInputMessage(
@@ -111,10 +120,16 @@ def _parse_function_call_output_id(payload: dict[str, Any]) -> str:
         if raw_value is None:
             continue
         if not isinstance(raw_value, str):
-            raise ValueError(f"responses function_call_output {field_name} must be a string")
+            raise ValueError(
+                f"responses function_call_output {field_name} must be a string"
+            )
         stripped = raw_value.strip()
         if stripped:
             return stripped
     if "call_id" in payload or "tool_call_id" in payload:
-        raise ValueError("responses function_call_output call_id/tool_call_id must be non-empty")
-    raise ValueError("responses function_call_output items must include call_id or tool_call_id")
+        raise ValueError(
+            "responses function_call_output call_id/tool_call_id must be non-empty"
+        )
+    raise ValueError(
+        "responses function_call_output items must include call_id or tool_call_id"
+    )

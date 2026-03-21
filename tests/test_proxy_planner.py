@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
-
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
-from ergon_studio.proxy.planner import build_turn_planner_prompt, parse_turn_plan, resolve_workflow_reference
+from ergon_studio.proxy.planner import (
+    build_turn_planner_prompt,
+    parse_turn_plan,
+    resolve_workflow_reference,
+)
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
@@ -39,7 +42,7 @@ class ProxyPlannerTests(unittest.TestCase):
                         ProxyToolCall(
                             id="call_1",
                             name="read_file",
-                            arguments_json="{\"path\":\"main.py\"}",
+                            arguments_json='{"path":"main.py"}',
                         ),
                     ),
                 ),
@@ -61,7 +64,10 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"mode":"workflow","workflow_id":"standard-build","goal":"Build it","deliverable_expected":true}',
+            (
+                '{"mode":"workflow","workflow_id":"standard-build",'
+                '"goal":"Build it","deliverable_expected":true}'
+            ),
             registry=registry,
         )
 

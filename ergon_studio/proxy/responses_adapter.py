@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyOutputItemRef,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCallEvent,
+)
 
 
 def build_responses_response(
@@ -17,7 +23,9 @@ def build_responses_response(
     output_items: tuple[ProxyOutputItemRef, ...] = (),
 ) -> dict[str, Any]:
     output: list[dict[str, Any]] = []
-    ordered_items = _normalize_output_items(output_items, reasoning=reasoning, content=content, tool_calls=tool_calls)
+    ordered_items = _normalize_output_items(
+        output_items, reasoning=reasoning, content=content, tool_calls=tool_calls
+    )
     tool_calls_by_id = {tool_call.id: tool_call for tool_call in tool_calls}
     tool_calls_emitted: set[str] = set()
     for item in ordered_items:
@@ -79,7 +87,10 @@ def build_responses_response(
 
 def encode_responses_stream_events(
     *,
-    event: ProxyReasoningDeltaEvent | ProxyContentDeltaEvent | ProxyToolCallEvent | ProxyFinishEvent,
+    event: ProxyReasoningDeltaEvent
+    | ProxyContentDeltaEvent
+    | ProxyToolCallEvent
+    | ProxyFinishEvent,
     response_id: str,
     model: str,
     created_at: int,
@@ -286,7 +297,7 @@ def encode_responses_stream_events(
 def encode_responses_stream_sse(payload: dict[str, Any]) -> bytes:
     import json
 
-    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode("utf-8")
+    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
 
 
 def _normalize_output_items(
@@ -304,7 +315,9 @@ def _normalize_output_items(
             continue
         if item.kind == "content" and not (content or not tool_calls):
             continue
-        if item.kind == "tool_call" and not any(tool_call.id == item.call_id for tool_call in tool_calls):
+        if item.kind == "tool_call" and not any(
+            tool_call.id == item.call_id for tool_call in tool_calls
+        ):
             continue
         ordered.append(item)
     if reasoning and ProxyOutputItemRef(kind="reasoning") not in ordered:

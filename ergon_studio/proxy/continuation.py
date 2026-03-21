@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from base64 import urlsafe_b64decode, urlsafe_b64encode
-from dataclasses import dataclass
 import json
 import zlib
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from dataclasses import dataclass
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
-
 
 _TOKEN_PREFIX = "ergon:"
 _TOKEN_VERSION = 1
@@ -32,7 +31,9 @@ class PendingContinuation:
     tool_results: tuple[ProxyInputMessage, ...]
 
 
-def encode_continuation_tool_call(tool_call: ProxyToolCall, *, state: ContinuationState) -> ProxyToolCall:
+def encode_continuation_tool_call(
+    tool_call: ProxyToolCall, *, state: ContinuationState
+) -> ProxyToolCall:
     payload = {
         "v": _TOKEN_VERSION,
         "m": state.mode,
@@ -54,7 +55,13 @@ def encode_continuation_tool_call(tool_call: ProxyToolCall, *, state: Continuati
         payload["c"] = state.current_brief
     if state.workflow_outputs:
         payload["o"] = list(state.workflow_outputs)
-    encoded = urlsafe_b64encode(zlib.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))).decode("ascii").rstrip("=")
+    encoded = (
+        urlsafe_b64encode(
+            zlib.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
     return ProxyToolCall(
         id=f"{_TOKEN_PREFIX}{encoded}:{tool_call.id}",
         name=tool_call.name,
@@ -62,7 +69,9 @@ def encode_continuation_tool_call(tool_call: ProxyToolCall, *, state: Continuati
     )
 
 
-def decode_continuation_from_tool_call_id(tool_call_id: str) -> ContinuationState | None:
+def decode_continuation_from_tool_call_id(
+    tool_call_id: str,
+) -> ContinuationState | None:
     payload = _decode_payload(tool_call_id)
     if payload is None:
         return None
@@ -91,7 +100,9 @@ def decode_continuation_from_tool_call_id(tool_call_id: str) -> ContinuationStat
         return None
     if current_brief is not None and not isinstance(current_brief, str):
         return None
-    if not isinstance(workflow_outputs, list) or not all(isinstance(item, str) for item in workflow_outputs):
+    if not isinstance(workflow_outputs, list) or not all(
+        isinstance(item, str) for item in workflow_outputs
+    ):
         return None
     return ContinuationState(
         mode=mode,
@@ -133,7 +144,11 @@ def _decode_payload(tool_call_id: str) -> dict[str, object] | None:
         return None
     padding = "=" * (-len(encoded_payload) % 4)
     try:
-        payload = json.loads(zlib.decompress(urlsafe_b64decode((encoded_payload + padding).encode("ascii"))).decode("utf-8"))
+        payload = json.loads(
+            zlib.decompress(
+                urlsafe_b64decode((encoded_payload + padding).encode("ascii"))
+            ).decode("utf-8")
+        )
     except (ValueError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
@@ -151,14 +166,18 @@ def original_tool_call_id(tool_call_id: str) -> str | None:
     return original or None
 
 
-def latest_continuation(messages: tuple[ProxyInputMessage, ...]) -> ContinuationState | None:
+def latest_continuation(
+    messages: tuple[ProxyInputMessage, ...],
+) -> ContinuationState | None:
     pending = latest_pending_continuation(messages)
     if pending is None:
         return None
     return pending.state
 
 
-def latest_pending_continuation(messages: tuple[ProxyInputMessage, ...]) -> PendingContinuation | None:
+def latest_pending_continuation(
+    messages: tuple[ProxyInputMessage, ...],
+) -> PendingContinuation | None:
     if not messages or messages[-1].role != "tool":
         return None
 
@@ -174,7 +193,10 @@ def latest_pending_continuation(messages: tuple[ProxyInputMessage, ...]) -> Pend
         if candidate.role == "assistant" and candidate.tool_calls:
             assistant_message = candidate
             assistant_call_ids = {tool_call.id for tool_call in candidate.tool_calls}
-            if any((message.tool_call_id or "") not in assistant_call_ids for message in tool_results):
+            if any(
+                (message.tool_call_id or "") not in assistant_call_ids
+                for message in tool_results
+            ):
                 return None
 
     state: ContinuationState | None = None
@@ -200,7 +222,11 @@ def continuation_tool_calls(pending: PendingContinuation) -> tuple[ProxyToolCall
     if pending.assistant_message is None:
         return ()
     result_ids = {message.tool_call_id for message in pending.tool_results}
-    return tuple(tool_call for tool_call in pending.assistant_message.tool_calls if tool_call.id in result_ids)
+    return tuple(
+        tool_call
+        for tool_call in pending.assistant_message.tool_calls
+        if tool_call.id in result_ids
+    )
 
 
 def continuation_result_map(pending: PendingContinuation) -> dict[str, str]:

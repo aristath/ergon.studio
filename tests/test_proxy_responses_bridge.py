@@ -29,7 +29,9 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(
+            [message.role for message in request.messages], ["system", "user"]
+        )
         self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
         self.assertEqual(request.messages[1].content, "Build it")
 
@@ -53,12 +55,14 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
                     {
                         "type": "message",
                         "role": "assistant",
-                        "content": [{"type": "output_text", "text": "Need a file read."}],
+                        "content": [
+                            {"type": "output_text", "text": "Need a file read."}
+                        ],
                     },
                     {
                         "type": "function_call_output",
                         "call_id": "call_1",
-                        "output": "{\"contents\":\"print(1)\"}",
+                        "output": '{"contents":"print(1)"}',
                     },
                 ],
             }
@@ -124,7 +128,7 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
                         "type": "function_call",
                         "call_id": "call_1",
                         "name": "read_file",
-                        "arguments": "{\"path\":\"main.py\"}",
+                        "arguments": '{"path":"main.py"}',
                     }
                 ],
             }
@@ -153,7 +157,9 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(
+            [message.role for message in request.messages], ["system", "user"]
+        )
         self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
 
     def test_parses_specific_function_tool_choice(self) -> None:
@@ -178,4 +184,6 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(request.tool_choice, {"type": "function", "function": {"name": "read_file"}})
+        self.assertEqual(
+            request.tool_choice, {"type": "function", "function": {"name": "read_file"}}
+        )

@@ -17,19 +17,54 @@ class RegistryTests(unittest.TestCase):
             agents_dir.mkdir(parents=True)
             workflows_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
-                "---\nid: orchestrator\nrole: orchestrator\n---\n## Identity\nLead engineer.\n",
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
                 encoding="utf-8",
             )
             (workflows_dir / "standard-build.md").write_text(
-                "---\nid: standard-build\norchestration: sequential\nsteps:\n  - architect\n  - coder\n---\n## Purpose\nBuild.\n",
+                (
+                    "---\n"
+                    "id: standard-build\n"
+                    "orchestration: sequential\n"
+                    "steps:\n"
+                    "  - architect\n"
+                    "  - coder\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Build.\n"
+                ),
                 encoding="utf-8",
             )
             (workflows_dir / "research-then-decide.md").write_text(
-                "---\nid: research-then-decide\norchestration: sequential\nsteps:\n  - researcher\n---\n## Purpose\nResearch.\n",
+                (
+                    "---\n"
+                    "id: research-then-decide\n"
+                    "orchestration: sequential\n"
+                    "steps:\n"
+                    "  - researcher\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Research.\n"
+                ),
                 encoding="utf-8",
             )
             (workflows_dir / "debate.md").write_text(
-                "---\nid: debate\norchestration: group_chat\nstep_groups:\n  - [architect, reviewer]\n---\n## Purpose\nDebate.\n",
+                (
+                    "---\n"
+                    "id: debate\n"
+                    "orchestration: group_chat\n"
+                    "step_groups:\n"
+                    "  - [architect, reviewer]\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Debate.\n"
+                ),
                 encoding="utf-8",
             )
 
@@ -49,12 +84,20 @@ class RegistryTests(unittest.TestCase):
             root_dir = Path(temp_dir) / "definitions"
             root_dir.mkdir()
             with self.assertRaisesRegex(ValueError, "missing agents directory"):
-                load_registry(root_dir, upstream=UpstreamSettings(base_url="http://localhost:8080/v1"))
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
 
     def test_load_registry_requires_orchestrator_definition(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             (root_dir / "agents").mkdir(parents=True)
             (root_dir / "workflows").mkdir(parents=True)
-            with self.assertRaisesRegex(ValueError, "missing required agent definition"):
-                load_registry(root_dir, upstream=UpstreamSettings(base_url="http://localhost:8080/v1"))
+            with self.assertRaisesRegex(
+                ValueError, "missing required agent definition"
+            ):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )

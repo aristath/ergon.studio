@@ -27,7 +27,9 @@ Generate multiple candidates in parallel.
                 encoding="utf-8",
             )
 
-            step_groups = workflow_step_groups_for_definition(load_definition(definition_path))
+            step_groups = workflow_step_groups_for_definition(
+                load_definition(definition_path)
+            )
 
             self.assertEqual(step_groups, (("coder", "coder", "coder"), ("reviewer",)))
 
@@ -67,7 +69,9 @@ Broken.
             )
 
             definition = load_definition(definition_path)
-            with self.assertRaisesRegex(ValueError, "must declare `steps` or `step_groups`"):
+            with self.assertRaisesRegex(
+                ValueError, "must declare `steps` or `step_groups`"
+            ):
                 workflow_step_groups_for_definition(definition)
 
     def test_workflow_step_groups_preserve_orchestrated_participants(self) -> None:
@@ -87,6 +91,8 @@ Compare competing approaches.
                 encoding="utf-8",
             )
 
-            step_groups = workflow_step_groups_for_definition(load_definition(definition_path))
+            step_groups = workflow_step_groups_for_definition(
+                load_definition(definition_path)
+            )
 
             self.assertEqual(step_groups, (("architect", "brainstormer", "reviewer"),))

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
 import time
-from typing import Any
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, cast
 from uuid import uuid4
 
 from ergon_studio.proxy.chat_adapter import (
@@ -15,18 +15,34 @@ from ergon_studio.proxy.chat_adapter import (
     encode_chat_stream_sse,
 )
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyReasoningDeltaEvent, ProxyToolCallEvent
+from ergon_studio.proxy.core import ProxyOrchestrationCore
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyOutputItemRef,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCallEvent,
+    ProxyTurnRequest,
+    ProxyTurnResult,
+)
 from ergon_studio.proxy.responses_adapter import (
     build_responses_response,
     encode_responses_stream_events,
     encode_responses_stream_sse,
 )
 from ergon_studio.proxy.responses_bridge import parse_responses_request
+from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import probe_upstream_models
 
 
 class ProxyHTTPServer(ThreadingHTTPServer):
-    def __init__(self, server_address, RequestHandlerClass, *, core):
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        RequestHandlerClass: type[BaseHTTPRequestHandler],
+        *,
+        core: ProxyOrchestrationCore,
+    ) -> None:
         super().__init__(server_address, RequestHandlerClass)
         self.core = core
 
@@ -35,12 +51,18 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     server_version = "ergon-studio-proxy/0.1"
     protocol_version = "HTTP/1.1"
 
+    @property
+    def proxy_server(self) -> ProxyHTTPServer:
+        return cast(ProxyHTTPServer, self.server)
+
     def do_GET(self) -> None:
         if self.path == "/v1/models":
             try:
-                data = _available_models(self.server.core.registry)
+                data = _available_models(self.proxy_server.core.registry)
             except Exception as exc:
-                self._send_error_json(HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}")
+                self._send_error_json(
+                    HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}"
+                )
                 return
             self._send_json(HTTPStatus.OK, {"object": "list", "data": data})
             return
@@ -55,7 +77,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown route: {self.path}")
 
-    def log_message(self, format: str, *args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def _handle_chat_completions(self) -> None:
@@ -85,10 +107,14 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         try:
             result = asyncio.run(self._run_chat_completion(request))
         except Exception as exc:
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}")
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
+            )
             return
         if result.finish_reason == "error":
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed")
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
+            )
             return
         self._send_json(
             HTTPStatus.OK,
@@ -103,14 +129,23 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             ),
         )
 
-    async def _run_chat_completion(self, request):
-        stream = self.server.core.stream_turn(request, created_at=int(time.time()))
+    async def _run_chat_completion(self, request: ProxyTurnRequest) -> ProxyTurnResult:
+        stream = self.proxy_server.core.stream_turn(
+            request,
+            created_at=int(time.time()),
+        )
         async for _event in stream:
             pass
         return await stream.get_final_response()
 
-    async def _stream_chat_completion(self, *, request, completion_id: str, created_at: int) -> None:
-        stream = self.server.core.stream_turn(request, created_at=created_at)
+    async def _stream_chat_completion(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        completion_id: str,
+        created_at: int,
+    ) -> None:
+        stream = self.proxy_server.core.stream_turn(request, created_at=created_at)
         async for event in stream:
             chunk = encode_chat_stream_sse(
                 event,
@@ -150,10 +185,14 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         try:
             result = asyncio.run(self._run_chat_completion(request))
         except Exception as exc:
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}")
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
+            )
             return
         if result.finish_reason == "error":
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed")
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
+            )
             return
         self._send_json(
             HTTPStatus.OK,
@@ -168,7 +207,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             ),
         )
 
-    async def _stream_responses(self, *, request, response_id: str, created_at: int) -> None:
+    async def _stream_responses(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        response_id: str,
+        created_at: int,
+    ) -> None:
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
         content_emitted = False
@@ -179,31 +224,45 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         created_payload = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
-                    "response": {
-                        "id": response_id,
-                        "object": "response",
-                        "created_at": created_at,
-                        "model": request.model,
-                        "status": "in_progress",
-                    },
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": created_at,
+                "model": request.model,
+                "status": "in_progress",
+            },
             "sequence_number": 1,
         }
         self.wfile.write(encode_responses_stream_sse(created_payload))
         self.wfile.flush()
         sequence_number = 2
-        stream = self.server.core.stream_turn(request, created_at=created_at)
+        stream = self.proxy_server.core.stream_turn(request, created_at=created_at)
         async for event in stream:
             if isinstance(event, ProxyContentDeltaEvent) and event.delta:
                 content_emitted = True
                 message_text += event.delta
             if isinstance(event, ProxyReasoningDeltaEvent) and event.delta:
                 reasoning_text += event.delta
-            reasoning_output_index = _response_output_index(output_items, ProxyOutputItemRef(kind="reasoning"))
+            reasoning_output_index = (
+                _response_output_index(
+                    output_items, ProxyOutputItemRef(kind="reasoning")
+                )
+                or 0
+            )
             if isinstance(event, ProxyReasoningDeltaEvent):
-                reasoning_output_index = _ensure_response_output_item(output_items, ProxyOutputItemRef(kind="reasoning"))
-            message_output_index = _response_output_index(output_items, ProxyOutputItemRef(kind="content"))
-            if isinstance(event, ProxyContentDeltaEvent) or (isinstance(event, ProxyFinishEvent) and content_emitted):
-                message_output_index = _ensure_response_output_item(output_items, ProxyOutputItemRef(kind="content"))
+                reasoning_output_index = _ensure_response_output_item(
+                    output_items, ProxyOutputItemRef(kind="reasoning")
+                )
+            message_output_index = (
+                _response_output_index(output_items, ProxyOutputItemRef(kind="content"))
+                or 0
+            )
+            if isinstance(event, ProxyContentDeltaEvent) or (
+                isinstance(event, ProxyFinishEvent) and content_emitted
+            ):
+                message_output_index = _ensure_response_output_item(
+                    output_items, ProxyOutputItemRef(kind="content")
+                )
             tool_output_index = 0
             if isinstance(event, ProxyToolCallEvent):
                 tool_output_index = _ensure_response_output_item(
@@ -222,7 +281,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 reasoning_output_index=reasoning_output_index,
                 message_output_index=message_output_index,
                 tool_output_index=tool_output_index,
-                tool_item_id=tool_item_ids.get(event.call.id) if isinstance(event, ProxyToolCallEvent) else None,
+                tool_item_id=tool_item_ids.get(event.call.id)
+                if isinstance(event, ProxyToolCallEvent)
+                else None,
                 reasoning_text=reasoning_text,
                 message_text=message_text,
                 include_output_done=content_emitted,
@@ -270,13 +331,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             {
                 "error": {
                     "message": message,
-                    "type": "invalid_request_error" if status < HTTPStatus.INTERNAL_SERVER_ERROR else "server_error",
+                    "type": "invalid_request_error"
+                    if status < HTTPStatus.INTERNAL_SERVER_ERROR
+                    else "server_error",
                 }
             },
         )
 
 
-def serve_proxy(*, host: str, port: int, core) -> None:
+def serve_proxy(*, host: str, port: int, core: ProxyOrchestrationCore) -> None:
     server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     try:
         server.serve_forever()
@@ -299,14 +362,19 @@ class ProxyServerHandle:
         self.thread.join(timeout=5)
 
 
-def start_proxy_server_in_thread(*, host: str, port: int, core) -> ProxyServerHandle:
+def start_proxy_server_in_thread(
+    *,
+    host: str,
+    port: int,
+    core: ProxyOrchestrationCore,
+) -> ProxyServerHandle:
     server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return ProxyServerHandle(server, thread)
 
 
-def _available_models(registry) -> list[dict[str, Any]]:
+def _available_models(registry: RuntimeRegistry) -> list[dict[str, Any]]:
     now = int(time.time())
     models = probe_upstream_models(registry.upstream, timeout=5)
     normalized: list[dict[str, Any]] = []
@@ -318,14 +386,18 @@ def _available_models(registry) -> list[dict[str, Any]]:
             {
                 "id": model_id,
                 "object": "model",
-                "created": int(model.get("created", now)) if isinstance(model.get("created"), int) else now,
+                "created": int(model.get("created", now))
+                if isinstance(model.get("created"), int)
+                else now,
                 "owned_by": str(model.get("owned_by", "upstream")),
             }
         )
     return normalized
 
 
-def _ensure_response_output_item(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int:
+def _ensure_response_output_item(
+    output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef
+) -> int:
     existing = _response_output_index(output_items, item)
     if existing is not None:
         return existing
@@ -333,7 +405,9 @@ def _ensure_response_output_item(output_items: list[ProxyOutputItemRef], item: P
     return len(output_items) - 1
 
 
-def _response_output_index(output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef) -> int | None:
+def _response_output_index(
+    output_items: list[ProxyOutputItemRef], item: ProxyOutputItemRef
+) -> int | None:
     try:
         return output_items.index(item)
     except ValueError:

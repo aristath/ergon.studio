@@ -15,13 +15,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--definitions-dir",
         type=Path,
-        default=Path(os.environ["ERGON_DEFINITIONS_DIR"]) if os.environ.get("ERGON_DEFINITIONS_DIR") else None,
+        default=Path(os.environ["ERGON_DEFINITIONS_DIR"])
+        if os.environ.get("ERGON_DEFINITIONS_DIR")
+        else None,
     )
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4000)
-    parser.add_argument("--upstream-base-url", type=str, default=os.environ.get("ERGON_UPSTREAM_BASE_URL"))
-    parser.add_argument("--upstream-api-key", type=str, default=os.environ.get("ERGON_UPSTREAM_API_KEY"))
-    parser.add_argument("--instruction-role", type=str, default=os.environ.get("ERGON_INSTRUCTION_ROLE"))
+    parser.add_argument(
+        "--upstream-base-url",
+        type=str,
+        default=os.environ.get("ERGON_UPSTREAM_BASE_URL"),
+    )
+    parser.add_argument(
+        "--upstream-api-key", type=str, default=os.environ.get("ERGON_UPSTREAM_API_KEY")
+    )
+    parser.add_argument(
+        "--instruction-role", type=str, default=os.environ.get("ERGON_INSTRUCTION_ROLE")
+    )
     parser.add_argument("--disable-tool-calling", action="store_true")
     return parser
 
@@ -37,9 +47,15 @@ def run_proxy_server(
     disable_tool_calling: bool,
 ) -> int:
     if definitions_dir is None:
-        raise ValueError("missing definitions directory; pass --definitions-dir or set ERGON_DEFINITIONS_DIR")
+        raise ValueError(
+            "missing definitions directory; pass --definitions-dir or set "
+            "ERGON_DEFINITIONS_DIR"
+        )
     if not upstream_base_url or not upstream_base_url.strip():
-        raise ValueError("missing upstream base URL; pass --upstream-base-url or set ERGON_UPSTREAM_BASE_URL")
+        raise ValueError(
+            "missing upstream base URL; pass --upstream-base-url or set "
+            "ERGON_UPSTREAM_BASE_URL"
+        )
     registry = load_registry(
         definitions_dir,
         upstream=UpstreamSettings(

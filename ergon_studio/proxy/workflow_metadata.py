@@ -13,7 +13,9 @@ def workflow_orchestration_for_definition(definition: DefinitionDocument) -> str
     return "sequential"
 
 
-def workflow_participants_for_definition(definition: DefinitionDocument) -> tuple[str, ...]:
+def workflow_participants_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
     participants: list[str] = []
     for group in workflow_step_groups_for_definition(definition):
         for agent_id in group:
@@ -22,14 +24,18 @@ def workflow_participants_for_definition(definition: DefinitionDocument) -> tupl
     return tuple(participants)
 
 
-def workflow_max_rounds_for_definition(definition: DefinitionDocument, *, default: int = 1) -> int:
+def workflow_max_rounds_for_definition(
+    definition: DefinitionDocument, *, default: int = 1
+) -> int:
     value = definition.metadata.get("max_rounds", default)
     if isinstance(value, int) and value > 0:
         return value
     return default
 
 
-def workflow_selection_sequence_for_definition(definition: DefinitionDocument) -> tuple[str, ...]:
+def workflow_selection_sequence_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
     configured = definition.metadata.get("selection_sequence")
     if not isinstance(configured, list):
         return ()
@@ -53,7 +59,9 @@ def workflow_start_agent_for_definition(definition: DefinitionDocument) -> str |
     return stripped
 
 
-def workflow_finalizers_for_definition(definition: DefinitionDocument) -> tuple[str, ...]:
+def workflow_finalizers_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
     configured = definition.metadata.get("finalizers")
     if not isinstance(configured, list):
         return ()
@@ -67,7 +75,9 @@ def workflow_finalizers_for_definition(definition: DefinitionDocument) -> tuple[
     return tuple(finalizers)
 
 
-def workflow_handoffs_for_definition(definition: DefinitionDocument) -> dict[str, tuple[str, ...]]:
+def workflow_handoffs_for_definition(
+    definition: DefinitionDocument,
+) -> dict[str, tuple[str, ...]]:
     configured = definition.metadata.get("handoffs")
     if not isinstance(configured, Mapping):
         return {}

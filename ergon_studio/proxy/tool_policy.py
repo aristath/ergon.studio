@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from typing import Any
+
 from ergon_studio.proxy.models import ProxyFunctionTool
 
 
 def validate_tool_choice(
-    tool_choice: str | dict | None,
+    tool_choice: str | dict[str, Any] | None,
     *,
     tools: tuple[ProxyFunctionTool, ...],
-) -> str | dict | None:
+) -> str | dict[str, Any] | None:
     if tool_choice is None:
         return None
     if isinstance(tool_choice, str):
         if tool_choice not in {"auto", "required", "none"}:
-            raise ValueError("tool_choice must be auto, required, none, or a function selector")
+            raise ValueError(
+                "tool_choice must be auto, required, none, or a function selector"
+            )
         if tool_choice == "required" and not tools:
             raise ValueError("tool_choice='required' requires at least one tool")
         return tool_choice
@@ -22,10 +26,14 @@ def validate_tool_choice(
         raise ValueError("tool_choice objects must use type='function'")
     function = tool_choice.get("function")
     if not isinstance(function, dict):
-        raise ValueError("tool_choice function selectors must include a function object")
+        raise ValueError(
+            "tool_choice function selectors must include a function object"
+        )
     name = function.get("name")
     if not isinstance(name, str) or not name.strip():
-        raise ValueError("tool_choice function selectors must include a non-empty function name")
+        raise ValueError(
+            "tool_choice function selectors must include a non-empty function name"
+        )
     stripped_name = name.strip()
     if stripped_name not in {tool.name for tool in tools}:
         raise ValueError(f"tool_choice requested unknown tool: {stripped_name}")
@@ -38,12 +46,12 @@ def validate_tool_choice(
 def resolve_agent_tool_policy(
     *,
     tools: tuple[ProxyFunctionTool, ...],
-    tool_choice: str | dict | None,
+    tool_choice: str | dict[str, Any] | None,
     parallel_tool_calls: bool | None,
-) -> tuple[tuple[ProxyFunctionTool, ...], dict]:
+) -> tuple[tuple[ProxyFunctionTool, ...], dict[str, Any]]:
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
     resolved_tools = tools
-    run_options: dict = {}
+    run_options: dict[str, Any] = {}
     if tool_choice == "none":
         resolved_tools = ()
         run_options["tool_choice"] = "none"

@@ -33,6 +33,7 @@ def load_definitions_from_dir(directory: Path) -> dict[str, DefinitionDocument]:
         definitions[definition.id] = definition
     return definitions
 
+
 def parse_definition_text(text: str, *, path: Path) -> DefinitionDocument:
     frontmatter_text, body = _split_frontmatter(text)
     metadata = yaml.safe_load(frontmatter_text) if frontmatter_text else {}

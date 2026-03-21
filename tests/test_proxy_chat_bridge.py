@@ -14,7 +14,10 @@ class ProxyChatBridgeTests(unittest.TestCase):
                 "parallel_tool_calls": False,
                 "messages": [
                     {"role": "system", "content": "You are helpful."},
-                    {"role": "user", "content": [{"type": "text", "text": "Please fix it."}]},
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Please fix it."}],
+                    },
                     {
                         "role": "assistant",
                         "content": "",
@@ -24,7 +27,7 @@ class ProxyChatBridgeTests(unittest.TestCase):
                                 "type": "function",
                                 "function": {
                                     "name": "read_file",
-                                    "arguments": "{\"path\":\"main.py\"}",
+                                    "arguments": '{"path":"main.py"}',
                                 },
                             }
                         ],
@@ -95,7 +98,10 @@ class ProxyChatBridgeTests(unittest.TestCase):
                             {
                                 "id": "call_1",
                                 "type": "function",
-                                "function": {"name": "run_command", "arguments": "{\"command\":\"pwd\"}"},
+                                "function": {
+                                    "name": "run_command",
+                                    "arguments": '{"command":"pwd"}',
+                                },
                             }
                         ],
                     }
@@ -117,7 +123,9 @@ class ProxyChatBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual([message.role for message in request.messages], ["system", "user"])
+        self.assertEqual(
+            [message.role for message in request.messages], ["system", "user"]
+        )
         self.assertEqual(request.messages[0].content, "Always explain tradeoffs.")
 
     def test_normalizes_legacy_function_call_history(self) -> None:
@@ -130,7 +138,7 @@ class ProxyChatBridgeTests(unittest.TestCase):
                         "content": None,
                         "function_call": {
                             "name": "read_file",
-                            "arguments": "{\"path\":\"main.py\"}",
+                            "arguments": '{"path":"main.py"}',
                         },
                     },
                     {
@@ -170,7 +178,9 @@ class ProxyChatBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(request.tool_choice, {"type": "function", "function": {"name": "read_file"}})
+        self.assertEqual(
+            request.tool_choice, {"type": "function", "function": {"name": "read_file"}}
+        )
 
     def test_rejects_unknown_specific_function_tool_choice(self) -> None:
         with self.assertRaises(ValueError):

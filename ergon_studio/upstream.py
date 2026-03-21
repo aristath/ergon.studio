@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -14,7 +14,9 @@ class UpstreamSettings:
     tool_calling: bool = True
 
 
-def probe_upstream_models(settings: UpstreamSettings, *, timeout: int = 10) -> list[dict[str, Any]]:
+def probe_upstream_models(
+    settings: UpstreamSettings, *, timeout: int = 10
+) -> list[dict[str, Any]]:
     url = settings.base_url.rstrip("/") + "/models"
     request = urllib.request.Request(url)
     if settings.api_key:

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from agent_framework import ResponseStream
 from openai import OpenAI
-from unittest.mock import patch
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyOutputItemRef, ProxyToolCall, ProxyToolCallEvent
-from ergon_studio.proxy.models import ProxyTurnResult
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyToolCall,
+    ProxyToolCallEvent,
+    ProxyTurnResult,
+)
 from ergon_studio.proxy.server import start_proxy_server_in_thread
 from ergon_studio.upstream import UpstreamSettings
 
@@ -41,7 +46,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
                     ProxyToolCall(
                         id="call_1",
                         name="read_file",
-                        arguments_json="{\"path\":\"main.py\"}",
+                        arguments_json='{"path":"main.py"}',
                     ),
                 ),
             ),
@@ -82,12 +87,15 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         call = ProxyToolCall(
             id="call_1",
             name="read_file",
-            arguments_json="{\"path\":\"main.py\"}",
+            arguments_json='{"path":"main.py"}',
         )
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
             port=0,
-            core=_FakeCore([ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")], tool_calls=(call,)),
+            core=_FakeCore(
+                [ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")],
+                tool_calls=(call,),
+            ),
         )
         self.addCleanup(handle.close)
         client = _client(handle.port)
@@ -100,7 +108,9 @@ class ProxyOpenAISDKTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(chunks[0].choices[0].delta.tool_calls[0].function.name, "read_file")
+        self.assertEqual(
+            chunks[0].choices[0].delta.tool_calls[0].function.name, "read_file"
+        )
         self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
     def test_responses_create_returns_parsed_content(self) -> None:
@@ -129,7 +139,7 @@ class ProxyOpenAISDKTests(unittest.TestCase):
                     ProxyToolCall(
                         id="call_1",
                         name="read_file",
-                        arguments_json="{\"path\":\"main.py\"}",
+                        arguments_json='{"path":"main.py"}',
                     ),
                 ),
             ),
@@ -178,12 +188,15 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         call = ProxyToolCall(
             id="call_1",
             name="read_file",
-            arguments_json="{\"path\":\"main.py\"}",
+            arguments_json='{"path":"main.py"}',
         )
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
             port=0,
-            core=_FakeCore([ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")], tool_calls=(call,)),
+            core=_FakeCore(
+                [ProxyToolCallEvent(call), ProxyFinishEvent("tool_calls")],
+                tool_calls=(call,),
+            ),
         )
         self.addCleanup(handle.close)
         client = _client(handle.port)
@@ -205,11 +218,16 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         self.assertEqual(events[-1].type, "response.completed")
 
     def test_models_list_returns_upstream_model_ids(self) -> None:
-        with patch("ergon_studio.proxy.server.probe_upstream_models", return_value=[{"id": "gpt-oss-20b"}]):
+        with patch(
+            "ergon_studio.proxy.server.probe_upstream_models",
+            return_value=[{"id": "gpt-oss-20b"}],
+        ):
             handle = start_proxy_server_in_thread(
                 host="127.0.0.1",
                 port=0,
-                core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+                core=_FakeCore(
+                    [ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]
+                ),
             )
             self.addCleanup(handle.close)
             client = _client(handle.port)
@@ -236,7 +254,9 @@ class _FakeCore:
 
     def stream_turn(self, request, *, created_at: int | None = None):
         events = list(self._events)
-        content = "".join(event.delta for event in events if isinstance(event, ProxyContentDeltaEvent))
+        content = "".join(
+            event.delta for event in events if isinstance(event, ProxyContentDeltaEvent)
+        )
         finish_reason = "stop"
         for event in events:
             if isinstance(event, ProxyFinishEvent):

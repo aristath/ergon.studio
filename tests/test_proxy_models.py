@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyFunctionTool, ProxyInputMessage, ProxyReasoningDeltaEvent, ProxyToolCall, ProxyToolCallEvent, ProxyTurnRequest
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyFunctionTool,
+    ProxyInputMessage,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCall,
+    ProxyToolCallEvent,
+    ProxyTurnRequest,
+)
 
 
 class ProxyModelsTests(unittest.TestCase):
@@ -27,7 +36,7 @@ class ProxyModelsTests(unittest.TestCase):
                 ProxyToolCall(
                     id="call_1",
                     name="read_file",
-                    arguments_json="{\"path\":\"main.py\"}",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
         )

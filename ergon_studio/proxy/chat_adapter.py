@@ -3,11 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ergon_studio.proxy.models import ProxyContentDeltaEvent, ProxyFinishEvent, ProxyReasoningDeltaEvent, ProxyToolCallEvent
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCallEvent,
+)
 
 
 def encode_chat_stream_event(
-    event: ProxyReasoningDeltaEvent | ProxyContentDeltaEvent | ProxyToolCallEvent | ProxyFinishEvent,
+    event: ProxyReasoningDeltaEvent
+    | ProxyContentDeltaEvent
+    | ProxyToolCallEvent
+    | ProxyFinishEvent,
     *,
     completion_id: str,
     model: str,
@@ -58,7 +66,10 @@ def encode_chat_stream_event(
 
 
 def encode_chat_stream_sse(
-    event: ProxyReasoningDeltaEvent | ProxyContentDeltaEvent | ProxyToolCallEvent | ProxyFinishEvent,
+    event: ProxyReasoningDeltaEvent
+    | ProxyContentDeltaEvent
+    | ProxyToolCallEvent
+    | ProxyFinishEvent,
     *,
     completion_id: str,
     model: str,
@@ -72,7 +83,7 @@ def encode_chat_stream_sse(
         created_at=created_at,
         choice_index=choice_index,
     )
-    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode("utf-8")
+    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
 
 
 def encode_chat_stream_done() -> bytes:

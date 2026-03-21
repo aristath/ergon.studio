@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.workflow_metadata import (
@@ -23,7 +23,10 @@ class ProxyWorkflowMetadataTests(unittest.TestCase):
             metadata={
                 "id": "specialist-handoff",
                 "orchestration": "handoff",
-                "step_groups": [[" architect ", "reviewer"], ["reviewer", "brainstormer"]],
+                "step_groups": [
+                    [" architect ", "reviewer"],
+                    ["reviewer", "brainstormer"],
+                ],
                 "max_rounds": 6,
                 "selection_sequence": ["architect", "reviewer"],
                 "start_agent": "architect",
@@ -37,9 +40,18 @@ class ProxyWorkflowMetadataTests(unittest.TestCase):
         )
 
         self.assertEqual(workflow_orchestration_for_definition(definition), "handoff")
-        self.assertEqual(workflow_participants_for_definition(definition), ("architect", "reviewer", "brainstormer"))
+        self.assertEqual(
+            workflow_participants_for_definition(definition),
+            ("architect", "reviewer", "brainstormer"),
+        )
         self.assertEqual(workflow_max_rounds_for_definition(definition), 6)
-        self.assertEqual(workflow_selection_sequence_for_definition(definition), ("architect", "reviewer"))
+        self.assertEqual(
+            workflow_selection_sequence_for_definition(definition),
+            ("architect", "reviewer"),
+        )
         self.assertEqual(workflow_start_agent_for_definition(definition), "architect")
         self.assertEqual(workflow_finalizers_for_definition(definition), ("reviewer",))
-        self.assertEqual(workflow_handoffs_for_definition(definition), {"architect": ("reviewer", "brainstormer")})
+        self.assertEqual(
+            workflow_handoffs_for_definition(definition),
+            {"architect": ("reviewer", "brainstormer")},
+        )

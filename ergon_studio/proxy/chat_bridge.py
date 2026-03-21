@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from ergon_studio.proxy.models import ProxyFunctionTool, ProxyInputMessage, ProxyToolCall, ProxyTurnRequest
-from ergon_studio.proxy.parse_utils import normalize_message_content, optional_non_empty_text, parse_function_tool, parse_function_tool_call
+from ergon_studio.proxy.models import (
+    ProxyInputMessage,
+    ProxyToolCall,
+    ProxyTurnRequest,
+)
+from ergon_studio.proxy.parse_utils import (
+    normalize_message_content,
+    optional_non_empty_text,
+    parse_function_tool,
+    parse_function_tool_call,
+)
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 
 
@@ -45,16 +54,22 @@ def _parse_messages(raw_messages: list[Any]) -> list[ProxyInputMessage]:
     messages: list[ProxyInputMessage] = []
     pending_legacy_call_ids: list[str] = []
     for index, payload in enumerate(raw_messages):
-        message = _parse_message(payload, index=index, pending_legacy_call_ids=pending_legacy_call_ids)
+        message = _parse_message(
+            payload, index=index, pending_legacy_call_ids=pending_legacy_call_ids
+        )
         messages.append(message)
         if message.role == "assistant" and message.tool_calls:
-            pending_legacy_call_ids.extend(tool_call.id for tool_call in message.tool_calls)
+            pending_legacy_call_ids.extend(
+                tool_call.id for tool_call in message.tool_calls
+            )
         elif message.role == "tool" and pending_legacy_call_ids:
             pending_legacy_call_ids.pop(0)
     return messages
 
 
-def _parse_message(payload: Any, *, index: int, pending_legacy_call_ids: list[str]) -> ProxyInputMessage:
+def _parse_message(
+    payload: Any, *, index: int, pending_legacy_call_ids: list[str]
+) -> ProxyInputMessage:
     if not isinstance(payload, dict):
         raise ValueError("messages must contain objects")
     role = payload.get("role")
@@ -71,12 +86,18 @@ def _parse_message(payload: Any, *, index: int, pending_legacy_call_ids: list[st
     elif normalized_role == "assistant":
         legacy_function_call = payload.get("function_call")
         if legacy_function_call is not None:
-            parsed_tool_calls = (_parse_legacy_function_call(legacy_function_call, index=index),)
+            parsed_tool_calls = (
+                _parse_legacy_function_call(legacy_function_call, index=index),
+            )
 
     tool_call_id = optional_non_empty_text(payload.get("tool_call_id"))
     if normalized_role == "function":
         normalized_role = "tool"
-        tool_call_id = pending_legacy_call_ids[0] if pending_legacy_call_ids else f"legacy_call_{index}"
+        tool_call_id = (
+            pending_legacy_call_ids[0]
+            if pending_legacy_call_ids
+            else f"legacy_call_{index}"
+        )
 
     return ProxyInputMessage(
         role=normalized_role,

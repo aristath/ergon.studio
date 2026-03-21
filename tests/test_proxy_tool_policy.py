@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 
 from ergon_studio.proxy.models import ProxyFunctionTool
-from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy, validate_tool_choice
+from ergon_studio.proxy.tool_policy import (
+    resolve_agent_tool_policy,
+    validate_tool_choice,
+)
 
 
 def _tool(name: str) -> ProxyFunctionTool:
@@ -24,7 +27,9 @@ class ProxyToolPolicyTests(unittest.TestCase):
             tools=(_tool("read_file"),),
         )
 
-        self.assertEqual(choice, {"type": "function", "function": {"name": "read_file"}})
+        self.assertEqual(
+            choice, {"type": "function", "function": {"name": "read_file"}}
+        )
 
     def test_validate_tool_choice_rejects_unknown_function(self) -> None:
         with self.assertRaises(ValueError):
@@ -65,7 +70,9 @@ class ProxyToolPolicyTests(unittest.TestCase):
         self.assertEqual(tools, ())
         self.assertEqual(options, {"tool_choice": "none"})
 
-    def test_resolve_agent_tool_policy_rejects_malformed_function_selector(self) -> None:
+    def test_resolve_agent_tool_policy_rejects_malformed_function_selector(
+        self,
+    ) -> None:
         with self.assertRaisesRegex(ValueError, "function object"):
             resolve_agent_tool_policy(
                 tools=(_tool("read_file"),),

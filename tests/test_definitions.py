@@ -39,8 +39,12 @@ Do not use keyword-triggered behavior.
             self.assertEqual(definition.id, "orchestrator")
             self.assertEqual(definition.metadata["role"], "orchestrator")
             self.assertEqual(definition.metadata["tools"], ["read_file", "write_file"])
-            self.assertEqual(definition.sections["Identity"], "Lead engineer for the AI firm.")
-            self.assertEqual(definition.sections["Rules"], "Do not use keyword-triggered behavior.")
+            self.assertEqual(
+                definition.sections["Identity"], "Lead engineer for the AI firm."
+            )
+            self.assertEqual(
+                definition.sections["Rules"], "Do not use keyword-triggered behavior."
+            )
 
     def test_load_definitions_from_dir_indexes_by_definition_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

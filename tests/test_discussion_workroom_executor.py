@@ -8,18 +8,18 @@ from ergon_studio.proxy.discussion_workroom_executor import (
     ProxyDiscussionWorkroomExecutor,
 )
 from ergon_studio.proxy.models import (
-    ProxyContentDeltaEvent,
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyMoveResult, ProxyTurnState
 
 
 class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_runs_sequence_and_emits_summary(self) -> None:
+    async def test_execute_runs_one_full_discussion_round_and_keeps_room_open(
+        self,
+    ) -> None:
         streamed_agents: list[str] = []
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
 
         async def _stream_text_agent(**kwargs):
             streamed_agents.append(kwargs["agent_id"])
@@ -28,22 +28,16 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Shared result")
-
         executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Discuss it"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -52,22 +46,33 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 definition=_definition(),
                 goal="Discuss it",
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
         self.assertEqual(streamed_agents, ["architect", "reviewer"])
+        self.assertEqual(len(captured), 1)
         self.assertEqual(
-            summary_calls,
-            [("Refine", ("architect: Idea", "reviewer: Refine"))],
+            captured[0].worklog_lines,
+            ("architect: Idea", "reviewer: Refine"),
         )
-        self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
-        self.assertIsInstance(events[1], ProxyReasoningDeltaEvent)
-        self.assertIsInstance(events[2], ProxyContentDeltaEvent)
+        self.assertEqual(captured[0].current_brief, "Refine")
+        self.assertIsNotNone(captured[0].workroom_progress)
+        if captured[0].workroom_progress is None:
+            raise AssertionError("expected discussion room to stay active")
+        self.assertEqual(captured[0].workroom_progress.workroom_id, "debate")
+        self.assertIsNone(captured[0].workroom_progress.progress_index)
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("architect: Idea", reasoning)
+        self.assertIn("reviewer: Refine", reasoning)
 
     async def test_execute_expands_repeated_staffed_instances(self) -> None:
         streamed_agents: list[str] = []
         streamed_prompts: list[str] = []
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
 
         async def _stream_text_agent(**kwargs):
             streamed_agents.append(kwargs["agent_id"])
@@ -80,22 +85,16 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Shared result")
-
         executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Debate it"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -105,6 +104,7 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 goal="Debate it",
                 participants=("architect", "reviewer", "reviewer"),
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
@@ -112,6 +112,14 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Current staffed instance: reviewer[1]", streamed_prompts[1])
         self.assertIn("instance 1 of 2 staffed reviewers", streamed_prompts[1])
         self.assertIn("Current staffed instance: reviewer[2]", streamed_prompts[2])
+        self.assertEqual(
+            captured[0].worklog_lines,
+            (
+                "architect: Idea",
+                "reviewer[1]: Challenge",
+                "reviewer[2]: Challenge",
+            ),
+        )
         reasoning = "".join(
             event.delta
             for event in events
@@ -120,19 +128,6 @@ class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Idea", reasoning)
         self.assertIn("reviewer[1]: Challenge", reasoning)
         self.assertIn("reviewer[2]: Challenge", reasoning)
-        self.assertEqual(
-            summary_calls,
-            [
-                (
-                    "Challenge",
-                    (
-                        "architect: Idea",
-                        "reviewer[1]: Challenge",
-                        "reviewer[2]: Challenge",
-                    ),
-                )
-            ],
-        )
 
 
 def _definition() -> DefinitionDocument:

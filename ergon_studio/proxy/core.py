@@ -45,8 +45,6 @@ from ergon_studio.proxy.turn_state import (
     ProxyTurnState,
 )
 from ergon_studio.proxy.workroom_dispatcher import ProxyWorkroomDispatcher
-from ergon_studio.proxy.workroom_request_executor import ProxyWorkroomRequestExecutor
-from ergon_studio.proxy.workroom_support import ProxyWorkroomSupport
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -72,9 +70,6 @@ class ProxyOrchestrationCore:
             agent_builder=agent_builder,
         )
         self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
-        workroom_support = ProxyWorkroomSupport(
-            run_text_agent=self._agent_runner.run_text_agent,
-        )
         self._turn_executor = ProxyTurnExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
@@ -82,20 +77,15 @@ class ProxyOrchestrationCore:
         staged_workroom_executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workroom_summary=workroom_support.emit_summary,
         )
         discussion_workroom_executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-            emit_workroom_summary=workroom_support.emit_summary,
         )
-        workroom_dispatcher = ProxyWorkroomDispatcher(
+        self._workroom_dispatcher = ProxyWorkroomDispatcher(
             registry,
             execute_staged_workroom=staged_workroom_executor.execute,
             execute_discussion_workroom=discussion_workroom_executor.execute,
-        )
-        self._workroom_request_executor = ProxyWorkroomRequestExecutor(
-            workroom_dispatcher
         )
 
     def stream_turn(
@@ -323,11 +313,12 @@ class ProxyOrchestrationCore:
             return
         if isinstance(action, OpenWorkroomAction):
             state.mode = "workroom"
-            async for event in self._workroom_request_executor.execute_workroom(
+            async for event in self._workroom_dispatcher.execute_workroom(
                 request=request,
                 workroom_id=action.workroom_id,
                 participants=action.participants,
                 workroom_request=action.message,
+                goal=loop_state.goal,
                 state=state,
                 result_sink=_result_sink(result_holder),
                 loop_state=loop_state,
@@ -336,10 +327,20 @@ class ProxyOrchestrationCore:
             return
         if isinstance(action, ContinueWorkroomAction):
             state.mode = "workroom"
-            async for event in self._workroom_request_executor.execute_active_workroom(
+            active_workroom = loop_state.workroom_progress
+            if active_workroom is None:
+                state.finish_reason = "error"
+                error_text = "No active workroom is available to continue."
+                state.content = error_text
+                yield ProxyContentDeltaEvent(error_text)
+                return
+            async for event in self._workroom_dispatcher.execute_workroom_continuation(
                 request=request,
-                message=action.message,
-                participants=(),
+                continuation=_update_workroom_request(
+                    active_workroom,
+                    message=action.message,
+                ),
+                pending=None,
                 state=state,
                 result_sink=_result_sink(result_holder),
                 loop_state=loop_state,
@@ -375,7 +376,7 @@ class ProxyOrchestrationCore:
         if continuation.mode == "workroom":
             state.mode = "workroom"
             async for event in (
-                self._workroom_request_executor.execute_workroom_continuation(
+                self._workroom_dispatcher.execute_workroom_continuation(
                     request=request,
                     continuation=continuation,
                     pending=pending,
@@ -453,6 +454,32 @@ def _result_sink(holder: dict[str, object]) -> Any:
         holder["result"] = result
 
     return _capture
+
+
+def _update_workroom_request(
+    continuation: ContinuationState,
+    *,
+    message: str,
+) -> ContinuationState:
+    if message == continuation.workroom_request:
+        return continuation
+    return ContinuationState(
+        mode=continuation.mode,
+        agent_id=continuation.agent_id,
+        participant_label=continuation.participant_label,
+        workroom_id=continuation.workroom_id,
+        workroom_participants=continuation.workroom_participants,
+        workroom_request=message,
+        last_stage_outputs=continuation.last_stage_outputs,
+        last_stage_parallel_attempts=continuation.last_stage_parallel_attempts,
+        progress_index=continuation.progress_index,
+        member_index=continuation.member_index,
+        message=continuation.message,
+        goal=continuation.goal,
+        current_brief=continuation.current_brief,
+        worklog=continuation.worklog,
+        workroom_outputs=continuation.workroom_outputs,
+    )
 
 
 def _result(

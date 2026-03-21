@@ -489,21 +489,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             workroom_id="debate",
                             message="Choose an approach",
                         ),
-                        _internal_action(
-                            "continue_workroom",
-                            message=(
-                                "Continue the discussion and pressure-test "
-                                "the options"
-                            ),
-                        ),
-                        _internal_action(
-                            "continue_workroom",
-                            message="Keep going and move toward a recommendation",
-                        ),
-                        _internal_action(
-                            "continue_workroom",
-                            message="Wrap up with a decision-ready recommendation",
-                        ),
                         "Debate final summary",
                     ],
                     "architect": ["Option A", "Refined option A"],
@@ -542,13 +527,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_workroom",
                             workroom_id="dynamic-open-ended",
                             message="Build it",
-                        ),
-                        _internal_action(
-                            "continue_workroom",
-                            message=(
-                                "Continue the discussion and move toward "
-                                "a decision"
-                            ),
                         ),
                         "Dynamic final summary",
                     ],
@@ -1102,7 +1080,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                         "architect",
                         "reviewer",
                     ],
-                    "max_rounds": 4,
                 },
                 body="## Purpose\nDebate.",
                 sections={"Purpose": "Debate."},
@@ -1114,7 +1091,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                     "id": "dynamic-open-ended",
                     "shape": "discussion",
                     "turns": ["architect", "reviewer"],
-                    "max_rounds": 3,
                 },
                 body="## Purpose\nAdaptive.",
                 sections={"Purpose": "Adaptive."},
@@ -1126,7 +1102,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                     "id": "handoff-chain",
                     "shape": "staged",
                     "stages": [["researcher"], ["reviewer"]],
-                    "max_rounds": 3,
                 },
                 body="## Purpose\nHandoff.",
                 sections={"Purpose": "Handoff."},

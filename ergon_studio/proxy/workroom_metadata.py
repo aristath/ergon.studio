@@ -30,12 +30,3 @@ def workroom_turn_sequence_for_definition(
     if workroom_shape_for_definition(definition) != "discussion":
         return ()
     return discussion_turns_for_definition(definition)
-
-
-def workroom_max_rounds_for_definition(
-    definition: DefinitionDocument, *, default: int = 1
-) -> int:
-    value = definition.metadata.get("max_rounds", default)
-    if isinstance(value, int) and value > 0:
-        return value
-    return default

@@ -7,7 +7,6 @@ turns:
   - coder
   - critic
   - reviewer
-max_rounds: 4
 ---
 
 ## Purpose

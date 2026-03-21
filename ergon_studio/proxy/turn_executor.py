@@ -46,9 +46,9 @@ class ProxyTurnExecutor:
         agent_id: str,
         message: str,
         state: ProxyTurnState,
+        result_sink: Callable[[ProxyMoveResult], None],
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         intro = f"Orchestrator: messaging specialist {agent_id}."
@@ -104,10 +104,9 @@ class ProxyTurnExecutor:
                     yield tool_event
                 return
         final_text = specialist_text.strip() or effective_brief or "(no output)"
-        if result_sink is not None:
-            result_sink(
-                ProxyMoveResult(
-                    worklog_lines=(f"{agent_id}: {final_text}",),
-                    current_brief=final_text,
-                )
+        result_sink(
+            ProxyMoveResult(
+                worklog_lines=(f"{agent_id}: {final_text}",),
+                current_brief=final_text,
             )
+        )

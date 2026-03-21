@@ -48,11 +48,9 @@ class ProxyStagedWorkroomExecutor:
         *,
         stream_text_agent: Callable[..., Any],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
-        emit_workroom_summary: Callable[..., AsyncIterator[ProxyEvent]],
     ) -> None:
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
-        self._emit_workroom_summary = emit_workroom_summary
 
     async def execute(
         self,
@@ -68,6 +66,8 @@ class ProxyStagedWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
+        if result_sink is None:
+            raise ValueError("staged workroom execution requires a result sink")
         staffed_participants = (
             continuation.workroom_participants
             if continuation is not None
@@ -163,30 +163,28 @@ class ProxyStagedWorkroomExecutor:
                     )
                     last_stage_outputs = list(stage_outputs)
                     last_stage_parallel_attempts = True
-                    if result_sink is not None:
-                        result_sink(
-                            ProxyMoveResult(
-                                worklog_lines=tuple(stage_outputs),
+                    result_sink(
+                        ProxyMoveResult(
+                            worklog_lines=tuple(stage_outputs),
+                            current_brief=current_brief,
+                            workroom_progress=self._next_workroom_progress(
+                                definition=definition,
+                                stage_groups=stage_groups,
+                                staffed_participants=staffed_participants,
+                                workroom_request=workroom_request,
+                                stage_index=stage_index,
+                                goal=goal,
                                 current_brief=current_brief,
-                                workroom_progress=self._next_workroom_progress(
-                                    definition=definition,
-                                    stage_groups=stage_groups,
-                                    staffed_participants=staffed_participants,
-                                    workroom_request=workroom_request,
-                                    stage_index=stage_index,
-                                    goal=goal,
-                                    current_brief=current_brief,
-                                    loop_state=loop_state,
-                                    workroom_outputs=workroom_outputs,
-                                    last_stage_outputs=last_stage_outputs,
-                                    last_stage_parallel_attempts=(
-                                        last_stage_parallel_attempts
-                                    ),
+                                loop_state=loop_state,
+                                workroom_outputs=workroom_outputs,
+                                last_stage_outputs=last_stage_outputs,
+                                last_stage_parallel_attempts=(
+                                    last_stage_parallel_attempts
                                 ),
-                            )
+                            ),
                         )
-                        return
-                    continue
+                    )
+                    return
             for member_index in range(group_start_index, len(group)):
                 agent_id = group[member_index]
                 agent_label = _agent_instance_label(group, member_index)
@@ -270,38 +268,34 @@ class ProxyStagedWorkroomExecutor:
                 )
             last_stage_outputs = list(stage_outputs)
             last_stage_parallel_attempts = _is_parallel_attempt_group(group)
-            if result_sink is not None:
-                result_sink(
-                    ProxyMoveResult(
-                        worklog_lines=tuple(stage_outputs),
+            result_sink(
+                ProxyMoveResult(
+                    worklog_lines=tuple(stage_outputs),
+                    current_brief=current_brief,
+                    workroom_progress=self._next_workroom_progress(
+                        definition=definition,
+                        stage_groups=stage_groups,
+                        staffed_participants=staffed_participants,
+                        workroom_request=workroom_request,
+                        stage_index=stage_index,
+                        goal=goal,
                         current_brief=current_brief,
-                        workroom_progress=self._next_workroom_progress(
-                            definition=definition,
-                            stage_groups=stage_groups,
-                            staffed_participants=staffed_participants,
-                            workroom_request=workroom_request,
-                            stage_index=stage_index,
-                            goal=goal,
-                            current_brief=current_brief,
-                            loop_state=loop_state,
-                            workroom_outputs=workroom_outputs,
-                            last_stage_outputs=last_stage_outputs,
-                            last_stage_parallel_attempts=(
-                                last_stage_parallel_attempts
-                            ),
+                        loop_state=loop_state,
+                        workroom_outputs=workroom_outputs,
+                        last_stage_outputs=last_stage_outputs,
+                        last_stage_parallel_attempts=(
+                            last_stage_parallel_attempts
                         ),
-                    )
+                    ),
                 )
-                return
-        async for summary_event in self._emit_workroom_summary(
-            request=request,
-            definition=definition,
-            goal=goal,
-            current_brief=current_brief,
-            workroom_outputs=tuple(workroom_outputs),
-            state=state,
-        ):
-            yield summary_event
+            )
+            return
+        result_sink(
+            ProxyMoveResult(
+                worklog_lines=(),
+                current_brief=current_brief,
+            )
+        )
 
     def _should_try_parallel_group(
         self,

@@ -9,7 +9,6 @@ turns:
   - tester
   - reviewer
   - critic
-max_rounds: 6
 ---
 
 ## Purpose

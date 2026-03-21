@@ -71,8 +71,7 @@ class ProxyWorkroomDispatcher:
             yield ProxyContentDeltaEvent(error_text)
             return
         intro = _workroom_notice(
-            base=_workroom_intro(definition),
-            loop_state=loop_state,
+            _workroom_intro(definition),
         )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
@@ -112,11 +111,10 @@ class ProxyWorkroomDispatcher:
             return
         agent_name = continuation.agent_id or "(unknown)"
         intro = _workroom_notice(
-            base=(
+            (
                 f"Orchestrator: continuing workroom {definition.id} with "
                 f"{agent_name}."
             ),
-            loop_state=loop_state,
         )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
@@ -196,12 +194,7 @@ class ProxyWorkroomDispatcher:
         return self.registry.workroom_definitions.get(workroom_id or "")
 
 
-def _workroom_notice(
-    *,
-    base: str,
-    loop_state: ProxyDecisionLoopState | None,
-) -> str:
-    del loop_state
+def _workroom_notice(base: str) -> str:
     return base + "\n"
 
 
@@ -220,7 +213,6 @@ def _ad_hoc_workroom_definition(
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
         shape = "staged"
         metadata: dict[str, object] = {"stages": list(expanded_staffing)}
-        max_rounds = len(expanded_staffing)
     else:
         shape = "discussion"
         ordered_roles: list[str] = []
@@ -228,7 +220,6 @@ def _ad_hoc_workroom_definition(
             if agent_id not in ordered_roles:
                 ordered_roles.append(agent_id)
         metadata = {"turns": ordered_roles}
-        max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(
         id=AD_HOC_WORKROOM_ID,
         path=Path(AD_HOC_WORKROOM_ID),
@@ -236,7 +227,6 @@ def _ad_hoc_workroom_definition(
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
             "shape": shape,
-            "max_rounds": max_rounds,
             **metadata,
         },
         body=(

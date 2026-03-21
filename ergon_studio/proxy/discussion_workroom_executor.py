@@ -22,7 +22,6 @@ from ergon_studio.proxy.turn_state import (
     ProxyTurnState,
 )
 from ergon_studio.proxy.workroom_metadata import (
-    workroom_max_rounds_for_definition,
     workroom_participants_for_definition,
     workroom_turn_sequence_for_definition,
 )
@@ -47,11 +46,9 @@ class ProxyDiscussionWorkroomExecutor:
         *,
         stream_text_agent: Callable[..., Any],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
-        emit_workroom_summary: Callable[..., AsyncIterator[ProxyEvent]],
     ) -> None:
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
-        self._emit_workroom_summary = emit_workroom_summary
 
     async def execute(
         self,
@@ -67,6 +64,8 @@ class ProxyDiscussionWorkroomExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
+        if result_sink is None:
+            raise ValueError("discussion workroom execution requires a result sink")
         staffed_participants = (
             continuation.workroom_participants
             if continuation is not None
@@ -80,20 +79,15 @@ class ProxyDiscussionWorkroomExecutor:
             workroom_turn_sequence_for_definition(definition),
             participants=staffed_members,
         )
-        max_rounds = workroom_max_rounds_for_definition(
-            definition, default=max(len(sequence), len(staffed_members), 1)
-        )
         if not sequence:
             sequence = (
                 tuple(
                     staffed_members[index % len(staffed_members)].label
-                    for index in range(max_rounds)
+                    for index in range(len(staffed_members))
                 )
                 if staffed_members
                 else ()
             )
-        else:
-            sequence = sequence[:max_rounds]
         start_turn = (
             continuation.progress_index
             if continuation and continuation.progress_index is not None
@@ -118,6 +112,7 @@ class ProxyDiscussionWorkroomExecutor:
         workroom_outputs: list[str] = (
             list(continuation.workroom_outputs) if continuation is not None else []
         )
+        round_outputs: list[str] = []
         for turn_index in range(start_turn, len(sequence)):
             participant = participant_by_label(
                 staffed_members,
@@ -189,61 +184,31 @@ class ProxyDiscussionWorkroomExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workroom_outputs.append(f"{participant.label}: {agent_text.strip()}")
+            round_output = f"{participant.label}: {agent_text.strip()}"
+            workroom_outputs.append(round_output)
+            round_outputs.append(round_output)
             current_brief = agent_text.strip() or current_brief
-            if result_sink is not None:
-                next_turn = turn_index + 1
-                workroom_progress = None
-                if next_turn < len(sequence):
-                    next_participant = participant_by_label(
-                        staffed_members,
-                        sequence[next_turn],
-                    )
-                    workroom_progress = ContinuationState(
-                        mode="workroom",
-                        workroom_id=definition.id,
-                        workroom_participants=staffed_participants,
-                        workroom_request=workroom_request,
-                        progress_index=next_turn,
-                        agent_id=(
-                            next_participant.agent_id
-                            if next_participant is not None
-                            else participant.agent_id
-                        ),
-                        participant_label=(
-                            next_participant.label
-                            if next_participant is not None
-                            else None
-                        ),
-                        goal=goal,
-                        current_brief=current_brief,
-                        worklog=(
-                            loop_state.worklog if loop_state is not None else ()
-                        ),
-                        workroom_outputs=tuple(workroom_outputs),
-                    )
-                result_sink(
-                    ProxyMoveResult(
-                        worklog_lines=(workroom_outputs[-1],),
-                        current_brief=current_brief,
-                        workroom_progress=workroom_progress,
-                    )
-                )
-                return
-        if result_sink is not None:
-            result_sink(
-                ProxyMoveResult(
-                    worklog_lines=(),
+        result_sink(
+            ProxyMoveResult(
+                worklog_lines=tuple(round_outputs),
+                current_brief=current_brief,
+                workroom_progress=ContinuationState(
+                    mode="workroom",
+                    agent_id=staffed_members[0].agent_id if staffed_members else "",
+                    participant_label=(
+                        staffed_members[0].label if staffed_members else None
+                    ),
+                    workroom_id=definition.id,
+                    workroom_participants=staffed_participants,
+                    workroom_request=workroom_request,
+                    goal=goal,
                     current_brief=current_brief,
+                    worklog=(
+                        loop_state.worklog if loop_state is not None else ()
+                    ),
+                    workroom_outputs=tuple(workroom_outputs),
                 )
+                if staffed_members
+                else None,
             )
-            return
-        async for summary_event in self._emit_workroom_summary(
-            request=request,
-            definition=definition,
-            goal=goal,
-            current_brief=current_brief,
-            workroom_outputs=tuple(workroom_outputs),
-            state=state,
-        ):
-            yield summary_event
+        )

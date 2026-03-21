@@ -9,7 +9,6 @@ stages:
   - tester
   - critic
   - reviewer
-max_rounds: 6
 ---
 
 ## Purpose

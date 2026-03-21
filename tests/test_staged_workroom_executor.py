@@ -8,19 +8,17 @@ from pathlib import Path
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState
 from ergon_studio.proxy.models import (
-    ProxyContentDeltaEvent,
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.staged_workroom_executor import ProxyStagedWorkroomExecutor
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyMoveResult, ProxyTurnState
 
 
 class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_runs_steps_and_emits_summary(self) -> None:
+    async def test_execute_runs_first_stage_and_returns_next_progress(self) -> None:
         streamed_agents: list[str] = []
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
 
         async def _stream_text_agent(**kwargs):
             streamed_agents.append(kwargs["agent_id"])
@@ -29,22 +27,16 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Build it"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -53,21 +45,23 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 definition=_definition(),
                 goal="Build it",
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
-        self.assertEqual(streamed_agents, ["architect", "coder"])
-        self.assertEqual(
-            summary_calls,
-            [("Built", ("architect: Plan", "coder: Built"))],
-        )
+        self.assertEqual(streamed_agents, ["architect"])
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].worklog_lines, ("architect: Plan",))
+        self.assertEqual(captured[0].current_brief, "Plan")
+        self.assertIsNotNone(captured[0].workroom_progress)
+        if captured[0].workroom_progress is None:
+            raise AssertionError("expected staged workroom to advance")
+        self.assertEqual(captured[0].workroom_progress.progress_index, 1)
+        self.assertEqual(captured[0].workroom_progress.agent_id, "coder")
         self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
-        self.assertIsInstance(events[1], ProxyReasoningDeltaEvent)
-        self.assertIsInstance(events[2], ProxyContentDeltaEvent)
 
     async def test_execute_labels_parallel_role_instances(self) -> None:
         streamed_prompts: list[str] = []
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
         coder_outputs = iter(["Idea A", "Idea B", "Chosen"])
 
         async def _stream_text_agent(**kwargs):
@@ -77,22 +71,16 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -101,6 +89,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 definition=_best_of_n_definition(),
                 goal="Try a few approaches",
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
@@ -113,13 +102,8 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder[2]: Idea B", reasoning)
         self.assertIn("coder[3]: Chosen", reasoning)
         self.assertEqual(
-            summary_calls,
-            [
-                (
-                    "coder[1]: Idea A\ncoder[2]: Idea B\ncoder[3]: Chosen",
-                    ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
-                )
-            ],
+            captured[0].worklog_lines,
+            ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
         )
         self.assertIn("Current staffed instance: coder[1]", streamed_prompts[0])
         self.assertIn("instance 2 of 3", streamed_prompts[1])
@@ -127,7 +111,6 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_expands_repeated_role_instances_from_staffing_plan(
         self,
     ) -> None:
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
         coder_outputs = iter(["Idea A", "Idea B", "Idea C"])
 
         async def _stream_text_agent(**_kwargs):
@@ -136,22 +119,16 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -161,6 +138,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 goal="Try a few approaches",
                 participants=("coder", "coder", "coder"),
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
@@ -174,17 +152,11 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder[2]: Idea B", reasoning)
         self.assertIn("coder[3]: Idea C", reasoning)
         self.assertEqual(
-            summary_calls,
-            [
-                (
-                    "coder[1]: Idea A\ncoder[2]: Idea B\ncoder[3]: Idea C",
-                    ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Idea C"),
-                )
-            ],
+            captured[0].worklog_lines,
+            ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Idea C"),
         )
 
     async def test_execute_runs_parallel_attempt_group_concurrently(self) -> None:
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
         coder_outputs = iter(["Idea A", "Idea B", "Chosen"])
 
         async def _stream_text_agent(**_kwargs):
@@ -194,22 +166,16 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
             messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         started_at = time.perf_counter()
         [event async for event in executor.execute(
@@ -217,25 +183,20 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             definition=_best_of_n_definition(),
             goal="Try a few approaches",
             state=state,
+            result_sink=captured.append,
         )]
         elapsed = time.perf_counter() - started_at
 
         self.assertLess(elapsed, 0.12)
         self.assertEqual(
-            summary_calls,
-            [
-                (
-                    "coder[1]: Idea A\ncoder[2]: Idea B\ncoder[3]: Chosen",
-                    ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
-                )
-            ],
+            captured[0].worklog_lines,
+            ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Chosen"),
         )
 
     async def test_execute_falls_back_to_sequential_when_parallel_attempt_uses_tools(
         self,
     ) -> None:
         call_count = 0
-        summary_calls: list[tuple[str, tuple[str, ...]]] = []
 
         async def _stream_text_agent(**kwargs):
             nonlocal call_count
@@ -251,16 +212,9 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            summary_calls.append(
-                (kwargs["current_brief"], kwargs["workroom_outputs"])
-            )
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -268,6 +222,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -276,6 +231,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 definition=_best_of_n_definition(),
                 goal="Try a few approaches",
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
@@ -287,13 +243,8 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rerunning this staffed group sequentially", reasoning)
         self.assertEqual(call_count, 6)
         self.assertEqual(
-            summary_calls,
-            [
-                (
-                    "coder[1]: Final 4\ncoder[2]: Final 5\ncoder[3]: Final 6",
-                    ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
-                )
-            ],
+            captured[0].worklog_lines,
+            ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
         )
 
     async def test_next_stage_receives_parallel_attempts_as_alternatives(
@@ -308,13 +259,9 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -327,6 +274,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             definition=_best_of_n_review_definition(),
             goal="Pick the best one",
             state=state,
+            result_sink=lambda _result: None,
             continuation=ContinuationState(
                 mode="workroom",
                 workroom_id="best-of-n",
@@ -348,9 +296,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
         self.assertIn("Treat these as competing options", reviewer_prompt)
 
-    async def test_stage_prompt_receives_workroom_assignment(
-        self,
-    ) -> None:
+    async def test_stage_prompt_receives_workroom_assignment(self) -> None:
         streamed_prompts: list[str] = []
 
         async def _stream_text_agent(**kwargs):
@@ -360,13 +306,9 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         def _emit_tool_calls(**_kwargs):
             return []
 
-        async def _emit_workroom_summary(**kwargs):
-            yield ProxyContentDeltaEvent("Final summary")
-
         executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
-            emit_workroom_summary=_emit_workroom_summary,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -380,6 +322,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             goal="Pick the best one",
             workroom_request="Compare the two alternatives and choose one winner.",
             state=state,
+            result_sink=lambda _result: None,
             continuation=ContinuationState(
                 mode="workroom",
                 workroom_id="best-of-n",
@@ -442,20 +385,6 @@ def _best_of_n_review_definition() -> DefinitionDocument:
         },
         body="## Purpose\nCompare attempts.",
         sections={"Purpose": "Compare attempts."},
-    )
-
-
-def _review_then_polish_definition() -> DefinitionDocument:
-    return DefinitionDocument(
-        id="best-of-n",
-        path=Path("best-of-n.md"),
-        metadata={
-            "id": "best-of-n",
-            "shape": "staged",
-            "stages": [["coder", "coder"], ["reviewer"], ["coder"]],
-        },
-        body="## Purpose\nCompare, select, then polish.",
-        sections={"Purpose": "Compare, select, then polish."},
     )
 
 

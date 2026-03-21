@@ -5,7 +5,6 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.workroom_metadata import (
-    workroom_max_rounds_for_definition,
     workroom_participants_for_definition,
     workroom_shape_for_definition,
     workroom_turn_sequence_for_definition,
@@ -21,7 +20,6 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
                 "id": "discussion-room",
                 "shape": "discussion",
                 "turns": [" architect ", "reviewer", "reviewer", "brainstormer"],
-                "max_rounds": 6,
             },
             body="## Purpose\nDiscussion.",
             sections={"Purpose": "Discussion."},
@@ -32,7 +30,6 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             workroom_participants_for_definition(definition),
             ("architect", "reviewer", "brainstormer"),
         )
-        self.assertEqual(workroom_max_rounds_for_definition(definition), 6)
         self.assertEqual(
             workroom_turn_sequence_for_definition(definition),
             ("architect", "reviewer", "reviewer", "brainstormer"),

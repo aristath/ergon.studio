@@ -8,11 +8,17 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 
 
 class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_delegation_streams_specialist_reasoning(self) -> None:
+    async def test_execute_delegation_streams_specialist_reasoning_and_returns_result(
+        self,
+    ) -> None:
         async def _stream_text_agent(**_kwargs):
             yield "Patch"
             yield " applied"
@@ -29,6 +35,7 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Implement it"),),
         )
         state = ProxyTurnState()
+        captured: list[ProxyMoveResult] = []
 
         events = [
             event
@@ -37,6 +44,7 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
                 agent_id="coder",
                 message="Implement it",
                 state=state,
+                result_sink=captured.append,
             )
         ]
 
@@ -47,12 +55,15 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("messaging specialist coder", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].worklog_lines, ("coder: Patch applied",))
+        self.assertEqual(captured[0].current_brief, "Patch applied")
 
     async def test_execute_delegation_passes_context_to_specialist(self) -> None:
-        captured: dict[str, object] = {}
+        captured_prompt: dict[str, object] = {}
 
         async def _stream_text_agent(**kwargs):
-            captured["prompt"] = kwargs["prompt"]
+            captured_prompt["prompt"] = kwargs["prompt"]
             yield "Patch applied"
 
         def _emit_tool_calls(**_kwargs):
@@ -79,11 +90,12 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
                 agent_id="coder",
                 message="Implement it",
                 state=state,
+                result_sink=lambda _result: None,
                 loop_state=loop_state,
             )
         ]
 
-        prompt = captured["prompt"]
+        prompt = captured_prompt["prompt"]
         self.assertIsInstance(prompt, str)
         if not isinstance(prompt, str):
             raise AssertionError("expected prompt string")

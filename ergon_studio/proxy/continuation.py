@@ -18,8 +18,7 @@ class ContinuationState:
     participant_label: str | None = None
     workroom_id: str | None = None
     workroom_participants: tuple[str, ...] = ()
-    workroom_request: str | None = None
-    progress_index: int | None = None
+    workroom_message: str | None = None
     member_index: int | None = None
     goal: str | None = None
     current_brief: str | None = None
@@ -50,10 +49,8 @@ def encode_continuation_tool_call(
         payload["w"] = state.workroom_id
     if state.workroom_participants:
         payload["p"] = list(state.workroom_participants)
-    if state.workroom_request is not None:
-        payload["pr"] = state.workroom_request
-    if state.progress_index is not None:
-        payload["x"] = state.progress_index
+    if state.workroom_message is not None:
+        payload["pr"] = state.workroom_message
     if state.member_index is not None:
         payload["i"] = state.member_index
     if state.goal is not None:
@@ -91,8 +88,7 @@ def decode_continuation_from_tool_call_id(
     participant_label = payload.get("al")
     workroom_id = payload.get("w")
     workroom_participants = payload.get("p", [])
-    workroom_request = payload.get("pr")
-    progress_index = payload.get("x")
+    workroom_message = payload.get("pr")
     member_index = payload.get("i")
     goal = payload.get("g")
     current_brief = payload.get("c")
@@ -108,9 +104,7 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in workroom_participants
     ):
         return None
-    if workroom_request is not None and not isinstance(workroom_request, str):
-        return None
-    if progress_index is not None and not isinstance(progress_index, int):
+    if workroom_message is not None and not isinstance(workroom_message, str):
         return None
     if member_index is not None and not isinstance(member_index, int):
         return None
@@ -132,8 +126,7 @@ def decode_continuation_from_tool_call_id(
         participant_label=participant_label,
         workroom_id=workroom_id,
         workroom_participants=tuple(workroom_participants),
-        workroom_request=workroom_request,
-        progress_index=progress_index,
+        workroom_message=workroom_message,
         member_index=member_index,
         goal=goal,
         current_brief=current_brief,

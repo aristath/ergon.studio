@@ -232,7 +232,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 request=request,
                 definition=_ordered_definition(),
                 goal="Pick the best one",
-                workroom_request="Choose one clear direction.",
+                workroom_message="Choose one clear direction.",
                 participants=("reviewer",),
                 state=state,
                 result_sink=lambda _result: None,
@@ -241,7 +241,7 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         reviewer_prompt = streamed_prompts[0]
-        self.assertIn("Current workroom assignment:", reviewer_prompt)
+        self.assertIn("Latest lead-dev message to this workroom:", reviewer_prompt)
         self.assertIn("Choose one clear direction.", reviewer_prompt)
         self.assertIn("Prior workroom outputs:", reviewer_prompt)
         self.assertIn("coder[1]: Idea A", reviewer_prompt)
@@ -281,7 +281,6 @@ def _continuation_state():
         mode="workroom",
         workroom_id="debate",
         workroom_participants=("reviewer",),
-        progress_index=None,
         member_index=0,
         agent_id="reviewer",
         goal="Pick the best one",

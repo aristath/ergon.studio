@@ -63,7 +63,7 @@ class ProxyWorkroomExecutor:
         definition: DefinitionDocument,
         goal: str,
         participants: tuple[str, ...] = (),
-        workroom_request: str | None = None,
+        workroom_message: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -86,11 +86,11 @@ class ProxyWorkroomExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
-        workroom_request = (
-            continuation.workroom_request
-            if continuation is not None and continuation.workroom_request is not None
-            else workroom_request
-            if workroom_request is not None
+        workroom_message = (
+            continuation.workroom_message
+            if continuation is not None and continuation.workroom_message is not None
+            else workroom_message
+            if workroom_message is not None
             else None
         )
         workroom_outputs: list[str] = (
@@ -110,7 +110,7 @@ class ProxyWorkroomExecutor:
                 staffed_members=staffed_members,
                 goal=goal,
                 current_brief=round_entry_brief,
-                workroom_request=workroom_request,
+                workroom_message=workroom_message,
             )
             if any(
                 extract_tool_calls(result.response)
@@ -142,7 +142,7 @@ class ProxyWorkroomExecutor:
                         workroom_progress=_active_workroom_state(
                             definition=definition,
                             round_participants=round_participants,
-                            workroom_request=workroom_request,
+                            workroom_message=workroom_message,
                             goal=goal,
                             current_brief=current_brief,
                             loop_state=loop_state,
@@ -170,7 +170,7 @@ class ProxyWorkroomExecutor:
                     if _is_parallel_round(staffed_members)
                     else current_brief
                 ),
-                workroom_request=workroom_request,
+                workroom_message=workroom_message,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workroom_outputs),
             )
@@ -204,8 +204,7 @@ class ProxyWorkroomExecutor:
                         mode="workroom",
                         workroom_id=definition.id,
                         workroom_participants=round_participants,
-                        workroom_request=workroom_request,
-                        progress_index=None,
+                        workroom_message=workroom_message,
                         member_index=member_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
@@ -239,7 +238,7 @@ class ProxyWorkroomExecutor:
                 workroom_progress=_active_workroom_state(
                     definition=definition,
                     round_participants=round_participants,
-                    workroom_request=workroom_request,
+                    workroom_message=workroom_message,
                     goal=goal,
                     current_brief=current_brief,
                     loop_state=loop_state,
@@ -270,7 +269,7 @@ class ProxyWorkroomExecutor:
         staffed_members: tuple[StaffedParticipant, ...],
         goal: str,
         current_brief: str,
-        workroom_request: str | None,
+        workroom_message: str | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
             asyncio.create_task(
@@ -280,7 +279,7 @@ class ProxyWorkroomExecutor:
                     participant=participant,
                     goal=goal,
                     current_brief=current_brief,
-                    workroom_request=workroom_request,
+                    workroom_message=workroom_message,
                 )
             )
             for participant in staffed_members
@@ -295,7 +294,7 @@ class ProxyWorkroomExecutor:
         participant: StaffedParticipant,
         goal: str,
         current_brief: str,
-        workroom_request: str | None,
+        workroom_message: str | None,
     ) -> _AgentAttemptResult:
         prompt = workroom_round_prompt(
             workroom_id=definition.id,
@@ -308,7 +307,7 @@ class ProxyWorkroomExecutor:
             role_instance_context=participant_context(participant),
             goal=goal,
             current_brief=current_brief,
-            workroom_request=workroom_request,
+            workroom_message=workroom_message,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
         )
@@ -349,7 +348,7 @@ def _active_workroom_state(
     *,
     definition: DefinitionDocument,
     round_participants: tuple[str, ...],
-    workroom_request: str | None,
+    workroom_message: str | None,
     goal: str,
     current_brief: str,
     loop_state: ProxyDecisionLoopState | None,
@@ -364,7 +363,7 @@ def _active_workroom_state(
         participant_label=staffed_members[0].label,
         workroom_id=definition.id,
         workroom_participants=round_participants,
-        workroom_request=workroom_request,
+        workroom_message=workroom_message,
         goal=goal,
         current_brief=current_brief,
         worklog=loop_state.worklog if loop_state is not None else (),

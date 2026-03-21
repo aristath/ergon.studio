@@ -26,7 +26,6 @@ class ProxyContinuationTests(unittest.TestCase):
                 mode="workroom",
                 agent_id="architect",
                 workroom_id="standard-build",
-                progress_index=2,
             ),
         )
 
@@ -37,7 +36,6 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.agent_id, "architect")
         self.assertEqual(decoded.workroom_id, "standard-build")
         self.assertEqual(decoded.workroom_participants, ())
-        self.assertEqual(decoded.progress_index, 2)
         self.assertEqual(decoded.member_index, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
@@ -55,8 +53,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 agent_id="coder",
                 workroom_id="standard-build",
                 workroom_participants=("coder", "coder", "coder", "reviewer"),
-                workroom_request="Polish the selected candidate.",
-                progress_index=1,
+                workroom_message="Polish the selected candidate.",
                 member_index=0,
                 goal="Build calculator",
                 current_brief="Updating main.py",
@@ -73,7 +70,7 @@ class ProxyContinuationTests(unittest.TestCase):
             decoded.workroom_participants,
             ("coder", "coder", "coder", "reviewer"),
         )
-        self.assertEqual(decoded.workroom_request, "Polish the selected candidate.")
+        self.assertEqual(decoded.workroom_message, "Polish the selected candidate.")
         self.assertEqual(decoded.workroom_outputs, ("architect: use main.py",))
         self.assertEqual(decoded.member_index, 0)
 

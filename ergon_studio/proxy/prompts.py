@@ -12,7 +12,7 @@ def orchestrator_turn_prompt(
     worklog: tuple[str, ...] = (),
     active_workroom_id: str | None = None,
     active_workroom_participants: tuple[str, ...] = (),
-    active_workroom_request: str | None = None,
+    active_workroom_message: str | None = None,
 ) -> str:
     lines = [
         "You are the lead developer in an AI software firm.",
@@ -50,8 +50,14 @@ def orchestrator_turn_prompt(
                 ", ".join(active_workroom_participants),
             ]
         )
-    if active_workroom_request:
-        lines.extend(["", "Current workroom assignment:", active_workroom_request])
+    if active_workroom_message:
+        lines.extend(
+            [
+                "",
+                "Latest message to the active workroom:",
+                active_workroom_message,
+            ]
+        )
     if worklog:
         lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
@@ -65,7 +71,7 @@ def workroom_round_prompt(
     role_instance_context: str | None = None,
     goal: str,
     current_brief: str,
-    workroom_request: str | None = None,
+    workroom_message: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
 ) -> str:
@@ -103,12 +109,12 @@ def workroom_round_prompt(
             current_brief or "(none)",
         ]
     )
-    if workroom_request:
+    if workroom_message:
         lines.extend(
             [
                 "",
-                "Current workroom assignment:",
-                workroom_request,
+                "Latest lead-dev message to this workroom:",
+                workroom_message,
             ]
         )
     if prior_outputs:

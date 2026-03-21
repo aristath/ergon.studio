@@ -50,7 +50,9 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
                     "http://localhost:8080/v1"
                 )
                 app.query_one("#endpoint-key", Input).value = "secret"
-                await pilot.click("#save-endpoint")
+                app.query_one("#proxy-host", Input).value = "0.0.0.0"
+                app.query_one("#proxy-port", Input).value = "4310"
+                app._save_endpoint()
                 await pilot.pause()
 
                 tabs = app.query_one(TabbedContent)
@@ -67,6 +69,33 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
             )
             saved_config = Path(temp_dir) / "config.json"
             self.assertIn("secret", saved_config.read_text(encoding="utf-8"))
+            self.assertIn('"host": "0.0.0.0"', saved_config.read_text(encoding="utf-8"))
+            self.assertIn('"port": 4310', saved_config.read_text(encoding="utf-8"))
+            self.assertEqual(controller.start_calls[1][0].host, "0.0.0.0")
+            self.assertEqual(controller.start_calls[1][0].port, 4310)
+
+    async def test_tui_rejects_invalid_proxy_port(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            controller = _FakeController()
+            app = ProxyConfigApp(
+                app_dir=workspace.app_dir,
+                definitions_dir=workspace.definitions_dir,
+                initial_config=ProxyAppConfig(),
+                server_controller=controller,
+            )
+
+            async with app.run_test() as pilot:
+                app.query_one("#endpoint-url", Input).value = (
+                    "http://localhost:8080/v1"
+                )
+                app.query_one("#proxy-port", Input).value = "not-a-port"
+                app._save_endpoint()
+                await pilot.pause()
+
+                self.assertEqual(app.config.port, 4000)
+
+            self.assertEqual(len(controller.start_calls), 1)
 
     async def test_navigation_does_not_discard_unsaved_definition_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

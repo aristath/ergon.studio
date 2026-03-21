@@ -350,6 +350,10 @@ class ProxyConfigApp(App[None]):
             Input(value=self.config.upstream_base_url, id="endpoint-url"),
             Label("API key"),
             Input(value=self.config.upstream_api_key, password=True, id="endpoint-key"),
+            Label("Proxy bind host"),
+            Input(value=self.config.host, id="proxy-host"),
+            Label("Proxy bind port"),
+            Input(value=str(self.config.port), id="proxy-port"),
             Static(
                 "If the API key is blank, ergon will use `not-needed` for the upstream "
                 "client.",
@@ -368,11 +372,30 @@ class ProxyConfigApp(App[None]):
             self._save_endpoint()
 
     def _save_endpoint(self) -> None:
+        host = self.query_one("#proxy-host", Input).value.strip()
+        port_text = self.query_one("#proxy-port", Input).value.strip()
+        if not host:
+            self.query_one("#endpoint-message", Static).update(
+                "Proxy host must be non-empty"
+            )
+            return
+        try:
+            port = int(port_text)
+        except ValueError:
+            self.query_one("#endpoint-message", Static).update(
+                "Proxy port must be an integer"
+            )
+            return
+        if port <= 0 or port > 65535:
+            self.query_one("#endpoint-message", Static).update(
+                "Proxy port must be between 1 and 65535"
+            )
+            return
         self.config = ProxyAppConfig(
             upstream_base_url=self.query_one("#endpoint-url", Input).value.strip(),
             upstream_api_key=self.query_one("#endpoint-key", Input).value,
-            host=self.config.host,
-            port=self.config.port,
+            host=host,
+            port=port,
             instruction_role=self.config.instruction_role,
             disable_tool_calling=self.config.disable_tool_calling,
         )

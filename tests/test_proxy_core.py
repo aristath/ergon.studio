@@ -108,15 +108,17 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
 
-    async def test_stream_turn_messages_specialist_and_then_replies(self) -> None:
+    async def test_stream_turn_opens_single_person_workroom_and_then_replies(
+        self,
+    ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_specialist",
-                            agent_id="coder",
+                            "open_workroom",
+                            participants=["coder"],
                             message="Implement it",
                         ),
                         "Final summary",
@@ -139,7 +141,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("messaging specialist coder", reasoning.lower())
+        self.assertIn("opening an ad hoc workroom", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(result.content, "Final summary")
         self.assertEqual(result.mode, "orchestrator")
@@ -354,7 +356,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
         tool_call = _host_continuation_tool_call(
-            state=ContinuationState(mode="delegate", agent_id="coder"),
+            state=ContinuationState(
+                mode="workroom",
+                agent_id="coder",
+                workroom_id="__ad_hoc__",
+                workroom_participants=("coder",),
+            ),
             call_id="call_1",
             name="read_file",
         )
@@ -633,7 +640,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         kwargs = captured["kwargs"]
         self.assertEqual(
             [tool.name for tool in tools],
-            ["write_file", "message_specialist", "open_workroom"],
+            ["write_file", "open_workroom"],
         )
         self.assertEqual(
             kwargs["tool_choice"],

@@ -185,6 +185,10 @@ class ProxyWorkroomDispatcher:
         workroom_id: str | None,
         participants: tuple[str, ...],
     ) -> DefinitionDocument | None:
+        if workroom_id is None and participants:
+            return _ad_hoc_workroom_definition(
+                participants=participants,
+            )
         if is_ad_hoc_workroom(workroom_id):
             if not participants:
                 return None

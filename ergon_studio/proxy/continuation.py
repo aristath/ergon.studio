@@ -23,7 +23,6 @@ class ContinuationState:
     last_stage_parallel_attempts: bool = False
     progress_index: int | None = None
     member_index: int | None = None
-    message: str | None = None
     goal: str | None = None
     current_brief: str | None = None
     worklog: tuple[str, ...] = ()
@@ -63,8 +62,6 @@ def encode_continuation_tool_call(
         payload["x"] = state.progress_index
     if state.member_index is not None:
         payload["i"] = state.member_index
-    if state.message is not None:
-        payload["r"] = state.message
     if state.goal is not None:
         payload["g"] = state.goal
     if state.current_brief is not None:
@@ -105,7 +102,6 @@ def decode_continuation_from_tool_call_id(
     last_stage_parallel_attempts = payload.get("lp", False)
     progress_index = payload.get("x")
     member_index = payload.get("i")
-    message = payload.get("r")
     goal = payload.get("g")
     current_brief = payload.get("c")
     worklog = payload.get("h", [])
@@ -132,8 +128,6 @@ def decode_continuation_from_tool_call_id(
         return None
     if member_index is not None and not isinstance(member_index, int):
         return None
-    if message is not None and not isinstance(message, str):
-        return None
     if goal is not None and not isinstance(goal, str):
         return None
     if current_brief is not None and not isinstance(current_brief, str):
@@ -157,7 +151,6 @@ def decode_continuation_from_tool_call_id(
         last_stage_parallel_attempts=last_stage_parallel_attempts,
         progress_index=progress_index,
         member_index=member_index,
-        message=message,
         goal=goal,
         current_brief=current_brief,
         worklog=tuple(worklog),

@@ -27,7 +27,6 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.orchestrator_tools import (
     ContinueWorkroomAction,
-    MessageSpecialistAction,
     OpenWorkroomAction,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
@@ -38,7 +37,6 @@ from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.staged_workroom_executor import ProxyStagedWorkroomExecutor
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
-from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -70,10 +68,6 @@ class ProxyOrchestrationCore:
             agent_builder=agent_builder,
         )
         self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
-        self._turn_executor = ProxyTurnExecutor(
-            stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
-        )
         staged_workroom_executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
@@ -103,7 +97,7 @@ class ProxyOrchestrationCore:
                 pending = latest_pending_continuation(request.messages)
                 loop_state = self._initial_loop_state(request, pending=pending)
                 if pending is not None:
-                    if pending.state.mode in {"delegate", "workroom"}:
+                    if pending.state.mode == "workroom":
                         result_holder: dict[str, object] = {}
                         async for event in self._resume_subtask(
                             request=request,
@@ -260,16 +254,6 @@ class ProxyOrchestrationCore:
                     return
                 if result_holder:
                     result = _result(result_holder, loop_state)
-                    if (
-                        isinstance(action, MessageSpecialistAction)
-                        and result.workroom_progress is None
-                        and loop_state.workroom_progress is not None
-                    ):
-                        result = ProxyMoveResult(
-                            worklog_lines=result.worklog_lines,
-                            current_brief=result.current_brief,
-                            workroom_progress=loop_state.workroom_progress,
-                        )
                     loop_state.absorb_result(result=result)
                 else:
                     return
@@ -298,19 +282,6 @@ class ProxyOrchestrationCore:
         loop_state: ProxyDecisionLoopState,
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
-        if isinstance(action, MessageSpecialistAction):
-            state.mode = "delegate"
-            async for event in self._turn_executor.execute_delegation(
-                request=request,
-                agent_id=action.agent_id,
-                message=action.message,
-                state=state,
-                current_brief=loop_state.current_brief,
-                result_sink=_result_sink(result_holder),
-                loop_state=loop_state,
-            ):
-                yield event
-            return
         if isinstance(action, OpenWorkroomAction):
             state.mode = "workroom"
             async for event in self._workroom_dispatcher.execute_workroom(
@@ -359,20 +330,6 @@ class ProxyOrchestrationCore:
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
-        if continuation.mode == "delegate":
-            state.mode = "delegate"
-            async for event in self._turn_executor.execute_delegation(
-                request=request,
-                agent_id=continuation.agent_id,
-                message=continuation.message or request.latest_user_text() or "",
-                state=state,
-                current_brief=continuation.current_brief,
-                pending=pending,
-                result_sink=_result_sink(result_holder),
-                loop_state=loop_state,
-            ):
-                yield event
-            return
         if continuation.mode == "workroom":
             state.mode = "workroom"
             async for event in (
@@ -474,7 +431,6 @@ def _update_workroom_request(
         last_stage_parallel_attempts=continuation.last_stage_parallel_attempts,
         progress_index=continuation.progress_index,
         member_index=continuation.member_index,
-        message=continuation.message,
         goal=continuation.goal,
         current_brief=continuation.current_brief,
         worklog=continuation.worklog,

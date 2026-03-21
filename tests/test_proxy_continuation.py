@@ -41,7 +41,6 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertFalse(decoded.last_stage_parallel_attempts)
         self.assertEqual(decoded.progress_index, 2)
         self.assertEqual(decoded.member_index, None)
-        self.assertEqual(decoded.message, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
         self.assertEqual(decoded.workroom_outputs, ())
@@ -63,7 +62,6 @@ class ProxyContinuationTests(unittest.TestCase):
                 last_stage_parallel_attempts=True,
                 progress_index=1,
                 member_index=0,
-                message="Implement A",
                 goal="Build calculator",
                 current_brief="Updating main.py",
                 workroom_outputs=("architect: use main.py",),
@@ -73,7 +71,6 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.message, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
         self.assertEqual(
@@ -92,7 +89,12 @@ class ProxyContinuationTests(unittest.TestCase):
     def test_latest_continuation_uses_latest_tool_message(self) -> None:
         first_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(mode="delegate", agent_id="coder"),
+            state=ContinuationState(
+                mode="workroom",
+                agent_id="coder",
+                workroom_id="__ad_hoc__",
+                workroom_participants=("coder",),
+            ),
         )
         second_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
@@ -123,7 +125,12 @@ class ProxyContinuationTests(unittest.TestCase):
     def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(mode="delegate", agent_id="coder"),
+            state=ContinuationState(
+                mode="workroom",
+                agent_id="coder",
+                workroom_id="__ad_hoc__",
+                workroom_participants=("coder",),
+            ),
         )
         messages = (
             ProxyInputMessage(role="user", content="Build it"),
@@ -143,7 +150,12 @@ class ProxyContinuationTests(unittest.TestCase):
     ) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(mode="delegate", agent_id="coder"),
+            state=ContinuationState(
+                mode="workroom",
+                agent_id="coder",
+                workroom_id="__ad_hoc__",
+                workroom_participants=("coder",),
+            ),
         )
         messages = (
             ProxyInputMessage(role="user", content="Build it"),
@@ -157,7 +169,7 @@ class ProxyContinuationTests(unittest.TestCase):
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.state.mode, "delegate")
+        self.assertEqual(pending.state.mode, "workroom")
         self.assertEqual(pending.assistant_message.tool_calls[0].id, tool_call.id)
         self.assertEqual(pending.tool_results[0].content, "file contents")
 

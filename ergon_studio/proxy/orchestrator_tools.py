@@ -7,14 +7,8 @@ from ergon_studio.proxy.models import ProxyFunctionTool, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 
 INTERNAL_TOOL_NAMES = frozenset(
-    {"message_specialist", "open_workroom", "continue_workroom"}
+    {"open_workroom", "continue_workroom"}
 )
-
-
-@dataclass(frozen=True)
-class MessageSpecialistAction:
-    agent_id: str
-    message: str
 
 
 @dataclass(frozen=True)
@@ -29,7 +23,7 @@ class ContinueWorkroomAction:
     message: str
 
 
-InternalAction = MessageSpecialistAction | OpenWorkroomAction | ContinueWorkroomAction
+InternalAction = OpenWorkroomAction | ContinueWorkroomAction
 
 
 def build_orchestrator_internal_tools(
@@ -45,29 +39,12 @@ def build_orchestrator_internal_tools(
     workroom_ids = tuple(sorted(registry.workroom_definitions))
     tools = [
         ProxyFunctionTool(
-            name="message_specialist",
-            description=(
-                "Open or continue a direct channel with one specialist and send "
-                "them a focused natural-language brief."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "enum": list(specialist_ids),
-                    },
-                    "message": {"type": "string"},
-                },
-                "required": ["agent_id", "message"],
-            },
-        ),
-        ProxyFunctionTool(
             name="open_workroom",
             description=(
                 "Open a collaborative workroom. Use a preset by id, or provide "
                 "participants for an ad hoc room. Repeating a participant means "
-                "multiple staffed instances of that role."
+                "multiple staffed instances of that role. A one-person room is "
+                "a direct specialist channel."
             ),
             parameters={
                 "type": "object",
@@ -119,11 +96,6 @@ def parse_internal_action(
     if not isinstance(payload, dict):
         raise ValueError(f"{tool_call.name} arguments must be an object")
 
-    if tool_call.name == "message_specialist":
-        agent_id = _required_specialist(payload.get("agent_id"), registry=registry)
-        message = _required_text(payload.get("message"), field="message")
-        return MessageSpecialistAction(agent_id=agent_id, message=message)
-
     if tool_call.name == "open_workroom":
         workroom_id = _optional_workroom_id(payload.get("workroom_id"), registry)
         participants = _normalize_staffing_list(
@@ -159,13 +131,6 @@ def _required_text(value: object, *, field: str) -> str:
     if not stripped:
         raise ValueError(f"{field} must be a non-empty string")
     return stripped
-
-
-def _required_specialist(value: object, *, registry: RuntimeRegistry) -> str:
-    agent_id = _required_text(value, field="agent_id")
-    if agent_id == "orchestrator" or agent_id not in registry.agent_definitions:
-        raise ValueError(f"unknown specialist: {agent_id}")
-    return agent_id
 
 
 def _optional_workroom_id(

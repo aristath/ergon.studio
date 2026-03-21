@@ -21,8 +21,8 @@ def orchestrator_turn_prompt(
             "forward yourself."
         ),
         (
-            "When you need help from the team, use one internal communication "
-            "tool at a time instead of describing a plan in JSON."
+            "When you need help from the team, open or continue one workroom "
+            "at a time instead of describing a plan in JSON."
         ),
         (
             "Do not send a product-manager-facing answer while you are still "
@@ -46,37 +46,6 @@ def orchestrator_turn_prompt(
     if worklog:
         lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
-
-
-def specialist_prompt(
-    *,
-    specialist_id: str,
-    message: str,
-    transcript_summary: str,
-    current_brief: str | None = None,
-) -> str:
-    lines = [
-        f"You are the {specialist_id} working for the lead developer.",
-        "You were brought in for a focused assignment inside a software team.",
-        "Solve the assigned slice well instead of re-litigating the whole project.",
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Assigned request:",
-        message or "(none)",
-    ]
-    if current_brief:
-        lines.extend(
-            [
-                "",
-                "Current progress:",
-                current_brief,
-            ]
-        )
-    return "\n".join(lines).strip()
-
-
 def workroom_round_prompt(
     *,
     workroom_id: str,

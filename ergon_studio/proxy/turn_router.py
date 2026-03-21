@@ -85,6 +85,7 @@ class ProxyTurnRouter:
         if plan.mode == "continue_playbook":
             async for event in self._execute_playbook_continuation(
                 request=request,
+                plan=plan,
                 state=state,
                 loop_state=loop_state,
                 result_sink=result_sink,

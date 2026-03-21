@@ -131,6 +131,67 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Current staffed instance: coder[1]", streamed_prompts[0])
         self.assertIn("instance 2 of 3", streamed_prompts[1])
 
+    async def test_execute_expands_grouped_role_counts_from_staffing_plan(
+        self,
+    ) -> None:
+        summary_calls: list[tuple[str, tuple[str, ...]]] = []
+        coder_outputs = iter(["Idea A", "Idea B", "Idea C"])
+
+        async def _stream_text_agent(**_kwargs):
+            yield next(coder_outputs)
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            summary_calls.append(
+                (kwargs["current_brief"], kwargs["workflow_outputs"])
+            )
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Try a few approaches"),),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in executor.execute(
+                request=request,
+                definition=_definition(),
+                goal="Try a few approaches",
+                specialists=("coder",),
+                specialist_counts=(("coder", 3),),
+                state=state,
+            )
+        ]
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertNotIn("architect:", reasoning)
+        self.assertIn("coder[1]: Idea A", reasoning)
+        self.assertIn("coder[2]: Idea B", reasoning)
+        self.assertIn("coder[3]: Idea C", reasoning)
+        self.assertEqual(
+            summary_calls,
+            [
+                (
+                    "coder[1]: Idea A\ncoder[2]: Idea B\ncoder[3]: Idea C",
+                    ("coder[1]: Idea A", "coder[2]: Idea B", "coder[3]: Idea C"),
+                )
+            ],
+        )
+
     async def test_execute_runs_parallel_attempt_group_concurrently(self) -> None:
         summary_calls: list[tuple[str, tuple[str, ...]]] = []
         coder_outputs = iter(["Idea A", "Idea B", "Chosen"])

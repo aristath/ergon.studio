@@ -92,11 +92,13 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
                 mode="workflow",
                 workflow_id="standard-build",
                 specialists=("coder", "reviewer"),
+                specialist_counts=(("coder", 3),),
             ),
             state=ProxyTurnState(),
         )]
 
         self.assertEqual(calls[0]["specialists"], ("coder", "reviewer"))
+        self.assertEqual(calls[0]["specialist_counts"], (("coder", 3),))
 
     async def test_execute_workflow_continuation_forwards_pending_state(
         self,
@@ -201,6 +203,58 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
         if not isinstance(first_event, ProxyContentDeltaEvent):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "continued")
+
+    async def test_execute_active_workflow_can_override_staffing_from_plan(
+        self,
+    ) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            raise AssertionError("not expected")
+
+        async def _execute_workflow_continuation(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("continued")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+        loop_state = ProxyDecisionLoopState(
+            goal="Build calculator",
+            current_brief="Architecture ready",
+            workflow_progress=ContinuationState(
+                mode="workflow",
+                agent_id="architect",
+                workflow_id="standard-build",
+                workflow_specialists=("architect", "coder"),
+            ),
+        )
+
+        [event async for event in executor.execute_active_workflow(
+            request=request,
+            plan=ProxyTurnPlan(
+                mode="continue_playbook",
+                workflow_id="standard-build",
+                specialists=("coder",),
+                specialist_counts=(("coder", 3),),
+            ),
+            state=ProxyTurnState(),
+            loop_state=loop_state,
+        )]
+
+        continuation = calls[0]["continuation"]
+        self.assertEqual(continuation.workflow_specialists, ("coder",))
+        self.assertEqual(continuation.workflow_specialist_counts, (("coder", 3),))
 
     async def test_execute_active_workflow_errors_without_progress(self) -> None:
         executor = ProxyWorkflowRequestExecutor(

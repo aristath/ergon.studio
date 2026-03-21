@@ -23,6 +23,7 @@ class ProxyTurnPlan:
     workflow_id: str | None = None
     agent_id: str | None = None
     specialists: tuple[str, ...] = ()
+    specialist_counts: tuple[tuple[str, int], ...] = ()
     comparison_mode: str | None = None
     comparison_criteria: str | None = None
     request: str | None = None
@@ -89,6 +90,11 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "the lead developer should bring in a specific subset of the team."
             ),
             (
+                "- You may optionally set specialist_counts for grouped playbooks "
+                "when the lead developer wants multiple staffed instances of a "
+                "role, such as several coders for parallel attempts."
+            ),
+            (
                 "- When a move is about judging alternatives, you may set "
                 "comparison_mode to select_best, synthesize_best, or critique_options."
             ),
@@ -131,7 +137,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -143,6 +149,8 @@ def build_turn_planner_prompt(
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
     active_workflow_id: str | None = None,
+    active_specialists: tuple[str, ...] = (),
+    active_specialist_counts: tuple[tuple[str, int], ...] = (),
     selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
@@ -191,6 +199,25 @@ def build_turn_planner_prompt(
                 active_workflow_id,
             ]
         )
+    if active_specialists:
+        lines.extend(
+            [
+                "",
+                "Currently staffed specialists:",
+                ", ".join(active_specialists),
+            ]
+        )
+    if active_specialist_counts:
+        lines.extend(
+            [
+                "",
+                "Current role instance counts:",
+                ", ".join(
+                    f"{agent_id} x{count}"
+                    for agent_id, count in active_specialist_counts
+                ),
+            ]
+        )
     return "\n".join(lines).strip()
 
 
@@ -212,12 +239,17 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     if agent_id is not None and agent_id not in registry.agent_definitions:
         agent_id = None
     specialists = _normalize_specialists(payload.get("specialists"), registry=registry)
+    specialist_counts = _normalize_specialist_counts(
+        payload.get("specialist_counts"),
+        registry=registry,
+    )
     comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
     return ProxyTurnPlan(
         mode=mode,
         workflow_id=workflow_id,
         agent_id=agent_id,
         specialists=specialists,
+        specialist_counts=specialist_counts,
         comparison_mode=comparison_mode,
         comparison_criteria=_optional_text(payload.get("comparison_criteria")),
         request=_optional_text(payload.get("request")),
@@ -281,6 +313,32 @@ def _normalize_specialists(
             continue
         specialists.append(candidate)
     return tuple(specialists)
+
+
+def _normalize_specialist_counts(
+    value: object,
+    *,
+    registry: RuntimeRegistry,
+) -> tuple[tuple[str, int], ...]:
+    if not isinstance(value, dict):
+        return ()
+    specialist_counts: list[tuple[str, int]] = []
+    for raw_agent_id, raw_count in value.items():
+        if not isinstance(raw_agent_id, str):
+            continue
+        agent_id = raw_agent_id.strip()
+        if (
+            not agent_id
+            or agent_id == "orchestrator"
+            or agent_id not in registry.agent_definitions
+        ):
+            continue
+        if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+            continue
+        if raw_count <= 0:
+            continue
+        specialist_counts.append((agent_id, raw_count))
+    return tuple(specialist_counts)
 
 
 def _normalize_comparison_mode(value: object) -> str | None:

@@ -18,6 +18,7 @@ class ContinuationState:
     agent_id: str
     workflow_id: str | None = None
     workflow_specialists: tuple[str, ...] = ()
+    workflow_specialist_counts: tuple[tuple[str, int], ...] = ()
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
     selection_outcome: ProxySelectionOutcome | None = None
@@ -51,6 +52,10 @@ def encode_continuation_tool_call(
         payload["w"] = state.workflow_id
     if state.workflow_specialists:
         payload["p"] = list(state.workflow_specialists)
+    if state.workflow_specialist_counts:
+        payload["pc"] = {
+            agent_id: count for agent_id, count in state.workflow_specialist_counts
+        }
     if state.last_stage_outputs:
         payload["ls"] = list(state.last_stage_outputs)
     if state.last_stage_parallel_attempts:
@@ -103,6 +108,7 @@ def decode_continuation_from_tool_call_id(
     agent_id = payload.get("a")
     workflow_id = payload.get("w")
     workflow_specialists = payload.get("p", [])
+    workflow_specialist_counts_payload = payload.get("pc", {})
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
     selection_outcome_payload = payload.get("so")
@@ -119,6 +125,15 @@ def decode_continuation_from_tool_call_id(
         return None
     if not isinstance(workflow_specialists, list) or not all(
         isinstance(item, str) for item in workflow_specialists
+    ):
+        return None
+    workflow_specialist_counts = _decode_specialist_counts(
+        workflow_specialist_counts_payload
+    )
+    if (
+        workflow_specialist_counts_payload is not None
+        and workflow_specialist_counts_payload != {}
+        and workflow_specialist_counts is None
     ):
         return None
     if not isinstance(last_stage_outputs, list) or not all(
@@ -153,6 +168,7 @@ def decode_continuation_from_tool_call_id(
         agent_id=agent_id,
         workflow_id=workflow_id,
         workflow_specialists=tuple(workflow_specialists),
+        workflow_specialist_counts=workflow_specialist_counts or (),
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
         selection_outcome=selection_outcome,
@@ -248,6 +264,25 @@ def _decode_selection_outcome(
         summary=summary,
         next_refinement=next_refinement,
     )
+
+
+def _decode_specialist_counts(
+    payload: object,
+) -> tuple[tuple[str, int], ...] | None:
+    if payload is None:
+        return ()
+    if not isinstance(payload, dict):
+        return None
+    specialist_counts: list[tuple[str, int]] = []
+    for raw_agent_id, raw_count in payload.items():
+        if not isinstance(raw_agent_id, str) or not raw_agent_id:
+            return None
+        if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+            return None
+        if raw_count <= 0:
+            return None
+        specialist_counts.append((raw_agent_id, raw_count))
+    return tuple(specialist_counts)
 
 
 def latest_continuation(

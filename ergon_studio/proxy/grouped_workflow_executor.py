@@ -64,6 +64,7 @@ class ProxyGroupedWorkflowExecutor:
         definition: DefinitionDocument,
         goal: str,
         specialists: tuple[str, ...] = (),
+        specialist_counts: tuple[tuple[str, int], ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -75,7 +76,16 @@ class ProxyGroupedWorkflowExecutor:
             if continuation is not None
             else specialists
         )
-        step_groups = _filtered_step_groups(definition, staffed_specialists)
+        staffed_specialist_counts = (
+            continuation.workflow_specialist_counts
+            if continuation is not None
+            else specialist_counts
+        )
+        step_groups = _filtered_step_groups(
+            definition,
+            staffed_specialists,
+            staffed_specialist_counts,
+        )
         start_index = (
             continuation.step_index
             if continuation and continuation.step_index is not None
@@ -169,6 +179,9 @@ class ProxyGroupedWorkflowExecutor:
                                     definition=definition,
                                     step_groups=step_groups,
                                     staffed_specialists=staffed_specialists,
+                                    staffed_specialist_counts=(
+                                        staffed_specialist_counts
+                                    ),
                                     step_index=step_index,
                                     goal=goal,
                                     current_brief=current_brief,
@@ -257,6 +270,7 @@ class ProxyGroupedWorkflowExecutor:
                             mode="workflow",
                             workflow_id=definition.id,
                             workflow_specialists=staffed_specialists,
+                            workflow_specialist_counts=staffed_specialist_counts,
                             last_stage_outputs=tuple(last_stage_outputs),
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
@@ -321,6 +335,7 @@ class ProxyGroupedWorkflowExecutor:
                             definition=definition,
                             step_groups=step_groups,
                             staffed_specialists=staffed_specialists,
+                            staffed_specialist_counts=staffed_specialist_counts,
                             step_index=step_index,
                             goal=goal,
                             current_brief=current_brief,
@@ -454,6 +469,7 @@ class ProxyGroupedWorkflowExecutor:
         definition: DefinitionDocument,
         step_groups: tuple[tuple[str, ...], ...],
         staffed_specialists: tuple[str, ...],
+        staffed_specialist_counts: tuple[tuple[str, int], ...],
         step_index: int,
         goal: str,
         current_brief: str,
@@ -471,6 +487,7 @@ class ProxyGroupedWorkflowExecutor:
             mode="workflow",
             workflow_id=definition.id,
             workflow_specialists=staffed_specialists,
+            workflow_specialist_counts=staffed_specialist_counts,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
             selection_outcome=selection_outcome,
@@ -489,17 +506,45 @@ class ProxyGroupedWorkflowExecutor:
 def _filtered_step_groups(
     definition: DefinitionDocument,
     specialists: tuple[str, ...],
+    specialist_counts: tuple[tuple[str, int], ...],
 ) -> tuple[tuple[str, ...], ...]:
     step_groups = workflow_step_groups_for_definition(definition)
-    if not specialists:
+    if not specialists and not specialist_counts:
         return step_groups
-    allowed = set(specialists)
+    count_map = dict(specialist_counts)
+    allowed = set(specialists) if specialists else None
+    if allowed is not None:
+        allowed.update(count_map)
     filtered: list[tuple[str, ...]] = []
     for group in step_groups:
-        filtered_group = tuple(agent_id for agent_id in group if agent_id in allowed)
+        filtered_group = _expand_group_staffing(
+            group=group,
+            allowed=allowed,
+            count_map=count_map,
+        )
         if filtered_group:
             filtered.append(filtered_group)
     return tuple(filtered)
+
+
+def _expand_group_staffing(
+    *,
+    group: tuple[str, ...],
+    allowed: set[str] | None,
+    count_map: dict[str, int],
+) -> tuple[str, ...]:
+    expanded: list[str] = []
+    seen_roles: set[str] = set()
+    for agent_id in group:
+        if agent_id in seen_roles:
+            continue
+        seen_roles.add(agent_id)
+        if allowed is not None and agent_id not in allowed:
+            continue
+        default_count = sum(1 for candidate in group if candidate == agent_id)
+        desired_count = count_map.get(agent_id, default_count)
+        expanded.extend(agent_id for _ in range(desired_count))
+    return tuple(expanded)
 
 
 def _is_parallel_attempt_group(group: tuple[str, ...]) -> bool:

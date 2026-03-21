@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
 from ergon_studio.proxy.models import (
@@ -34,6 +35,7 @@ class ProxyWorkflowRequestExecutor:
         self,
         *,
         request: ProxyTurnRequest,
+        plan: ProxyTurnPlan | None = None,
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
@@ -49,9 +51,13 @@ class ProxyWorkflowRequestExecutor:
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
+        active_continuation = _override_active_staffing(
+            workflow_progress,
+            plan=plan,
+        )
         async for event in self._workflow_dispatcher.execute_workflow_continuation(
             request=request,
-            continuation=workflow_progress,
+            continuation=active_continuation,
             pending=None,
             state=state,
             result_sink=result_sink,
@@ -72,6 +78,7 @@ class ProxyWorkflowRequestExecutor:
             request=request,
             workflow_id=plan.workflow_id,
             specialists=plan.specialists,
+            specialist_counts=plan.specialist_counts,
             goal=plan.goal or request.latest_user_text() or "",
             state=state,
             result_sink=result_sink,
@@ -98,3 +105,36 @@ class ProxyWorkflowRequestExecutor:
             loop_state=loop_state,
         ):
             yield event
+
+
+def _override_active_staffing(
+    continuation: ContinuationState,
+    *,
+    plan: ProxyTurnPlan | None,
+) -> ContinuationState:
+    if plan is None:
+        return continuation
+    workflow_specialists = (
+        plan.specialists
+        if plan.specialists
+        else continuation.workflow_specialists
+    )
+    workflow_specialist_counts = (
+        plan.specialist_counts
+        if plan.specialist_counts
+        else tuple(
+            (agent_id, count)
+            for agent_id, count in continuation.workflow_specialist_counts
+            if not workflow_specialists or agent_id in workflow_specialists
+        )
+    )
+    if (
+        workflow_specialists == continuation.workflow_specialists
+        and workflow_specialist_counts == continuation.workflow_specialist_counts
+    ):
+        return continuation
+    return replace(
+        continuation,
+        workflow_specialists=workflow_specialists,
+        workflow_specialist_counts=workflow_specialist_counts,
+    )

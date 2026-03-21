@@ -60,6 +60,26 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("assistant: [tool_calls read_file]", prompt)
         self.assertIn("tool_result[call_1]<read_file>: print('hello')", prompt)
 
+    def test_build_turn_planner_prompt_includes_active_staffing(self) -> None:
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+
+        prompt = build_turn_planner_prompt(
+            request,
+            active_workflow_id="best-of-n",
+            active_specialists=("coder", "reviewer"),
+            active_specialist_counts=(("coder", 3),),
+        )
+
+        self.assertIn("Playbook currently in progress:", prompt)
+        self.assertIn("best-of-n", prompt)
+        self.assertIn("Currently staffed specialists:", prompt)
+        self.assertIn("coder, reviewer", prompt)
+        self.assertIn("Current role instance counts:", prompt)
+        self.assertIn("coder x3", prompt)
+
     def test_parse_turn_plan_resolves_known_workflow(self) -> None:
         registry = _make_registry()
 
@@ -130,6 +150,23 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.specialists, ("coder",))
 
+    def test_parse_turn_plan_normalizes_specialist_counts(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"mode":"workflow","workflow_id":"best-of-n",'
+                '"specialist_counts":{"coder":3,"architect":1,"ghost":2,'
+                '"orchestrator":5,"reviewer":true,"coder_bad":"4"}}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(
+            plan.specialist_counts,
+            (("coder", 3), ("architect", 1)),
+        )
+
     def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:
         registry = _make_registry()
         registry.workflow_definitions["other-build"] = DefinitionDocument(
@@ -175,6 +212,19 @@ def _make_registry():
             ),
         },
         workflow_definitions={
+            "best-of-n": DefinitionDocument(
+                id="best-of-n",
+                path=Path("best-of-n.md"),
+                metadata={
+                    "id": "best-of-n",
+                    "name": "Best Of N",
+                    "orchestration": "grouped",
+                    "selection_hints": ["multiple_attempts"],
+                    "step_groups": [["coder", "coder"], ["reviewer"]],
+                },
+                body="## Purpose\nCompare multiple attempts.",
+                sections={"Purpose": "Compare multiple attempts."},
+            ),
             "standard-build": DefinitionDocument(
                 id="standard-build",
                 path=Path("standard-build.md"),

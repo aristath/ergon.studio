@@ -135,6 +135,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["kind"], "playbook_continuation")
         self.assertIs(calls[0]["loop_state"], loop_state)
+        self.assertEqual(calls[0]["plan"].specialist_counts, ())
         first_event = events[0]
         self.assertIsInstance(first_event, ProxyContentDeltaEvent)
         if not isinstance(first_event, ProxyContentDeltaEvent):

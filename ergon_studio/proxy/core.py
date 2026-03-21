@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
-from uuid import uuid4
 
 from agent_framework import ResponseStream
 
@@ -37,13 +36,9 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
     ProxyTurnResult,
 )
-from ergon_studio.proxy.planner import (
-    ProxyTurnPlan,
-    build_turn_planner_instructions,
-    build_turn_planner_prompt,
-    parse_turn_plan,
-)
+from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
+from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
@@ -83,6 +78,10 @@ class ProxyOrchestrationCore:
             stream_text_agent=self._stream_text_agent,
             run_text_agent=self._run_text_agent,
             emit_tool_calls=self._emit_tool_calls,
+        )
+        self._turn_planner = ProxyTurnPlanner(
+            registry,
+            run_text_agent=self._run_text_agent,
         )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
@@ -130,7 +129,7 @@ class ProxyOrchestrationCore:
                     ):
                         yield event
                 else:
-                    plan = await self._plan_turn(request)
+                    plan = await self._turn_planner.plan_turn(request)
                     state.mode = plan.mode
                     async for event in self._execute_plan(
                         request=request,
@@ -160,21 +159,6 @@ class ProxyOrchestrationCore:
                 output_items=state.output_items,
             ),
         )
-
-    async def _plan_turn(self, request: ProxyTurnRequest) -> ProxyTurnPlan:
-        planner_text = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=build_turn_planner_prompt(request),
-            preamble=build_turn_planner_instructions(self.registry),
-            session_id=f"proxy-planner-{uuid4().hex}",
-            model_id_override=request.model,
-        )
-        if not planner_text:
-            return ProxyTurnPlan(mode="act")
-        try:
-            return parse_turn_plan(planner_text, registry=self.registry)
-        except ValueError:
-            return ProxyTurnPlan(mode="act")
 
     async def _execute_plan(
         self,

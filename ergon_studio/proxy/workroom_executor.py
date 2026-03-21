@@ -252,7 +252,6 @@ class ProxyWorkroomExecutor:
                     round_outputs.append(f"{participant.label}: {text_summary}")
                 if (
                     len(staffed_members) == 1
-                    and definition.metadata.get("id") == "__ad_hoc__"
                     and request.tools
                     and participant_move_count + 1 < self._MAX_PARTICIPANT_MOVES
                 ):

@@ -626,9 +626,17 @@ class ProxyServerTests(unittest.TestCase):
                                 }
                             ],
                         },
-                        "Architecture plan",
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Architecture plan",
+                        ),
                     ],
-                    "coder": ["Built feature"],
+                    "coder": [
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Built feature",
+                        )
+                    ],
                 }
             ),
         )

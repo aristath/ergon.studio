@@ -462,8 +462,18 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
                 {
-                    "architect": ["Architecture plan"],
-                    "coder": ["Built feature"],
+                    "architect": [
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Architecture plan",
+                        )
+                    ],
+                    "coder": [
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Built feature",
+                        )
+                    ],
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
@@ -600,8 +610,18 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": ["Workroom final summary"],
-                    "architect": ["Architecture plan"],
-                    "coder": ["Built feature"],
+                    "architect": [
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Architecture plan",
+                        )
+                    ],
+                    "coder": [
+                        _internal_action(
+                            "reply_lead_dev",
+                            message="Built feature",
+                        )
+                    ],
                     "reviewer": ["Reviewed result"],
                 }
             ),

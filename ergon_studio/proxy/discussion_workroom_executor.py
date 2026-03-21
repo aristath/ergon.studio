@@ -21,15 +21,15 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workroom_metadata import (
-    workroom_participants_for_definition,
-    workroom_turn_sequence_for_definition,
-)
 from ergon_studio.proxy.workroom_staffing import (
     expand_staffed_participants,
     expand_staffed_sequence,
     participant_by_label,
     participant_context,
+)
+from ergon_studio.workroom_layout import (
+    workroom_participants_for_definition,
+    workroom_turn_sequence_for_definition,
 )
 
 ProxyEvent = (

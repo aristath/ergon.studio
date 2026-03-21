@@ -941,7 +941,6 @@ class _FakeRegistry:
                     path=Path("standard-build.md"),
                     metadata={
                         "id": "standard-build",
-                        "shape": "staged",
                         "stages": ["architect", "coder"],
                     },
                     body="## Purpose\nBuild.",
@@ -1007,7 +1006,6 @@ def _staged_workroom_registry():
         path=Path("staged-build.md"),
         metadata={
             "id": "staged-build",
-            "shape": "staged",
             "stages": [["architect", "coder", "reviewer"]],
         },
         body="## Purpose\nStaged build.",
@@ -1080,7 +1078,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("debate.md"),
                 metadata={
                     "id": "debate",
-                    "shape": "discussion",
                     "turns": [
                         "architect",
                         "brainstormer",
@@ -1096,7 +1093,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("dynamic-open-ended.md"),
                 metadata={
                     "id": "dynamic-open-ended",
-                    "shape": "discussion",
                     "turns": ["architect", "reviewer"],
                 },
                 body="## Purpose\nAdaptive.",
@@ -1107,7 +1103,6 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("handoff-chain.md"),
                 metadata={
                     "id": "handoff-chain",
-                    "shape": "staged",
                     "stages": [["researcher"], ["reviewer"]],
                 },
                 body="## Purpose\nHandoff.",

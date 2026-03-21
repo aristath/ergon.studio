@@ -352,7 +352,6 @@ def _definition() -> DefinitionDocument:
         path=Path("standard-build.md"),
         metadata={
             "id": "standard-build",
-            "shape": "staged",
             "stages": ["architect", "coder"],
         },
         body="## Purpose\nBuild.",
@@ -366,7 +365,6 @@ def _best_of_n_definition() -> DefinitionDocument:
         path=Path("best-of-n.md"),
         metadata={
             "id": "best-of-n",
-            "shape": "staged",
             "stages": [["coder", "coder", "coder"]],
         },
         body="## Purpose\nCompare attempts.",
@@ -380,7 +378,6 @@ def _best_of_n_review_definition() -> DefinitionDocument:
         path=Path("best-of-n.md"),
         metadata={
             "id": "best-of-n",
-            "shape": "staged",
             "stages": [["coder", "coder"], ["reviewer"]],
         },
         body="## Purpose\nCompare attempts.",

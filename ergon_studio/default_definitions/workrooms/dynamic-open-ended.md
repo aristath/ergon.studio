@@ -1,7 +1,6 @@
 ---
 id: dynamic-open-ended
 name: Dynamic Open Ended
-shape: discussion
 turns:
   - researcher
   - architect

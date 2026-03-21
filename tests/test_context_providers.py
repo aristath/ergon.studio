@@ -46,7 +46,7 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=None,
-                    metadata={"id": "standard-build", "shape": "staged"},
+                    metadata={"id": "standard-build", "stages": ["coder"]},
                     body="",
                     sections={},
                 )

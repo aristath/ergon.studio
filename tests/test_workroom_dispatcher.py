@@ -131,7 +131,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_builds_parallel_attempt_ad_hoc_workroom(
         self,
     ) -> None:
-        calls: list[tuple[str, str, tuple[str, ...], str]] = []
+        calls: list[tuple[str, str, tuple[str, ...], bool]] = []
 
         async def _staged_handler(**kwargs):
             calls.append(
@@ -139,7 +139,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                     kwargs["definition"].id,
                     kwargs["goal"],
                     tuple(kwargs["definition"].metadata["stages"]),
-                    str(kwargs["definition"].metadata["shape"]),
+                    "turns" in kwargs["definition"].metadata,
                 )
             )
             yield ProxyContentDeltaEvent("done")
@@ -179,7 +179,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                     "ad-hoc-workroom",
                     "Try three implementations",
                     ("coder", "coder", "coder"),
-                    "staged",
+                    False,
                 )
             ],
         )
@@ -218,7 +218,6 @@ def _registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "shape": "staged",
                     "stages": ["architect"],
                 },
                 body="## Purpose\nBuild.",

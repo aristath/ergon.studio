@@ -3,6 +3,23 @@ from __future__ import annotations
 from ergon_studio.definitions import DefinitionDocument
 
 
+def workroom_kind_for_definition(definition: DefinitionDocument) -> str:
+    has_stages = "stages" in definition.metadata
+    has_turns = "turns" in definition.metadata
+    if has_stages and has_turns:
+        raise ValueError(
+            "workroom template "
+            f"'{definition.id}' cannot declare both `stages` and `turns`"
+        )
+    if has_turns:
+        return "discussion"
+    if has_stages:
+        return "staged"
+    raise ValueError(
+        f"workroom template '{definition.id}' must declare either `stages` or `turns`"
+    )
+
+
 def staged_groups_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[tuple[str, ...], ...]:
@@ -36,18 +53,31 @@ def discussion_turns_for_definition(
 def referenced_agents_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
-    shape = definition.metadata.get("shape", "staged")
-    if isinstance(shape, str) and shape.strip():
-        normalized_shape = shape.strip()
-    else:
-        normalized_shape = "staged"
-    if normalized_shape == "discussion":
+    if workroom_kind_for_definition(definition) == "discussion":
         return discussion_turns_for_definition(definition)
     return tuple(
         agent_id
         for group in staged_groups_for_definition(definition)
         for agent_id in group
     )
+
+
+def workroom_participants_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
+    participants: list[str] = []
+    for agent_id in referenced_agents_for_definition(definition):
+        if agent_id not in participants:
+            participants.append(agent_id)
+    return tuple(participants)
+
+
+def workroom_turn_sequence_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
+    if workroom_kind_for_definition(definition) != "discussion":
+        return ()
+    return discussion_turns_for_definition(definition)
 
 
 def _validate_staged_group(

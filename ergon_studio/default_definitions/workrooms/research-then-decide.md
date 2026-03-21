@@ -1,7 +1,6 @@
 ---
 id: research-then-decide
 name: Research And Synthesis
-shape: staged
 stages:
   - researcher
   - architect

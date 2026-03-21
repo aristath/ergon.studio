@@ -18,10 +18,10 @@ from ergon_studio.proxy.turn_state import (
     ProxyTurnState,
 )
 from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
-from ergon_studio.proxy.workroom_metadata import (
-    workroom_shape_for_definition,
-)
 from ergon_studio.registry import RuntimeRegistry
+from ergon_studio.workroom_layout import (
+    workroom_kind_for_definition,
+)
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -146,8 +146,8 @@ class ProxyWorkroomDispatcher:
         result_sink: Callable[[ProxyMoveResult], None],
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        shape = workroom_shape_for_definition(definition)
-        if shape == "staged":
+        kind = workroom_kind_for_definition(definition)
+        if kind == "staged":
             async for event in self._execute_staged_workroom(
                 request=request,
                 definition=definition,
@@ -162,7 +162,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        if shape == "discussion":
+        if kind == "discussion":
             async for event in self._execute_discussion_workroom(
                 request=request,
                 definition=definition,
@@ -177,7 +177,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        raise ValueError(f"unsupported workroom shape: {shape}")
+        raise ValueError(f"unsupported workroom kind: {kind}")
 
     def _resolve_workroom_definition(
         self,
@@ -215,10 +215,8 @@ def _ad_hoc_workroom_definition(
     expanded_staffing = participants
     unique_roles = {agent_id for agent_id in expanded_staffing}
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
-        shape = "staged"
         metadata: dict[str, object] = {"stages": list(expanded_staffing)}
     else:
-        shape = "discussion"
         ordered_roles: list[str] = []
         for agent_id in expanded_staffing:
             if agent_id not in ordered_roles:
@@ -230,7 +228,6 @@ def _ad_hoc_workroom_definition(
         metadata={
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
-            "shape": shape,
             **metadata,
         },
         body=(

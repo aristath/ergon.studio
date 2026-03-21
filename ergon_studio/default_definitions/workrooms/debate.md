@@ -1,7 +1,6 @@
 ---
 id: debate
 name: Debate
-shape: discussion
 turns:
   - architect
   - coder

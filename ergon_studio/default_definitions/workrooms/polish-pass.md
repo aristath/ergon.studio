@@ -1,7 +1,6 @@
 ---
 id: polish-pass
 name: Polish Pass
-shape: staged
 stages:
   - reviewer
   - coder

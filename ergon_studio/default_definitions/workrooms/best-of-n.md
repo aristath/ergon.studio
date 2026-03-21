@@ -1,7 +1,6 @@
 ---
 id: best-of-n
 name: Best Of N
-shape: staged
 stages:
   - [coder, coder, coder]
   - [reviewer]

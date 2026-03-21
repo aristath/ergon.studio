@@ -8,9 +8,6 @@ def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
     worklog: tuple[str, ...] = (),
-    active_workroom_id: str | None = None,
-    active_workroom_participants: tuple[str, ...] = (),
-    active_workroom_message: str | None = None,
 ) -> str:
     lines = [
         "You are the lead developer in an AI software firm.",
@@ -38,30 +35,6 @@ def orchestrator_turn_prompt(
         "Latest user request:",
         request.latest_user_text() or "(none)",
     ]
-    if active_workroom_id or active_workroom_participants:
-        lines.extend(
-            [
-                "",
-                "Workroom currently in progress:",
-                active_workroom_id or "ad hoc",
-            ]
-        )
-    if active_workroom_participants:
-        lines.extend(
-            [
-                "",
-                "Current workroom staffing:",
-                ", ".join(active_workroom_participants),
-            ]
-        )
-    if active_workroom_message:
-        lines.extend(
-            [
-                "",
-                "Latest message to the active workroom:",
-                active_workroom_message,
-            ]
-        )
     if worklog:
         lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()

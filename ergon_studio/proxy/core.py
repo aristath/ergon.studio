@@ -30,7 +30,6 @@ from ergon_studio.proxy.orchestrator_tools import (
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.turn_state import (
-    ActiveWorkroom,
     ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
@@ -159,21 +158,6 @@ class ProxyOrchestrationCore:
                 prompt=orchestrator_turn_prompt(
                     request,
                     worklog=loop_state.worklog,
-                    active_workroom_id=(
-                        loop_state.active_workroom.workroom_id
-                        if loop_state.active_workroom is not None
-                        else None
-                    ),
-                    active_workroom_participants=(
-                        loop_state.active_workroom.workroom_participants
-                        if loop_state.active_workroom is not None
-                        else ()
-                    ),
-                    active_workroom_message=(
-                        loop_state.active_workroom.workroom_message
-                        if loop_state.active_workroom is not None
-                        else None
-                    ),
                 ),
                 session_id=f"proxy-orchestrator-{uuid4().hex}",
                 model_id_override=request.model,
@@ -259,43 +243,11 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         if isinstance(action, MessageWorkroomAction):
             state.mode = "workroom"
-            active_workroom = loop_state.active_workroom
-            if (
-                active_workroom is None
-                and action.preset is None
-                and not action.participants
-            ):
+            if action.preset is None and not action.participants:
                 state.finish_reason = "error"
-                error_text = "message_workroom needs an active room or a room target."
+                error_text = "message_workroom needs a preset or participants target."
                 state.content = error_text
                 yield ProxyContentDeltaEvent(error_text)
-                return
-            if _should_continue_active_workroom(
-                action=action,
-                active_workroom=active_workroom,
-            ):
-                if active_workroom is None:
-                    state.finish_reason = "error"
-                    error_text = "No active workroom is available to message."
-                    state.content = error_text
-                    yield ProxyContentDeltaEvent(error_text)
-                    return
-                continuation = _update_workroom_message(
-                    active_workroom,
-                    participants=action.participants,
-                    message=action.message,
-                )
-                async for event in self._message_workroom(
-                    request=request,
-                    workroom_id=continuation.workroom_id,
-                    participants=continuation.workroom_participants,
-                    workroom_message=continuation.workroom_message,
-                    pending=None,
-                    state=state,
-                    result_sink=partial(_store_result, result_holder),
-                    loop_state=loop_state,
-                ):
-                    yield event
                 return
             async for event in self._message_workroom(
                 request=request,
@@ -402,43 +354,17 @@ class ProxyOrchestrationCore:
     ) -> ProxyDecisionLoopState:
         if pending is None:
             return ProxyDecisionLoopState()
-        continuation = pending.state
-        active_workroom = (
-            ActiveWorkroom(
-                workroom_id=continuation.workroom_id,
-                workroom_participants=continuation.workroom_participants,
-                workroom_message=continuation.workroom_message,
-            )
-            if continuation.workroom_id is not None
-            or continuation.workroom_participants
-            else None
-        )
         return ProxyDecisionLoopState(
-            worklog=continuation.worklog,
-            active_workroom=active_workroom,
+            worklog=pending.state.worklog,
         )
 
 
 def _orchestrator_continuation_state(
     loop_state: ProxyDecisionLoopState,
 ) -> ContinuationState:
-    active_workroom = loop_state.active_workroom
     return ContinuationState(
         mode="orchestrator",
         agent_id="orchestrator",
-        workroom_id=(
-            active_workroom.workroom_id if active_workroom is not None else None
-        ),
-        workroom_participants=(
-            active_workroom.workroom_participants
-            if active_workroom is not None
-            else ()
-        ),
-        workroom_message=(
-            active_workroom.workroom_message
-            if active_workroom is not None
-            else None
-        ),
         worklog=loop_state.worklog,
     )
 
@@ -450,48 +376,14 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
     return isinstance(tool_choice, dict)
 
 
-def _update_workroom_message(
-    active_workroom: ActiveWorkroom,
-    *,
-    participants: tuple[str, ...],
-    message: str,
-) -> ActiveWorkroom:
-    next_participants = participants or active_workroom.workroom_participants
-    if (
-        message == active_workroom.workroom_message
-        and next_participants == active_workroom.workroom_participants
-    ):
-        return active_workroom
-    return ActiveWorkroom(
-        workroom_id=active_workroom.workroom_id,
-        workroom_participants=next_participants,
-        workroom_message=message,
-    )
-
-
 def _result(
     holder: dict[str, object],
-    loop_state: ProxyDecisionLoopState,
+    _loop_state: ProxyDecisionLoopState,
 ) -> ProxyMoveResult:
     value = holder.get("result")
     if isinstance(value, ProxyMoveResult):
         return value
-    return ProxyMoveResult(
-        worklog_lines=(),
-        active_workroom=loop_state.active_workroom,
-    )
-
-
-def _should_continue_active_workroom(
-    *,
-    action: MessageWorkroomAction,
-    active_workroom: ActiveWorkroom | None,
-) -> bool:
-    if active_workroom is None:
-        return False
-    if action.preset is None:
-        return True
-    return action.preset == active_workroom.workroom_id
+    return ProxyMoveResult(worklog_lines=())
 
 
 def _store_response(holder: dict[str, Any], value: object) -> None:

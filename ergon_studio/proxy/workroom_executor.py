@@ -26,7 +26,6 @@ from ergon_studio.proxy.orchestrator_tools import (
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
-    ActiveWorkroom,
     ProxyMoveResult,
     ProxyTurnState,
 )
@@ -132,11 +131,6 @@ class ProxyWorkroomExecutor:
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(room_lines),
-                        active_workroom=_active_workroom_state(
-                            definition=definition,
-                            round_participants=round_participants,
-                            workroom_message=workroom_message,
-                        ),
                     )
                 )
                 return
@@ -260,11 +254,6 @@ class ProxyWorkroomExecutor:
         result_sink(
             ProxyMoveResult(
                 worklog_lines=tuple(room_lines),
-                active_workroom=_active_workroom_state(
-                    definition=definition,
-                    round_participants=round_participants,
-                    workroom_message=workroom_message,
-                ),
             )
         )
 
@@ -376,22 +365,6 @@ def _continuation_start_index(
         if participant.agent_id == continuation.agent_id:
             return index
     return 0
-
-
-def _active_workroom_state(
-    *,
-    definition: DefinitionDocument,
-    round_participants: tuple[str, ...],
-    workroom_message: str | None,
-) -> ActiveWorkroom | None:
-    if not round_participants:
-        return None
-    return ActiveWorkroom(
-        workroom_id=_active_workroom_id(definition),
-        workroom_participants=round_participants,
-        workroom_message=workroom_message,
-    )
-
 
 def _prior_work(
     *,

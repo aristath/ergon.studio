@@ -38,9 +38,8 @@ def build_orchestrator_internal_tools(
             name="message_workroom",
             description=(
                 "Message a workroom. Provide a preset or participants "
-                "to open a room. If a room is already active, omitting both means "
-                "continue it. Repeating a participant means multiple staffed "
-                "instances of that role."
+                "to target the room you want. Repeating a participant means "
+                "multiple staffed instances of that role."
             ),
             parameters={
                 "type": "object",

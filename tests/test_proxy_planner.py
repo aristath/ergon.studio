@@ -128,31 +128,14 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("Still missing before delivery:", prompt)
         self.assertIn("verify", prompt)
 
-    def test_parse_turn_plan_resolves_known_workflow(self) -> None:
+    def test_parse_turn_plan_requires_action(self) -> None:
         registry = _make_registry()
 
-        plan = parse_turn_plan(
-            (
-                '{"mode":"workflow","workflow_id":"standard-build",'
-                '"goal":"Build it","rationale":"This needs staged work",'
-                '"comparison_mode":"select_best",'
-                '"comparison_criteria":"Prefer the safest implementation",'
-                '"success_criteria":"Have a reviewed implementation",'
-                '"deliverable_expected":true}'
-            ),
-            registry=registry,
-        )
-
-        self.assertEqual(plan.mode, "workflow")
-        self.assertEqual(plan.workflow_id, "standard-build")
-        self.assertEqual(plan.rationale, "This needs staged work")
-        self.assertEqual(plan.comparison_mode, "select_best")
-        self.assertEqual(
-            plan.comparison_criteria,
-            "Prefer the safest implementation",
-        )
-        self.assertEqual(plan.success_criteria, "Have a reviewed implementation")
-        self.assertTrue(plan.deliverable_expected)
+        with self.assertRaisesRegex(ValueError, "must include action"):
+            parse_turn_plan(
+                '{"mode":"workflow","workflow_id":"standard-build"}',
+                registry=registry,
+            )
 
     def test_parse_turn_plan_parses_compact_delegate_action(self) -> None:
         registry = _make_registry()
@@ -211,7 +194,7 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"mode":"delegate","agent_id":"ghost","request":"Do it"}',
+            '{"action":"delegate","target":"ghost","assignment":"Do it"}',
             registry=registry,
         )
 
@@ -222,7 +205,7 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"mode":"workflow","workflow_id":"Standard Build"}',
+            '{"action":"start_playbook","target":"Standard Build"}',
             registry=registry,
         )
 
@@ -232,63 +215,49 @@ class ProxyPlannerTests(unittest.TestCase):
         registry = _make_registry()
 
         plan = parse_turn_plan(
-            '{"mode":"workflow","workflow_id":"staged_delivery"}',
+            '{"action":"start_playbook","target":"staged_delivery"}',
             registry=registry,
         )
 
         self.assertEqual(plan.workflow_id, "standard-build")
 
-    def test_parse_turn_plan_normalizes_staffed_specialists(self) -> None:
+    def test_parse_turn_plan_normalizes_staffing_list(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"mode":"workflow","workflow_id":"standard-build",'
-                '"specialists":["coder","orchestrator","ghost","coder"]}'
+                '{"action":"start_playbook","target":"standard-build",'
+                '"staffing":["coder","orchestrator","ghost","coder"]}'
             ),
             registry=registry,
         )
 
         self.assertEqual(plan.specialists, ("coder",))
+        self.assertEqual(plan.specialist_counts, (("coder", 2),))
 
-    def test_parse_turn_plan_normalizes_specialist_counts(self) -> None:
+    def test_parse_turn_plan_allows_dense_staffing_list(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"mode":"workflow","workflow_id":"best-of-n",'
-                '"specialist_counts":{"coder":3,"architect":1,"ghost":2,'
-                '"orchestrator":5,"reviewer":true,"coder_bad":"4"}}'
+                '{"action":"start_playbook","target":"best-of-n",'
+                '"staffing":["coder","coder","coder","architect"]}'
             ),
             registry=registry,
         )
 
         self.assertEqual(
             plan.specialist_counts,
-            (("coder", 3), ("architect", 1)),
+            (("coder", 3),),
         )
-
-    def test_parse_turn_plan_parses_staffing_action(self) -> None:
-        registry = _make_registry()
-
-        plan = parse_turn_plan(
-            (
-                '{"mode":"continue_playbook","workflow_id":"best-of-n",'
-                '"staffing_action":"augment","specialists":["reviewer"]}'
-            ),
-            registry=registry,
-        )
-
-        self.assertEqual(plan.mode, "continue_playbook")
-        self.assertEqual(plan.staffing_action, "augment")
 
     def test_parse_turn_plan_parses_playbook_request(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"mode":"continue_playbook","workflow_id":"best-of-n",'
-                '"playbook_request":"Compare the current options and pick one."}'
+                '{"action":"continue_playbook","target":"current",'
+                '"assignment":"Compare the current options and pick one."}'
             ),
             registry=registry,
         )
@@ -299,26 +268,12 @@ class ProxyPlannerTests(unittest.TestCase):
             "Compare the current options and pick one.",
         )
 
-    def test_parse_turn_plan_parses_playbook_focus(self) -> None:
-        registry = _make_registry()
-
-        plan = parse_turn_plan(
-            (
-                '{"mode":"continue_playbook","workflow_id":"best-of-n",'
-                '"playbook_focus":"verification"}'
-            ),
-            registry=registry,
-        )
-
-        self.assertEqual(plan.mode, "continue_playbook")
-        self.assertEqual(plan.playbook_focus, "verify")
-
     def test_parse_turn_plan_parses_delivery_requirements(self) -> None:
         registry = _make_registry()
 
         plan = parse_turn_plan(
             (
-                '{"mode":"finish","delivery_requirements":['
+                '{"action":"deliver","delivery_requirements":['
                 '"reviewed","verification","ghost","review"]}'
             ),
             registry=registry,
@@ -326,20 +281,6 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.mode, "finish")
         self.assertEqual(plan.delivery_requirements, ("review", "verify"))
-
-    def test_parse_turn_plan_infers_compare_focus_from_comparison_mode(self) -> None:
-        registry = _make_registry()
-
-        plan = parse_turn_plan(
-            (
-                '{"mode":"workflow","workflow_id":"best-of-n",'
-                '"comparison_mode":"select_best"}'
-            ),
-            registry=registry,
-        )
-
-        self.assertEqual(plan.comparison_mode, "select_best")
-        self.assertEqual(plan.playbook_focus, "compare")
 
     def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:
         registry = _make_registry()

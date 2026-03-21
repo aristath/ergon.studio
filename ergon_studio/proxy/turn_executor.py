@@ -258,10 +258,7 @@ class ProxyTurnExecutor:
                     ),
                     request_text=plan.request or request.latest_user_text(),
                     current_brief=specialist_text.strip() or current_brief,
-                    goal=(
-                        plan.goal
-                        or (loop_state.goal if loop_state is not None else None)
-                    ),
+                    goal=loop_state.goal if loop_state is not None else None,
                     decision_history=(
                         loop_state.worklog if loop_state is not None else ()
                     ),

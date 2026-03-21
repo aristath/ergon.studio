@@ -208,8 +208,6 @@ class ProxyOrchestrationCore:
                 loop_state=loop_state,
             )
             state.mode = plan.mode
-            if plan.goal:
-                loop_state.goal = plan.goal
             if plan.delivery_requirements is not None:
                 loop_state.delivery_requirements = plan.delivery_requirements
             loop_state.current_move_rationale = plan.rationale

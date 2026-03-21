@@ -584,11 +584,11 @@ class ProxyServerTests(unittest.TestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"standard-build",'
-                            '"goal":"Build calculator"}'
+                            '{"action":"start_playbook","target":"standard-build",'
+                            '"assignment":"Build calculator"}'
                         ),
-                        '{"mode":"workflow","workflow_id":"standard-build"}',
-                        '{"mode":"finish"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
                     "architect": [
@@ -687,7 +687,7 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -749,7 +749,7 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -908,7 +908,7 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [

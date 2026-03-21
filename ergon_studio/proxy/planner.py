@@ -10,7 +10,6 @@ from ergon_studio.proxy.delivery_requirements import (
     unmet_delivery_requirements,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
-from ergon_studio.proxy.playbook_focus import normalize_playbook_focus
 from ergon_studio.proxy.selection_outcome import (
     ProxySelectionOutcome,
     selection_outcome_lines,
@@ -37,10 +36,8 @@ class ProxyTurnPlan:
     comparison_mode: str | None = None
     comparison_criteria: str | None = None
     request: str | None = None
-    goal: str | None = None
     rationale: str | None = None
     success_criteria: str | None = None
-    deliverable_expected: bool = False
 
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
@@ -287,10 +284,9 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         raise ValueError(f"invalid planner json: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError("planner output must be a JSON object")
-
-    if "action" in payload:
-        return _parse_action_plan(payload, registry=registry)
-    return _parse_legacy_plan(payload, registry=registry)
+    if "action" not in payload:
+        raise ValueError("planner output must include action")
+    return _parse_action_plan(payload, registry=registry)
 
 
 def _parse_action_plan(
@@ -366,57 +362,6 @@ def _parse_action_plan(
     )
 
 
-def _parse_legacy_plan(
-    payload: dict[str, object],
-    *,
-    registry: RuntimeRegistry,
-) -> ProxyTurnPlan:
-
-    mode = str(payload.get("mode", "act")).strip().lower()
-    if mode not in {"act", "delegate", "workflow", "continue_playbook", "finish"}:
-        mode = "act"
-    staffing_action = _normalize_staffing_action(payload.get("staffing_action"))
-    workflow_id = resolve_workflow_reference(
-        registry, _optional_text(payload.get("workflow_id"))
-    )
-    agent_id = _optional_text(payload.get("agent_id"))
-    if agent_id is not None and agent_id not in registry.agent_definitions:
-        agent_id = None
-    specialists = _normalize_specialists(payload.get("specialists"), registry=registry)
-    specialist_counts = _normalize_specialist_counts(
-        payload.get("specialist_counts"),
-        registry=registry,
-    )
-    comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
-    playbook_focus = normalize_playbook_focus(payload.get("playbook_focus"))
-    delivery_requirements = normalize_delivery_requirements(
-        payload["delivery_requirements"]
-    ) if "delivery_requirements" in payload else None
-    if mode not in {"workflow", "continue_playbook"}:
-        staffing_action = None
-        playbook_focus = None
-    elif comparison_mode is not None and playbook_focus is None:
-        playbook_focus = "compare"
-    return ProxyTurnPlan(
-        mode=mode,
-        workflow_id=workflow_id,
-        agent_id=agent_id,
-        staffing_action=staffing_action,
-        specialists=specialists,
-        specialist_counts=specialist_counts,
-        playbook_request=_optional_text(payload.get("playbook_request")),
-        playbook_focus=playbook_focus,
-        delivery_requirements=delivery_requirements,
-        comparison_mode=comparison_mode,
-        comparison_criteria=_optional_text(payload.get("comparison_criteria")),
-        request=_optional_text(payload.get("request")),
-        goal=_optional_text(payload.get("goal")),
-        rationale=_optional_text(payload.get("rationale")),
-        success_criteria=_optional_text(payload.get("success_criteria")),
-        deliverable_expected=bool(payload.get("deliverable_expected", False)),
-    )
-
-
 def resolve_workflow_reference(
     registry: RuntimeRegistry, value: str | None
 ) -> str | None:
@@ -449,55 +394,6 @@ def resolve_workflow_reference(
     return None
 
 
-def _normalize_specialists(
-    value: object,
-    *,
-    registry: RuntimeRegistry,
-) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return ()
-    specialists: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            continue
-        candidate = item.strip()
-        if (
-            not candidate
-            or candidate == "orchestrator"
-            or candidate not in registry.agent_definitions
-            or candidate in specialists
-        ):
-            continue
-        specialists.append(candidate)
-    return tuple(specialists)
-
-
-def _normalize_specialist_counts(
-    value: object,
-    *,
-    registry: RuntimeRegistry,
-) -> tuple[tuple[str, int], ...]:
-    if not isinstance(value, dict):
-        return ()
-    specialist_counts: list[tuple[str, int]] = []
-    for raw_agent_id, raw_count in value.items():
-        if not isinstance(raw_agent_id, str):
-            continue
-        agent_id = raw_agent_id.strip()
-        if (
-            not agent_id
-            or agent_id == "orchestrator"
-            or agent_id not in registry.agent_definitions
-        ):
-            continue
-        if isinstance(raw_count, bool) or not isinstance(raw_count, int):
-            continue
-        if raw_count <= 0:
-            continue
-        specialist_counts.append((agent_id, raw_count))
-    return tuple(specialist_counts)
-
-
 def _normalize_staffing_list(
     value: object,
     *,
@@ -526,24 +422,6 @@ def _normalize_staffing_list(
         (agent_id, count) for agent_id in order if (count := counts[agent_id]) > 1
     )
     return specialists, specialist_counts
-
-
-def _normalize_comparison_mode(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    candidate = value.strip().lower()
-    if candidate in {"select_best", "synthesize_best", "critique_options"}:
-        return candidate
-    return None
-
-
-def _normalize_staffing_action(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if normalized in {"keep", "replace", "augment", "trim"}:
-        return normalized
-    return None
 
 
 def _normalize_action(value: object) -> str:

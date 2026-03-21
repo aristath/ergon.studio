@@ -81,7 +81,11 @@ class ProxyWorkflowRequestExecutor:
             specialist_counts=plan.specialist_counts,
             workflow_request=plan.playbook_request,
             workflow_focus=plan.playbook_focus,
-            goal=plan.goal or request.latest_user_text() or "",
+            goal=(
+                loop_state.goal
+                if loop_state is not None
+                else request.latest_user_text() or ""
+            ),
             state=state,
             result_sink=result_sink,
             loop_state=loop_state,

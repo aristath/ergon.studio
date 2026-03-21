@@ -30,7 +30,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"mode":"act"}', "Hello world"],
+                    "orchestrator": ['{"action":"reply"}', "Hello world"],
                 }
             ),
         )
@@ -90,7 +90,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         def _builder(_registry, agent_id: str, **kwargs):
             captured["agent_id"] = agent_id
             captured["model_id_override"] = kwargs.get("model_id_override")
-            return _FakeAgent(['{"mode":"act"}', "Hello world"])
+            return _FakeAgent(['{"action":"reply"}', "Hello world"])
 
         core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
         request = ProxyTurnRequest(
@@ -195,16 +195,16 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"delegate","agent_id":"coder",'
-                            '"request":"Implement it",'
+                            '{"action":"delegate","target":"coder",'
+                            '"assignment":"Implement it",'
                             '"delivery_requirements":["review"]}'
                         ),
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         (
-                            '{"mode":"delegate","agent_id":"reviewer",'
-                            '"request":"Review the implementation"}'
+                            '{"action":"delegate","target":"reviewer",'
+                            '"assignment":"Review the implementation"}'
                         ),
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         "Reviewed delivery",
                     ],
                     "coder": ["Implemented the change"],
@@ -262,11 +262,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"reviewed-build",'
-                            '"goal":"Build calculator",'
+                            '{"action":"start_playbook","target":"reviewed-build",'
+                            '"assignment":"Build calculator",'
                             '"delivery_requirements":["review"]}'
                         ),
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         "Reviewed workflow delivery",
                     ],
                     "architect": ["Plan the build"],
@@ -304,10 +304,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"standard-build",'
-                            '"goal":"Build calculator","specialists":["coder"]}'
+                            '{"action":"start_playbook","target":"standard-build",'
+                            '"assignment":"Build calculator","staffing":["coder"]}'
                         ),
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
                     "coder": ["Built"],
@@ -338,7 +338,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -381,8 +381,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"standard-build",'
-                            '"goal":"Build calculator"}'
+                            '{"action":"start_playbook","target":"standard-build",'
+                            '"assignment":"Build calculator"}'
                         ),
                     ],
                     "architect": [
@@ -421,8 +421,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "orchestrator": [
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"finish"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"deliver"}',
                         "Workflow final summary",
                     ],
                 }
@@ -470,7 +470,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"mode":"act"}', "Fresh reply"],
+                    "orchestrator": ['{"action":"reply"}', "Fresh reply"],
                 }
             ),
         )
@@ -511,8 +511,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"grouped-build",'
-                            '"goal":"Build calculator"}'
+                            '{"action":"start_playbook","target":"grouped-build",'
+                            '"assignment":"Build calculator"}'
                         ),
                     ],
                     "architect": [
@@ -550,7 +550,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "reviewer": ["Reviewed result"],
-                    "orchestrator": ['{"mode":"act"}', "Workflow final summary"],
+                    "orchestrator": ['{"action":"reply"}', "Workflow final summary"],
                 }
             ),
         )
@@ -592,13 +592,13 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow","workflow_id":"debate",'
-                            '"goal":"Choose an approach"}'
+                            '{"action":"start_playbook","target":"debate",'
+                            '"assignment":"Choose an approach"}'
                         ),
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"finish"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"deliver"}',
                         "Debate final summary",
                     ],
                     "architect": ["Option A", "Refined option A"],
@@ -634,15 +634,15 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow",'
-                            '"workflow_id":"dynamic-open-ended","goal":"Build it"}'
+                            '{"action":"start_playbook",'
+                            '"target":"dynamic-open-ended","assignment":"Build it"}'
                         ),
                         '{"agent_id":"architect"}',
-                        '{"mode":"continue_playbook"}',
+                        '{"action":"continue_playbook","target":"current"}',
                         '{"agent_id":"reviewer"}',
-                        '{"mode":"continue_playbook"}',
+                        '{"action":"continue_playbook","target":"current"}',
                         '{"agent_id":null}',
-                        '{"mode":"finish"}',
+                        '{"action":"deliver"}',
                         "Dynamic final summary",
                     ],
                     "architect": ["Architecture pass"],
@@ -676,12 +676,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         (
-                            '{"mode":"workflow",'
-                            '"workflow_id":"specialist-handoff",'
-                            '"goal":"Research and decide"}'
+                            '{"action":"start_playbook",'
+                            '"target":"specialist-handoff",'
+                            '"assignment":"Research and decide"}'
                         ),
-                        '{"mode":"continue_playbook"}',
-                        '{"mode":"finish"}',
+                        '{"action":"continue_playbook","target":"current"}',
+                        '{"action":"deliver"}',
                         "Handoff final summary",
                     ],
                     "architect": ["Initial direction", '{"agent_id":"reviewer"}'],
@@ -710,7 +710,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
         remaining = {
-            "orchestrator": ['{"mode":"act"}', {"text": "", "tool_calls": []}],
+            "orchestrator": ['{"action":"reply"}', {"text": "", "tool_calls": []}],
         }
 
         class _CaptureAgent(_FakeAgent):
@@ -753,7 +753,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         remaining = {
-            "orchestrator": ['{"mode":"act"}', {"text": "Done", "tool_calls": []}],
+            "orchestrator": ['{"action":"reply"}', {"text": "Done", "tool_calls": []}],
         }
 
         class _CaptureAgent(_FakeAgent):
@@ -793,7 +793,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             registry,
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"mode":"act"}', "unused"],
+                    "orchestrator": ['{"action":"reply"}', "unused"],
                 }
             ),
         )
@@ -822,7 +822,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -862,7 +862,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"mode":"act"}',
+                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [

@@ -584,12 +584,12 @@ class ProxyServerTests(unittest.TestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(
-                            "continue_workroom",
+                            "message_workroom",
                             participants=["coder"],
                             message="Continue the build from the plan",
                         ),

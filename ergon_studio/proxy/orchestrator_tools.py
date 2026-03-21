@@ -6,31 +6,21 @@ from dataclasses import dataclass
 from ergon_studio.proxy.models import ProxyFunctionTool, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 
-INTERNAL_TOOL_NAMES = frozenset(
-    {"open_workroom", "continue_workroom"}
-)
+INTERNAL_TOOL_NAMES = frozenset({"message_workroom"})
 
 
 @dataclass(frozen=True)
-class OpenWorkroomAction:
+class MessageWorkroomAction:
     workroom_id: str | None
     participants: tuple[str, ...]
     message: str
 
 
-@dataclass(frozen=True)
-class ContinueWorkroomAction:
-    participants: tuple[str, ...]
-    message: str
-
-
-InternalAction = OpenWorkroomAction | ContinueWorkroomAction
+InternalAction = MessageWorkroomAction
 
 
 def build_orchestrator_internal_tools(
     registry: RuntimeRegistry,
-    *,
-    has_active_workroom: bool,
 ) -> tuple[ProxyFunctionTool, ...]:
     specialist_ids = tuple(
         agent_id
@@ -38,14 +28,14 @@ def build_orchestrator_internal_tools(
         if agent_id != "orchestrator"
     )
     workroom_ids = tuple(sorted(registry.workroom_definitions))
-    tools = [
+    return (
         ProxyFunctionTool(
-            name="open_workroom",
+            name="message_workroom",
             description=(
-                "Open a collaborative workroom. Use a preset by id, or provide "
-                "participants for an ad hoc room. Repeating a participant means "
-                "multiple staffed instances of that role. A one-person room is "
-                "a direct specialist channel."
+                "Message a workroom. Provide a preset workroom_id or participants "
+                "to open a room. If a room is already active, omitting both means "
+                "continue it. Repeating a participant means multiple staffed "
+                "instances of that role."
             ),
             parameters={
                 "type": "object",
@@ -66,34 +56,7 @@ def build_orchestrator_internal_tools(
                 "required": ["message"],
             },
         ),
-    ]
-    if has_active_workroom:
-            tools.append(
-            ProxyFunctionTool(
-                name="continue_workroom",
-                description=(
-                    "Continue the workroom already in progress with a new "
-                    "natural-language assignment from the lead developer. "
-                    "Optionally name the participants who should continue the "
-                    "next phase of the room."
-                ),
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "participants": {
-                            "type": "array",
-                            "items": {
-                                "type": "string",
-                                "enum": list(specialist_ids),
-                            },
-                        },
-                        "message": {"type": "string"},
-                    },
-                    "required": ["message"],
-                },
-            )
-        )
-    return tuple(tools)
+    )
 
 
 def parse_internal_action(
@@ -108,35 +71,17 @@ def parse_internal_action(
     if not isinstance(payload, dict):
         raise ValueError(f"{tool_call.name} arguments must be an object")
 
-    if tool_call.name == "open_workroom":
-        workroom_id = _optional_workroom_id(payload.get("workroom_id"), registry)
-        participants = _normalize_staffing_list(
+    if tool_call.name != "message_workroom":
+        raise ValueError(f"unsupported internal tool: {tool_call.name}")
+
+    return MessageWorkroomAction(
+        workroom_id=_optional_workroom_id(payload.get("workroom_id"), registry),
+        participants=_normalize_staffing_list(
             payload.get("participants"),
             registry=registry,
-        )
-        if workroom_id is None and not participants:
-            raise ValueError(
-                "open_workroom requires either a preset workroom_id or participants"
-            )
-        message = _required_text(payload.get("message"), field="message")
-        return OpenWorkroomAction(
-            workroom_id=workroom_id,
-            participants=participants,
-            message=message,
-        )
-
-    if tool_call.name == "continue_workroom":
-        participants = _normalize_staffing_list(
-            payload.get("participants"),
-            registry=registry,
-        )
-        message = _required_text(payload.get("message"), field="message")
-        return ContinueWorkroomAction(
-            participants=participants,
-            message=message,
-        )
-
-    raise ValueError(f"unsupported internal tool: {tool_call.name}")
+        ),
+        message=_required_text(payload.get("message"), field="message"),
+    )
 
 
 def is_internal_tool_name(name: str) -> bool:

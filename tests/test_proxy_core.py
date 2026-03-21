@@ -117,7 +117,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             participants=["coder"],
                             message="Implement it",
                         ),
@@ -153,12 +153,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(
-                            "continue_workroom",
+                            "message_workroom",
                             participants=["coder"],
                             message="Implement the approved plan",
                         ),
@@ -196,7 +196,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="standard-build",
                             participants=["coder"],
                             message="Build calculator",
@@ -273,7 +273,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="standard-build",
                             message="Build calculator",
                         ),
@@ -315,7 +315,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "coder": ["Built feature"],
                     "orchestrator": [
                         _internal_action(
-                            "continue_workroom",
+                            "message_workroom",
                             participants=["coder"],
                             message="Continue from the architecture plan",
                         ),
@@ -412,7 +412,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="build-room",
                             message="Build calculator",
                         ),
@@ -494,7 +494,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="debate",
                             message="Choose an approach",
                         ),
@@ -526,7 +526,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Decision-ready", reasoning)
         self.assertEqual(result.content, "Debate final summary")
 
-    async def test_continue_workroom_can_replace_room_staffing(self) -> None:
+    async def test_message_workroom_can_replace_room_staffing(self) -> None:
         registry = _advanced_workroom_registry()
         core = ProxyOrchestrationCore(
             registry,
@@ -534,12 +534,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "open_workroom",
+                            "message_workroom",
                             workroom_id="debate",
                             message="Build it",
                         ),
                         _internal_action(
-                            "continue_workroom",
+                            "message_workroom",
                             participants=["reviewer"],
                             message="Reviewer, give the final verdict.",
                         ),
@@ -607,7 +607,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         kwargs = captured["kwargs"]
         self.assertEqual(
             [tool.name for tool in tools],
-            ["write_file", "open_workroom"],
+            ["write_file", "message_workroom"],
         )
         self.assertEqual(
             kwargs["tool_choice"],

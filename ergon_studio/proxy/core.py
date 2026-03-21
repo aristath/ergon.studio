@@ -23,8 +23,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnResult,
 )
 from ergon_studio.proxy.orchestrator_tools import (
-    ContinueWorkroomAction,
-    OpenWorkroomAction,
+    MessageWorkroomAction,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
     parse_internal_action,
@@ -161,10 +160,7 @@ class ProxyOrchestrationCore:
         for _ in range(self._MAX_INTERNAL_MOVES):
             response_holder: dict[str, Any] = {}
             buffered_deltas: list[str] = []
-            internal_tools = build_orchestrator_internal_tools(
-                self.registry,
-                has_active_workroom=loop_state.workroom_progress is not None,
-            )
+            internal_tools = build_orchestrator_internal_tools(self.registry)
             async for delta in self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
@@ -279,37 +275,52 @@ class ProxyOrchestrationCore:
         loop_state: ProxyDecisionLoopState,
         result_holder: dict[str, object],
     ) -> AsyncIterator[ProxyEvent]:
-        if isinstance(action, OpenWorkroomAction):
+        if isinstance(action, MessageWorkroomAction):
             state.mode = "workroom"
+            active_workroom = loop_state.workroom_progress
+            if (
+                active_workroom is None
+                and action.workroom_id is None
+                and not action.participants
+            ):
+                state.finish_reason = "error"
+                error_text = "message_workroom needs an active room or a room target."
+                state.content = error_text
+                yield ProxyContentDeltaEvent(error_text)
+                return
+            if _should_continue_active_workroom(
+                action=action,
+                active_workroom=active_workroom,
+            ):
+                if active_workroom is None:
+                    state.finish_reason = "error"
+                    error_text = "No active workroom is available to message."
+                    state.content = error_text
+                    yield ProxyContentDeltaEvent(error_text)
+                    return
+                continuation = _update_workroom_request(
+                    active_workroom,
+                    participants=action.participants,
+                    message=action.message,
+                )
+                async for event in (
+                    self._workroom_dispatcher.execute_workroom_continuation(
+                        request=request,
+                        continuation=continuation,
+                        pending=None,
+                        state=state,
+                        result_sink=_result_sink(result_holder),
+                        loop_state=loop_state,
+                    )
+                ):
+                    yield event
+                return
             async for event in self._workroom_dispatcher.execute_workroom(
                 request=request,
                 workroom_id=action.workroom_id,
                 participants=action.participants,
                 workroom_request=action.message,
                 goal=loop_state.goal,
-                state=state,
-                result_sink=_result_sink(result_holder),
-                loop_state=loop_state,
-            ):
-                yield event
-            return
-        if isinstance(action, ContinueWorkroomAction):
-            state.mode = "workroom"
-            active_workroom = loop_state.workroom_progress
-            if active_workroom is None:
-                state.finish_reason = "error"
-                error_text = "No active workroom is available to continue."
-                state.content = error_text
-                yield ProxyContentDeltaEvent(error_text)
-                return
-            async for event in self._workroom_dispatcher.execute_workroom_continuation(
-                request=request,
-                continuation=_update_workroom_request(
-                    active_workroom,
-                    participants=action.participants,
-                    message=action.message,
-                ),
-                pending=None,
                 state=state,
                 result_sink=_result_sink(result_holder),
                 loop_state=loop_state,
@@ -450,3 +461,15 @@ def _result(
         current_brief=loop_state.current_brief,
         workroom_progress=loop_state.workroom_progress,
     )
+
+
+def _should_continue_active_workroom(
+    *,
+    action: MessageWorkroomAction,
+    active_workroom: ContinuationState | None,
+) -> bool:
+    if active_workroom is None:
+        return False
+    if action.workroom_id is None:
+        return True
+    return action.workroom_id == active_workroom.workroom_id

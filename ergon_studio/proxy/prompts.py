@@ -22,8 +22,8 @@ def orchestrator_turn_prompt(
             "forward yourself."
         ),
         (
-            "When you need help from the team, open or continue one workroom "
-            "at a time instead of describing a plan in JSON."
+            "When you need help from the team, message one workroom at a time "
+            "instead of describing a plan in JSON."
         ),
         (
             "Do not send a product-manager-facing answer while you are still "

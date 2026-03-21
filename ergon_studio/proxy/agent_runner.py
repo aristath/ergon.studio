@@ -44,7 +44,6 @@ class RuntimeAgent:
 class AgentInvocation:
     agent: RuntimeAgent
     model: str
-    prompt: str
     messages: tuple[dict[str, Any], ...]
     tools: tuple[ProxyFunctionTool, ...]
     tool_choice: str | dict[str, Any] | None
@@ -81,7 +80,6 @@ class ProxyAgentRunner:
         agent_id: str,
         prompt: str,
         model_id_override: str,
-        preamble: str = "",
         host_tools: tuple[ProxyFunctionTool, ...] = (),
         extra_tools: tuple[ProxyFunctionTool, ...] = (),
         tool_choice: ProxyToolChoice = None,
@@ -90,7 +88,7 @@ class ProxyAgentRunner:
     ) -> ResponseStream[str, AgentRunResult]:
         invocation = self._build_invocation(
             agent_id=agent_id,
-            prompt=_merge_preamble(preamble, prompt),
+            prompt=prompt,
             model_id_override=model_id_override,
             host_tools=host_tools,
             extra_tools=extra_tools,
@@ -245,7 +243,6 @@ class ProxyAgentRunner:
         return AgentInvocation(
             agent=agent,
             model=model_id_override,
-            prompt=prompt,
             messages=messages,
             tools=declared_tools,
             tool_choice=translated_tool_choice,
@@ -508,14 +505,6 @@ def _metadata_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
-
-
-def _merge_preamble(preamble: str, prompt: str) -> str:
-    preamble = preamble.strip()
-    prompt = prompt.strip()
-    if preamble and prompt:
-        return f"{preamble}\n\n{prompt}"
-    return preamble or prompt
 
 
 def _synthetic_tool_calls_from_results(

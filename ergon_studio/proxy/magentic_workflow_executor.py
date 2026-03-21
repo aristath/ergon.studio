@@ -14,6 +14,12 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.playbook_staffing import (
+    expand_staffed_participants,
+    participant_by_label,
+    participant_context,
+    participant_for_agent,
+)
 from ergon_studio.proxy.prompts import workflow_step_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import (
@@ -55,6 +61,7 @@ class ProxyMagenticWorkflowExecutor:
         definition: DefinitionDocument,
         goal: str,
         specialists: tuple[str, ...] = (),
+        specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
         workflow_focus: str | None = None,
         state: ProxyTurnState,
@@ -68,7 +75,16 @@ class ProxyMagenticWorkflowExecutor:
             if continuation is not None
             else specialists
         )
-        participants = _staffed_participants(definition, staffed_specialists)
+        staffed_specialist_counts = (
+            continuation.workflow_specialist_counts
+            if continuation is not None
+            else specialist_counts
+        )
+        participants = expand_staffed_participants(
+            workflow_participants_for_definition(definition),
+            specialists=staffed_specialists,
+            specialist_counts=staffed_specialist_counts,
+        )
         max_rounds = workflow_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
         )
@@ -108,21 +124,26 @@ class ProxyMagenticWorkflowExecutor:
             else 0
         )
         while round_index < max_rounds:
-            agent_id: str | None
+            participant = None
             if (
                 continuation is not None
                 and pending is not None
                 and round_index == (continuation.step_index or 0)
             ):
-                agent_id = continuation.agent_id
+                participant = participant_by_label(
+                    participants,
+                    continuation.participant_label,
+                ) or participant_for_agent(participants, continuation.agent_id)
             else:
-                agent_id = await self._select_manager_agent(
+                participant_label = await self._select_manager_agent(
                     workflow_id=definition.id,
                     goal=goal,
                     current_brief=current_brief,
                     playbook_request=workflow_request,
                     playbook_focus=workflow_focus,
-                    participants=participants,
+                    participants=tuple(
+                        participant.label for participant in participants
+                    ),
                     prior_outputs=tuple(workflow_outputs),
                     move_rationale=(
                         loop_state.current_move_rationale
@@ -136,11 +157,18 @@ class ProxyMagenticWorkflowExecutor:
                     ),
                     model_id_override=request.model,
                 )
-            if agent_id is None:
+                participant = participant_by_label(participants, participant_label)
+            if participant is None:
                 break
             prompt = workflow_step_prompt(
                 workflow_id=definition.id,
-                agent_id=agent_id,
+                agent_id=participant.agent_id,
+                role_instance_label=(
+                    participant.label
+                    if participant.label != participant.agent_id
+                    else None
+                ),
+                role_instance_context=participant_context(participant),
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
@@ -162,9 +190,11 @@ class ProxyMagenticWorkflowExecutor:
             first = True
             response_holder: dict[str, Any] = {}
             async for delta in self._stream_text_agent(
-                agent_id=agent_id,
+                agent_id=participant.agent_id,
                 prompt=prompt,
-                session_id=f"proxy-magentic-{definition.id}-{agent_id}-{uuid4().hex}",
+                session_id=(
+                    f"proxy-magentic-{definition.id}-{participant.label}-{uuid4().hex}"
+                ),
                 model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
@@ -176,7 +206,7 @@ class ProxyMagenticWorkflowExecutor:
                 final_response_sink=response_holder_sink(response_holder),
             ):
                 agent_text += delta
-                reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                reasoning_delta = f"{participant.label}: {delta}" if first else delta
                 first = False
                 state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
@@ -189,10 +219,12 @@ class ProxyMagenticWorkflowExecutor:
                         mode="workflow",
                         workflow_id=definition.id,
                         workflow_specialists=staffed_specialists,
+                        workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
                         step_index=round_index,
-                        agent_id=agent_id,
+                        agent_id=participant.agent_id,
+                        participant_label=participant.label,
                         goal=goal,
                         current_brief=agent_text.strip() or current_brief,
                         decision_history=(
@@ -206,7 +238,7 @@ class ProxyMagenticWorkflowExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+            workflow_outputs.append(f"{participant.label}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             round_index += 1
             if result_sink is not None:
@@ -216,10 +248,12 @@ class ProxyMagenticWorkflowExecutor:
                         mode="workflow",
                         workflow_id=definition.id,
                         workflow_specialists=staffed_specialists,
+                        workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
                         step_index=round_index,
-                        agent_id=agent_id,
+                        agent_id=participant.agent_id,
+                        participant_label=participant.label,
                         goal=goal,
                         current_brief=current_brief,
                         decision_history=(
@@ -252,14 +286,3 @@ class ProxyMagenticWorkflowExecutor:
             state=state,
         ):
             yield summary_event
-
-
-def _staffed_participants(
-    definition: DefinitionDocument,
-    specialists: tuple[str, ...],
-) -> tuple[str, ...]:
-    participants = workflow_participants_for_definition(definition)
-    if not specialists:
-        return participants
-    allowed = set(specialists)
-    return tuple(agent_id for agent_id in participants if agent_id in allowed)

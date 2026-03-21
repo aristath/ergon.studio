@@ -14,6 +14,14 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.playbook_staffing import (
+    StaffedParticipant,
+    expand_staffed_participants,
+    participant_by_label,
+    participant_context,
+    participant_for_agent,
+    participant_labels_for_agents,
+)
 from ergon_studio.proxy.prompts import workflow_step_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import (
@@ -58,6 +66,7 @@ class ProxyHandoffWorkflowExecutor:
         definition: DefinitionDocument,
         goal: str,
         specialists: tuple[str, ...] = (),
+        specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
         workflow_focus: str | None = None,
         state: ProxyTurnState,
@@ -71,8 +80,20 @@ class ProxyHandoffWorkflowExecutor:
             if continuation is not None
             else specialists
         )
-        participants = _staffed_participants(definition, staffed_specialists)
-        finalizers = workflow_finalizers_for_definition(definition)
+        staffed_specialist_counts = (
+            continuation.workflow_specialist_counts
+            if continuation is not None
+            else specialist_counts
+        )
+        participants = expand_staffed_participants(
+            workflow_participants_for_definition(definition),
+            specialists=staffed_specialists,
+            specialist_counts=staffed_specialist_counts,
+        )
+        finalizers = participant_labels_for_agents(
+            participants,
+            workflow_finalizers_for_definition(definition),
+        )
         handoffs = _staffed_handoffs(definition, participants)
         max_rounds = workflow_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
@@ -113,46 +134,64 @@ class ProxyHandoffWorkflowExecutor:
             else 0
         )
         if continuation is not None and pending is not None:
-            current_agent: str | None = continuation.agent_id
+            current_participant = participant_by_label(
+                participants,
+                continuation.participant_label,
+            ) or participant_for_agent(participants, continuation.agent_id)
         elif continuation is not None and continuation.agent_id is not None:
-            current_agent = await self._select_handoff_target(
-                workflow_id=definition.id,
-                current_agent=continuation.agent_id,
-                goal=goal,
-                current_brief=current_brief,
-                playbook_request=workflow_request,
-                playbook_focus=workflow_focus,
-                prior_outputs=tuple(workflow_outputs),
-                allowed=handoffs.get(
-                    continuation.agent_id,
-                    tuple(
-                        agent
-                        for agent in participants
-                        if agent != continuation.agent_id
+            current_participant = participant_by_label(
+                participants,
+                continuation.participant_label,
+            ) or participant_for_agent(participants, continuation.agent_id)
+            if current_participant is not None:
+                next_label = await self._select_handoff_target(
+                    workflow_id=definition.id,
+                    current_agent=current_participant.label,
+                    goal=goal,
+                    current_brief=current_brief,
+                    playbook_request=workflow_request,
+                    playbook_focus=workflow_focus,
+                    prior_outputs=tuple(workflow_outputs),
+                    allowed=handoffs.get(
+                        current_participant.label,
+                        tuple(
+                            participant.label
+                            for participant in participants
+                            if participant.label != current_participant.label
+                        ),
                     ),
-                ),
-                move_rationale=(
-                    loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
-                success_criteria=(
-                    loop_state.current_move_success_criteria
-                    if loop_state is not None
-                    else None
-                ),
-                model_id_override=request.model,
-            )
+                    move_rationale=(
+                        loop_state.current_move_rationale
+                        if loop_state is not None
+                        else None
+                    ),
+                    success_criteria=(
+                        loop_state.current_move_success_criteria
+                        if loop_state is not None
+                        else None
+                    ),
+                    model_id_override=request.model,
+                )
+                current_participant = participant_by_label(participants, next_label)
         else:
             start_agent = workflow_start_agent_for_definition(definition)
-            if start_agent not in participants:
-                start_agent = participants[0] if participants else "reviewer"
-            current_agent = start_agent
+            if start_agent is None:
+                current_participant = participants[0] if participants else None
+            else:
+                current_participant = participant_for_agent(participants, start_agent)
+                if current_participant is None:
+                    current_participant = participants[0] if participants else None
 
-        while round_index < max_rounds and current_agent:
+        while round_index < max_rounds and current_participant is not None:
             prompt = workflow_step_prompt(
                 workflow_id=definition.id,
-                agent_id=current_agent,
+                agent_id=current_participant.agent_id,
+                role_instance_label=(
+                    current_participant.label
+                    if current_participant.label != current_participant.agent_id
+                    else None
+                ),
+                role_instance_context=participant_context(current_participant),
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
@@ -174,9 +213,12 @@ class ProxyHandoffWorkflowExecutor:
             first = True
             response_holder: dict[str, Any] = {}
             async for delta in self._stream_text_agent(
-                agent_id=current_agent,
+                agent_id=current_participant.agent_id,
                 prompt=prompt,
-                session_id=f"proxy-handoff-{definition.id}-{current_agent}-{uuid4().hex}",
+                session_id=(
+                    f"proxy-handoff-{definition.id}-"
+                    f"{current_participant.label}-{uuid4().hex}"
+                ),
                 model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
@@ -188,7 +230,9 @@ class ProxyHandoffWorkflowExecutor:
                 final_response_sink=response_holder_sink(response_holder),
             ):
                 agent_text += delta
-                reasoning_delta = f"{current_agent}: {delta}" if first else delta
+                reasoning_delta = (
+                    f"{current_participant.label}: {delta}" if first else delta
+                )
                 first = False
                 state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
@@ -201,10 +245,12 @@ class ProxyHandoffWorkflowExecutor:
                         mode="workflow",
                         workflow_id=definition.id,
                         workflow_specialists=staffed_specialists,
+                        workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
                         step_index=round_index,
-                        agent_id=current_agent,
+                        agent_id=current_participant.agent_id,
+                        participant_label=current_participant.label,
                         goal=goal,
                         current_brief=agent_text.strip() or current_brief,
                         decision_history=(
@@ -218,9 +264,11 @@ class ProxyHandoffWorkflowExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workflow_outputs.append(f"{current_agent}: {agent_text.strip()}")
+            workflow_outputs.append(
+                f"{current_participant.label}: {agent_text.strip()}"
+            )
             current_brief = agent_text.strip() or current_brief
-            if current_agent in finalizers:
+            if current_participant.label in finalizers:
                 if result_sink is not None:
                     result_sink(
                         ProxyMoveResult(
@@ -240,10 +288,12 @@ class ProxyHandoffWorkflowExecutor:
                             mode="workflow",
                             workflow_id=definition.id,
                             workflow_specialists=staffed_specialists,
+                            workflow_specialist_counts=staffed_specialist_counts,
                             workflow_request=workflow_request,
                             workflow_focus=workflow_focus,
                             step_index=next_round,
-                            agent_id=current_agent,
+                            agent_id=current_participant.agent_id,
+                            participant_label=current_participant.label,
                             goal=goal,
                             current_brief=current_brief,
                             decision_history=(
@@ -256,17 +306,21 @@ class ProxyHandoffWorkflowExecutor:
                     )
                 )
                 return
-            current_agent = await self._select_handoff_target(
+            next_label = await self._select_handoff_target(
                 workflow_id=definition.id,
-                current_agent=current_agent,
+                current_agent=current_participant.label,
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
                 playbook_focus=workflow_focus,
                 prior_outputs=tuple(workflow_outputs),
                 allowed=handoffs.get(
-                    current_agent,
-                    tuple(agent for agent in participants if agent != current_agent),
+                    current_participant.label,
+                    tuple(
+                        participant.label
+                        for participant in participants
+                        if participant.label != current_participant.label
+                    ),
                 ),
                 move_rationale=(
                     loop_state.current_move_rationale
@@ -280,6 +334,7 @@ class ProxyHandoffWorkflowExecutor:
                 ),
                 model_id_override=request.model,
             )
+            current_participant = participant_by_label(participants, next_label)
             round_index += 1
         if result_sink is not None:
             result_sink(
@@ -300,30 +355,27 @@ class ProxyHandoffWorkflowExecutor:
             yield summary_event
 
 
-def _staffed_participants(
-    definition: DefinitionDocument,
-    specialists: tuple[str, ...],
-) -> tuple[str, ...]:
-    participants = workflow_participants_for_definition(definition)
-    if not specialists:
-        return participants
-    allowed = set(specialists)
-    return tuple(agent_id for agent_id in participants if agent_id in allowed)
-
-
 def _staffed_handoffs(
     definition: DefinitionDocument,
-    participants: tuple[str, ...],
+    participants: tuple[StaffedParticipant, ...],
 ) -> dict[str, tuple[str, ...]]:
     configured = workflow_handoffs_for_definition(definition)
     if not participants:
         return {}
-    allowed = set(participants)
+    allowed_agents = {participant.agent_id for participant in participants}
     filtered: dict[str, tuple[str, ...]] = {}
-    for agent_id, targets in configured.items():
-        if agent_id not in allowed:
+    for current_participant in participants:
+        targets = configured.get(current_participant.agent_id, ())
+        if current_participant.agent_id not in allowed_agents:
             continue
-        filtered_targets = tuple(target for target in targets if target in allowed)
+        filtered_targets = tuple(
+            participant.label
+            for participant in participants
+            if (
+                participant.agent_id in targets
+                and participant.label != current_participant.label
+            )
+        )
         if filtered_targets:
-            filtered[agent_id] = filtered_targets
+            filtered[current_participant.label] = filtered_targets
     return filtered

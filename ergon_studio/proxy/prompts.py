@@ -317,6 +317,8 @@ def group_chat_turn_prompt(
     *,
     workflow_id: str,
     agent_id: str,
+    role_instance_label: str | None = None,
+    role_instance_context: str | None = None,
     goal: str,
     transcript_summary: str,
     current_brief: str,
@@ -330,16 +332,34 @@ def group_chat_turn_prompt(
         f"You are {agent_id} speaking in playbook {workflow_id}.",
         "Respond to the current discussion and move the decision forward.",
         "Add real value from your role instead of repeating the room.",
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Goal:",
-        goal or "(none)",
-        "",
-        "Current brief:",
-        current_brief or "(none)",
     ]
+    if role_instance_label:
+        lines.extend(
+            [
+                "",
+                f"Current staffed instance: {role_instance_label}",
+            ]
+        )
+    if role_instance_context:
+        lines.extend(
+            [
+                "",
+                role_instance_context,
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Conversation summary:",
+            transcript_summary or "(none)",
+            "",
+            "Goal:",
+            goal or "(none)",
+            "",
+            "Current brief:",
+            current_brief or "(none)",
+        ]
+    )
     if playbook_request:
         lines.extend(
             [

@@ -74,6 +74,65 @@ class MagenticWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[1], ProxyReasoningDeltaEvent)
         self.assertIsInstance(events[2], ProxyContentDeltaEvent)
 
+    async def test_execute_allows_repeated_staffed_instances(self) -> None:
+        streamed_agents: list[str] = []
+        streamed_prompts: list[str] = []
+        manager_calls: list[tuple[str, ...]] = []
+        summary_calls: list[tuple[str, tuple[str, ...]]] = []
+
+        async def _stream_text_agent(**kwargs):
+            streamed_agents.append(kwargs["agent_id"])
+            streamed_prompts.append(kwargs["prompt"])
+            yield "Ship"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            summary_calls.append(
+                (kwargs["current_brief"], kwargs["workflow_outputs"])
+            )
+            yield ProxyContentDeltaEvent("Delivered")
+
+        async def _select_manager_agent(**kwargs):
+            manager_calls.append(kwargs["participants"])
+            return "coder[2]"
+
+        executor = ProxyMagenticWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_manager_agent=_select_manager_agent,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in executor.execute(
+                request=request,
+                definition=_single_round_definition(),
+                goal="Build it",
+                specialists=("coder",),
+                specialist_counts=(("coder", 2),),
+                state=state,
+            )
+        ]
+
+        self.assertEqual(manager_calls, [("coder[1]", "coder[2]")])
+        self.assertEqual(streamed_agents, ["coder"])
+        self.assertIn("Current staffed instance: coder[2]", streamed_prompts[0])
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("coder[2]: Ship", reasoning)
+        self.assertEqual(summary_calls, [("Ship", ("coder[2]: Ship",))])
+
 
 def _definition() -> DefinitionDocument:
     return DefinitionDocument(
@@ -84,6 +143,21 @@ def _definition() -> DefinitionDocument:
             "orchestration": "magentic",
             "steps": ["architect", "coder"],
             "max_rounds": 2,
+        },
+        body="## Purpose\nAdapt.",
+        sections={"Purpose": "Adapt."},
+    )
+
+
+def _single_round_definition() -> DefinitionDocument:
+    return DefinitionDocument(
+        id="dynamic-open-ended",
+        path=Path("dynamic-open-ended.md"),
+        metadata={
+            "id": "dynamic-open-ended",
+            "orchestration": "magentic",
+            "steps": ["coder"],
+            "max_rounds": 1,
         },
         body="## Purpose\nAdapt.",
         sections={"Purpose": "Adapt."},

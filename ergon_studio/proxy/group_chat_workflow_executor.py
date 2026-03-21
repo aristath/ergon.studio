@@ -14,6 +14,12 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.playbook_staffing import (
+    expand_staffed_participants,
+    expand_staffed_sequence,
+    participant_by_label,
+    participant_context,
+)
 from ergon_studio.proxy.prompts import group_chat_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.turn_state import (
@@ -54,6 +60,7 @@ class ProxyGroupChatWorkflowExecutor:
         definition: DefinitionDocument,
         goal: str,
         specialists: tuple[str, ...] = (),
+        specialist_counts: tuple[tuple[str, int], ...] = (),
         workflow_request: str | None = None,
         workflow_focus: str | None = None,
         state: ProxyTurnState,
@@ -62,16 +69,23 @@ class ProxyGroupChatWorkflowExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = _staffed_participants(
-            definition,
-            (
-                continuation.workflow_specialists
-                if continuation is not None
-                else specialists
-            ),
+        staffed_specialists = (
+            continuation.workflow_specialists
+            if continuation is not None
+            else specialists
         )
-        sequence = _staffed_sequence(
-            definition,
+        staffed_specialist_counts = (
+            continuation.workflow_specialist_counts
+            if continuation is not None
+            else specialist_counts
+        )
+        participants = expand_staffed_participants(
+            workflow_participants_for_definition(definition),
+            specialists=staffed_specialists,
+            specialist_counts=staffed_specialist_counts,
+        )
+        sequence = expand_staffed_sequence(
+            workflow_selection_sequence_for_definition(definition),
             participants=participants,
         )
         max_rounds = workflow_max_rounds_for_definition(
@@ -80,7 +94,7 @@ class ProxyGroupChatWorkflowExecutor:
         if not sequence:
             sequence = (
                 tuple(
-                    participants[index % len(participants)]
+                    participants[index % len(participants)].label
                     for index in range(max_rounds)
                 )
                 if participants
@@ -124,10 +138,18 @@ class ProxyGroupChatWorkflowExecutor:
             list(continuation.workflow_outputs) if continuation is not None else []
         )
         for turn_index in range(start_turn, len(sequence)):
-            agent_id = sequence[turn_index]
+            participant = participant_by_label(participants, sequence[turn_index])
+            if participant is None:
+                continue
             prompt = group_chat_turn_prompt(
                 workflow_id=definition.id,
-                agent_id=agent_id,
+                agent_id=participant.agent_id,
+                role_instance_label=(
+                    participant.label
+                    if participant.label != participant.agent_id
+                    else None
+                ),
+                role_instance_context=participant_context(participant),
                 goal=goal,
                 transcript_summary=summarize_conversation(request.messages),
                 current_brief=current_brief,
@@ -149,9 +171,11 @@ class ProxyGroupChatWorkflowExecutor:
             first = True
             response_holder: dict[str, Any] = {}
             async for delta in self._stream_text_agent(
-                agent_id=agent_id,
+                agent_id=participant.agent_id,
                 prompt=prompt,
-                session_id=f"proxy-group-chat-{definition.id}-{agent_id}-{uuid4().hex}",
+                session_id=(
+                    f"proxy-group-chat-{definition.id}-{participant.label}-{uuid4().hex}"
+                ),
                 model_id_override=request.model,
                 host_tools=request.tools,
                 tool_choice=request.tool_choice,
@@ -160,7 +184,9 @@ class ProxyGroupChatWorkflowExecutor:
                 final_response_sink=response_holder_sink(response_holder),
             ):
                 agent_text += delta
-                reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                reasoning_delta = (
+                    f"{participant.label}: {delta}" if first else delta
+                )
                 first = False
                 state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
@@ -172,13 +198,13 @@ class ProxyGroupChatWorkflowExecutor:
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
-                        workflow_specialists=continuation.workflow_specialists
-                        if continuation is not None
-                        else specialists,
+                        workflow_specialists=staffed_specialists,
+                        workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
                         step_index=turn_index,
-                        agent_id=agent_id,
+                        agent_id=participant.agent_id,
+                        participant_label=participant.label,
                         goal=goal,
                         current_brief=agent_text.strip() or current_brief,
                         decision_history=(
@@ -192,22 +218,34 @@ class ProxyGroupChatWorkflowExecutor:
                     for tool_event in emitted:
                         yield tool_event
                     return
-            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+            workflow_outputs.append(f"{participant.label}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             if result_sink is not None:
                 next_turn = turn_index + 1
                 workflow_progress = None
                 if next_turn < len(sequence):
+                    next_participant = participant_by_label(
+                        participants,
+                        sequence[next_turn],
+                    )
                     workflow_progress = ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
-                        workflow_specialists=continuation.workflow_specialists
-                        if continuation is not None
-                        else specialists,
+                        workflow_specialists=staffed_specialists,
+                        workflow_specialist_counts=staffed_specialist_counts,
                         workflow_request=workflow_request,
                         workflow_focus=workflow_focus,
                         step_index=next_turn,
-                        agent_id=agent_id,
+                        agent_id=(
+                            next_participant.agent_id
+                            if next_participant is not None
+                            else participant.agent_id
+                        ),
+                        participant_label=(
+                            next_participant.label
+                            if next_participant is not None
+                            else None
+                        ),
                         goal=goal,
                         current_brief=current_brief,
                         decision_history=(
@@ -240,28 +278,3 @@ class ProxyGroupChatWorkflowExecutor:
             state=state,
         ):
             yield summary_event
-
-
-def _staffed_participants(
-    definition: DefinitionDocument,
-    specialists: tuple[str, ...],
-) -> tuple[str, ...]:
-    participants = workflow_participants_for_definition(definition)
-    if not specialists:
-        return participants
-    allowed = set(specialists)
-    return tuple(agent_id for agent_id in participants if agent_id in allowed)
-
-
-def _staffed_sequence(
-    definition: DefinitionDocument,
-    *,
-    participants: tuple[str, ...],
-) -> tuple[str, ...]:
-    configured = workflow_selection_sequence_for_definition(definition)
-    if not participants:
-        return ()
-    if not configured:
-        return ()
-    allowed = set(participants)
-    return tuple(agent_id for agent_id in configured if agent_id in allowed)

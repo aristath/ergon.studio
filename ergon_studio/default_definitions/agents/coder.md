@@ -12,7 +12,7 @@ changes, not just commentary about changes.
 
 ## Responsibilities
 - Implement the assigned work concretely.
-- Use host tools when code edits, commands, or inspection are required.
+- Use available tools when code edits, commands, or inspection are required.
 - Keep the work aligned with the brief instead of freelancing the scope.
 - Surface blockers precisely when the brief is insufficient or reality differs
   from the plan.

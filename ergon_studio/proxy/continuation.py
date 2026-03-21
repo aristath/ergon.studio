@@ -16,6 +16,7 @@ class ContinuationState:
     mode: str
     agent_id: str
     workflow_id: str | None = None
+    workflow_specialists: tuple[str, ...] = ()
     step_index: int | None = None
     agent_index: int | None = None
     request_text: str | None = None
@@ -44,6 +45,8 @@ def encode_continuation_tool_call(
     }
     if state.workflow_id is not None:
         payload["w"] = state.workflow_id
+    if state.workflow_specialists:
+        payload["p"] = list(state.workflow_specialists)
     if state.step_index is not None:
         payload["s"] = state.step_index
     if state.agent_index is not None:
@@ -83,6 +86,7 @@ def decode_continuation_from_tool_call_id(
     mode = payload.get("m")
     agent_id = payload.get("a")
     workflow_id = payload.get("w")
+    workflow_specialists = payload.get("p", [])
     step_index = payload.get("s")
     agent_index = payload.get("i")
     request_text = payload.get("r")
@@ -93,6 +97,10 @@ def decode_continuation_from_tool_call_id(
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
     if workflow_id is not None and not isinstance(workflow_id, str):
+        return None
+    if not isinstance(workflow_specialists, list) or not all(
+        isinstance(item, str) for item in workflow_specialists
+    ):
         return None
     if step_index is not None and not isinstance(step_index, int):
         return None
@@ -116,6 +124,7 @@ def decode_continuation_from_tool_call_id(
         mode=mode,
         agent_id=agent_id,
         workflow_id=workflow_id,
+        workflow_specialists=tuple(workflow_specialists),
         step_index=step_index,
         agent_index=agent_index,
         request_text=request_text,

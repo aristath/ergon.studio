@@ -180,6 +180,41 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content, "Workflow final summary")
         self.assertEqual(result.mode, "finish")
 
+    async def test_stream_turn_workflow_can_staff_specific_specialists(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_builder=_fake_agent_builder(
+                {
+                    "orchestrator": [
+                        (
+                            '{"mode":"workflow","workflow_id":"standard-build",'
+                            '"goal":"Build calculator","specialists":["coder"]}'
+                        ),
+                        '{"mode":"finish"}',
+                        "Workflow final summary",
+                    ],
+                    "coder": ["Built"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertNotIn("architect:", reasoning)
+        self.assertIn("coder: Built", reasoning)
+        self.assertEqual(result.content, "Workflow final summary")
+
     async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),

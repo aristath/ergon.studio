@@ -36,6 +36,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.mode, "workflow")
         self.assertEqual(decoded.agent_id, "architect")
         self.assertEqual(decoded.workflow_id, "standard-build")
+        self.assertEqual(decoded.workflow_specialists, ())
         self.assertEqual(decoded.step_index, 2)
         self.assertEqual(decoded.agent_index, None)
         self.assertEqual(decoded.request_text, None)
@@ -54,6 +55,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 mode="workflow",
                 agent_id="coder",
                 workflow_id="standard-build",
+                workflow_specialists=("coder", "reviewer"),
                 step_index=1,
                 agent_index=0,
                 request_text="Implement A",
@@ -69,6 +71,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.request_text, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
+        self.assertEqual(decoded.workflow_specialists, ("coder", "reviewer"))
         self.assertEqual(decoded.workflow_outputs, ("architect: use main.py",))
         self.assertEqual(decoded.agent_index, 0)
 

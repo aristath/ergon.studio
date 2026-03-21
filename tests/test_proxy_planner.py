@@ -110,6 +110,19 @@ class ProxyPlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.workflow_id, "standard-build")
 
+    def test_parse_turn_plan_normalizes_staffed_specialists(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"mode":"workflow","workflow_id":"standard-build",'
+                '"specialists":["coder","orchestrator","ghost","coder"]}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.specialists, ("coder",))
+
     def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:
         registry = _make_registry()
         registry.workflow_definitions["other-build"] = DefinitionDocument(

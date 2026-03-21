@@ -71,6 +71,7 @@ class ProxyWorkflowRequestExecutor:
         async for event in self._workflow_dispatcher.execute_workflow(
             request=request,
             workflow_id=plan.workflow_id,
+            specialists=plan.specialists,
             goal=plan.goal or request.latest_user_text() or "",
             state=state,
             result_sink=result_sink,

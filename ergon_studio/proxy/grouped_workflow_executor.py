@@ -49,13 +49,19 @@ class ProxyGroupedWorkflowExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
+        specialists: tuple[str, ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        step_groups = workflow_step_groups_for_definition(definition)
+        staffed_specialists = (
+            continuation.workflow_specialists
+            if continuation is not None
+            else specialists
+        )
+        step_groups = _filtered_step_groups(definition, staffed_specialists)
         start_index = (
             continuation.step_index
             if continuation and continuation.step_index is not None
@@ -126,6 +132,7 @@ class ProxyGroupedWorkflowExecutor:
                         continuation=ContinuationState(
                             mode="workflow",
                             workflow_id=definition.id,
+                            workflow_specialists=staffed_specialists,
                             step_index=step_index,
                             agent_index=agent_index,
                             agent_id=agent_id,
@@ -152,6 +159,7 @@ class ProxyGroupedWorkflowExecutor:
                     workflow_progress = ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=staffed_specialists,
                         step_index=next_step_index,
                         agent_index=0,
                         agent_id=next_group[0],
@@ -181,3 +189,19 @@ class ProxyGroupedWorkflowExecutor:
             state=state,
         ):
             yield summary_event
+
+
+def _filtered_step_groups(
+    definition: DefinitionDocument,
+    specialists: tuple[str, ...],
+) -> tuple[tuple[str, ...], ...]:
+    step_groups = workflow_step_groups_for_definition(definition)
+    if not specialists:
+        return step_groups
+    allowed = set(specialists)
+    filtered: list[tuple[str, ...]] = []
+    for group in step_groups:
+        filtered_group = tuple(agent_id for agent_id in group if agent_id in allowed)
+        if filtered_group:
+            filtered.append(filtered_group)
+    return tuple(filtered)

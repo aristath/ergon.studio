@@ -18,6 +18,7 @@ class ProxyTurnPlan:
     mode: str
     workflow_id: str | None = None
     agent_id: str | None = None
+    specialists: tuple[str, ...] = ()
     request: str | None = None
     goal: str | None = None
     rationale: str | None = None
@@ -78,6 +79,10 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "what a good outcome would look like."
             ),
             (
+                "- You may optionally name staffed specialists for a playbook when "
+                "the lead developer should bring in a specific subset of the team."
+            ),
+            (
                 "- Prefer act for discussion, clarification, planning with the product "
                 "manager, and small direct actions."
             ),
@@ -116,7 +121,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -188,10 +193,12 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
     agent_id = _optional_text(payload.get("agent_id"))
     if agent_id is not None and agent_id not in registry.agent_definitions:
         agent_id = None
+    specialists = _normalize_specialists(payload.get("specialists"), registry=registry)
     return ProxyTurnPlan(
         mode=mode,
         workflow_id=workflow_id,
         agent_id=agent_id,
+        specialists=specialists,
         request=_optional_text(payload.get("request")),
         goal=_optional_text(payload.get("goal")),
         rationale=_optional_text(payload.get("rationale")),
@@ -230,6 +237,29 @@ def resolve_workflow_reference(
     if len(by_hint) == 1:
         return by_hint[0]
     return None
+
+
+def _normalize_specialists(
+    value: object,
+    *,
+    registry: RuntimeRegistry,
+) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    specialists: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if (
+            not candidate
+            or candidate == "orchestrator"
+            or candidate not in registry.agent_definitions
+            or candidate in specialists
+        ):
+            continue
+        specialists.append(candidate)
+    return tuple(specialists)
 
 
 def summarize_conversation(

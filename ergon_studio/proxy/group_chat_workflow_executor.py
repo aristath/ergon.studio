@@ -53,14 +53,25 @@ class ProxyGroupChatWorkflowExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
+        specialists: tuple[str, ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = workflow_participants_for_definition(definition)
-        sequence = workflow_selection_sequence_for_definition(definition)
+        participants = _staffed_participants(
+            definition,
+            (
+                continuation.workflow_specialists
+                if continuation is not None
+                else specialists
+            ),
+        )
+        sequence = _staffed_sequence(
+            definition,
+            participants=participants,
+        )
         max_rounds = workflow_max_rounds_for_definition(
             definition, default=max(len(sequence), len(participants), 1)
         )
@@ -135,6 +146,9 @@ class ProxyGroupChatWorkflowExecutor:
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=continuation.workflow_specialists
+                        if continuation is not None
+                        else specialists,
                         step_index=turn_index,
                         agent_id=agent_id,
                         goal=goal,
@@ -159,6 +173,9 @@ class ProxyGroupChatWorkflowExecutor:
                     workflow_progress = ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=continuation.workflow_specialists
+                        if continuation is not None
+                        else specialists,
                         step_index=next_turn,
                         agent_id=agent_id,
                         goal=goal,
@@ -193,3 +210,28 @@ class ProxyGroupChatWorkflowExecutor:
             state=state,
         ):
             yield summary_event
+
+
+def _staffed_participants(
+    definition: DefinitionDocument,
+    specialists: tuple[str, ...],
+) -> tuple[str, ...]:
+    participants = workflow_participants_for_definition(definition)
+    if not specialists:
+        return participants
+    allowed = set(specialists)
+    return tuple(agent_id for agent_id in participants if agent_id in allowed)
+
+
+def _staffed_sequence(
+    definition: DefinitionDocument,
+    *,
+    participants: tuple[str, ...],
+) -> tuple[str, ...]:
+    configured = workflow_selection_sequence_for_definition(definition)
+    if not participants:
+        return ()
+    if not configured:
+        return ()
+    allowed = set(participants)
+    return tuple(agent_id for agent_id in configured if agent_id in allowed)

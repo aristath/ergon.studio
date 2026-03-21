@@ -54,13 +54,19 @@ class ProxyMagenticWorkflowExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
+        specialists: tuple[str, ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = workflow_participants_for_definition(definition)
+        staffed_specialists = (
+            continuation.workflow_specialists
+            if continuation is not None
+            else specialists
+        )
+        participants = _staffed_participants(definition, staffed_specialists)
         max_rounds = workflow_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
         )
@@ -154,6 +160,7 @@ class ProxyMagenticWorkflowExecutor:
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=staffed_specialists,
                         step_index=round_index,
                         agent_id=agent_id,
                         goal=goal,
@@ -178,6 +185,7 @@ class ProxyMagenticWorkflowExecutor:
                     workflow_progress = ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=staffed_specialists,
                         step_index=round_index,
                         agent_id=agent_id,
                         goal=goal,
@@ -212,3 +220,14 @@ class ProxyMagenticWorkflowExecutor:
             state=state,
         ):
             yield summary_event
+
+
+def _staffed_participants(
+    definition: DefinitionDocument,
+    specialists: tuple[str, ...],
+) -> tuple[str, ...]:
+    participants = workflow_participants_for_definition(definition)
+    if not specialists:
+        return participants
+    allowed = set(specialists)
+    return tuple(agent_id for agent_id in participants if agent_id in allowed)

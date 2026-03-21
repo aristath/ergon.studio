@@ -57,15 +57,21 @@ class ProxyHandoffWorkflowExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
+        specialists: tuple[str, ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = workflow_participants_for_definition(definition)
+        staffed_specialists = (
+            continuation.workflow_specialists
+            if continuation is not None
+            else specialists
+        )
+        participants = _staffed_participants(definition, staffed_specialists)
         finalizers = workflow_finalizers_for_definition(definition)
-        handoffs = workflow_handoffs_for_definition(definition)
+        handoffs = _staffed_handoffs(definition, participants)
         max_rounds = workflow_max_rounds_for_definition(
             definition, default=max(len(participants), 1)
         )
@@ -112,9 +118,10 @@ class ProxyHandoffWorkflowExecutor:
                 model_id_override=request.model,
             )
         else:
-            current_agent = workflow_start_agent_for_definition(definition) or (
-                participants[0] if participants else "reviewer"
-            )
+            start_agent = workflow_start_agent_for_definition(definition)
+            if start_agent not in participants:
+                start_agent = participants[0] if participants else "reviewer"
+            current_agent = start_agent
 
         while round_index < max_rounds and current_agent:
             prompt = workflow_step_prompt(
@@ -165,6 +172,7 @@ class ProxyHandoffWorkflowExecutor:
                     continuation=ContinuationState(
                         mode="workflow",
                         workflow_id=definition.id,
+                        workflow_specialists=staffed_specialists,
                         step_index=round_index,
                         agent_id=current_agent,
                         goal=goal,
@@ -201,6 +209,7 @@ class ProxyHandoffWorkflowExecutor:
                         workflow_progress=ContinuationState(
                             mode="workflow",
                             workflow_id=definition.id,
+                            workflow_specialists=staffed_specialists,
                             step_index=next_round,
                             agent_id=current_agent,
                             goal=goal,
@@ -255,3 +264,32 @@ class ProxyHandoffWorkflowExecutor:
             state=state,
         ):
             yield summary_event
+
+
+def _staffed_participants(
+    definition: DefinitionDocument,
+    specialists: tuple[str, ...],
+) -> tuple[str, ...]:
+    participants = workflow_participants_for_definition(definition)
+    if not specialists:
+        return participants
+    allowed = set(specialists)
+    return tuple(agent_id for agent_id in participants if agent_id in allowed)
+
+
+def _staffed_handoffs(
+    definition: DefinitionDocument,
+    participants: tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    configured = workflow_handoffs_for_definition(definition)
+    if not participants:
+        return {}
+    allowed = set(participants)
+    filtered: dict[str, tuple[str, ...]] = {}
+    for agent_id, targets in configured.items():
+        if agent_id not in allowed:
+            continue
+        filtered_targets = tuple(target for target in targets if target in allowed)
+        if filtered_targets:
+            filtered[agent_id] = filtered_targets
+    return filtered

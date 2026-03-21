@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from agent_framework import ResponseStream
@@ -23,7 +23,10 @@ from ergon_studio.proxy.models import (
     ProxyToolCall,
     ProxyToolCallEvent,
 )
-from ergon_studio.proxy.server import start_proxy_server_in_thread
+from ergon_studio.proxy.server import (
+    MAX_REQUEST_BODY_BYTES,
+    start_proxy_server_in_thread,
+)
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
@@ -941,6 +944,73 @@ class ProxyServerTests(unittest.TestCase):
             "RuntimeError: planner exploded",
         )
 
+    def test_responses_stream_failure_preserves_sequence_order(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_LateFailingCore(
+                [ProxyReasoningDeltaEvent("Plan.")],
+                RuntimeError("planner exploded"),
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payloads = [
+                json.loads(line[6:])
+                for line in response.read().decode("utf-8").splitlines()
+                if line.startswith("data: {")
+            ]
+
+        self.assertEqual(payloads[0]["sequence_number"], 1)
+        self.assertEqual(payloads[1]["sequence_number"], 2)
+        self.assertEqual(payloads[-1]["type"], "response.failed")
+        self.assertEqual(payloads[-1]["sequence_number"], 3)
+
+    def test_chat_completions_reject_large_request_bodies(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore([ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")]),
+        )
+        self.addCleanup(handle.close)
+
+        oversized_content = "x" * MAX_REQUEST_BODY_BYTES
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": oversized_content}],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with self.assertRaises((HTTPError, URLError)) as exc:
+            urlopen(request)
+
+        error = exc.exception
+        if isinstance(error, HTTPError):
+            payload = json.loads(error.read().decode("utf-8"))
+            self.assertEqual(error.code, 413)
+            self.assertIn("request body exceeds", payload["error"]["message"])
+            return
+        self.assertIn("Broken pipe", str(error))
+
 
 class _FakeCore:
     def __init__(self, events, *, tool_calls=(), output_items=()):
@@ -1001,6 +1071,40 @@ class _FailingCore:
         del request, created_at
 
         async def _event_iter():
+            raise self._exc
+            yield None  # pragma: no cover
+
+        return ResponseStream(
+            _event_iter(),
+            finalizer=lambda _updates: ProxyTurnResult(
+                finish_reason="error",
+                content=str(self._exc),
+                reasoning="",
+                mode="act",
+            ),
+        )
+
+
+class _LateFailingCore:
+    def __init__(self, events, exc: Exception) -> None:
+        self._events = list(events)
+        self._exc = exc
+        self.registry = type(
+            "Registry",
+            (),
+            {
+                "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
+                "agent_definitions": {},
+                "workflow_definitions": {},
+            },
+        )()
+
+    def stream_turn(self, request, *, created_at: int | None = None):
+        del request, created_at
+
+        async def _event_iter():
+            for event in self._events:
+                yield event
             raise self._exc
             yield None  # pragma: no cover
 

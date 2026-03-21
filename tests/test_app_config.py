@@ -49,3 +49,23 @@ class AppConfigTests(unittest.TestCase):
         app_dir = Path("/tmp/example")
         self.assertEqual(config_path(app_dir), app_dir / "config.json")
         self.assertEqual(definitions_dir(app_dir), app_dir / "definitions")
+
+    def test_load_app_config_rejects_boolean_port_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text('{"port": true}\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError, "config numeric values must be integers"
+            ):
+                load_app_config(path)
+
+    def test_load_app_config_rejects_non_boolean_disable_tool_calling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text('{"disable_tool_calling": "false"}\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError, "config boolean values must be bools"
+            ):
+                load_app_config(path)

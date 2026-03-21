@@ -43,7 +43,9 @@ def load_app_config(path: Path) -> ProxyAppConfig:
         host=_optional_str(payload.get("host")) or "127.0.0.1",
         port=_optional_int(payload.get("port")) or 4000,
         instruction_role=_optional_str(payload.get("instruction_role")) or "system",
-        disable_tool_calling=bool(payload.get("disable_tool_calling", False)),
+        disable_tool_calling=(
+            _optional_bool(payload.get("disable_tool_calling")) or False
+        ),
     )
 
 
@@ -66,6 +68,14 @@ def _optional_str(value: object) -> str:
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("config numeric values must be integers")
+    return value
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if type(value) is not bool:
+        raise ValueError("config boolean values must be bools")
     return value

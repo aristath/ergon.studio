@@ -34,6 +34,12 @@ from ergon_studio.proxy.responses_bridge import parse_responses_request
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import probe_upstream_models
 
+MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
+
+
+class RequestBodyTooLargeError(ValueError):
+    """Raised when a request exceeds the accepted body size."""
+
 
 class ProxyHTTPServer(ThreadingHTTPServer):
     def __init__(
@@ -84,6 +90,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json_body()
             request = parse_chat_completion_request(payload)
+        except RequestBodyTooLargeError as exc:
+            self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+            return
         except ValueError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -169,6 +178,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json_body()
             request = parse_responses_request(payload)
+        except RequestBodyTooLargeError as exc:
+            self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+            return
         except ValueError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -251,60 +263,71 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
         sequence_number = 2
         stream = self.proxy_server.core.stream_turn(request, created_at=created_at)
-        async for event in stream:
-            if isinstance(event, ProxyContentDeltaEvent) and event.delta:
-                content_emitted = True
-                message_text += event.delta
-            if isinstance(event, ProxyReasoningDeltaEvent) and event.delta:
-                reasoning_text += event.delta
-            reasoning_output_index = (
-                _response_output_index(
-                    output_items, ProxyOutputItemRef(kind="reasoning")
+        try:
+            async for event in stream:
+                if isinstance(event, ProxyContentDeltaEvent) and event.delta:
+                    content_emitted = True
+                    message_text += event.delta
+                if isinstance(event, ProxyReasoningDeltaEvent) and event.delta:
+                    reasoning_text += event.delta
+                reasoning_output_index = (
+                    _response_output_index(
+                        output_items, ProxyOutputItemRef(kind="reasoning")
+                    )
+                    or 0
                 )
-                or 0
-            )
-            if isinstance(event, ProxyReasoningDeltaEvent):
-                reasoning_output_index = _ensure_response_output_item(
-                    output_items, ProxyOutputItemRef(kind="reasoning")
+                if isinstance(event, ProxyReasoningDeltaEvent):
+                    reasoning_output_index = _ensure_response_output_item(
+                        output_items, ProxyOutputItemRef(kind="reasoning")
+                    )
+                message_output_index = (
+                    _response_output_index(
+                        output_items, ProxyOutputItemRef(kind="content")
+                    )
+                    or 0
                 )
-            message_output_index = (
-                _response_output_index(output_items, ProxyOutputItemRef(kind="content"))
-                or 0
-            )
-            if isinstance(event, ProxyContentDeltaEvent) or (
-                isinstance(event, ProxyFinishEvent) and content_emitted
-            ):
-                message_output_index = _ensure_response_output_item(
-                    output_items, ProxyOutputItemRef(kind="content")
-                )
-            tool_output_index = 0
-            if isinstance(event, ProxyToolCallEvent):
-                tool_output_index = _ensure_response_output_item(
-                    output_items,
-                    ProxyOutputItemRef(kind="tool_call", call_id=event.call.id),
-                )
-                tool_item_ids.setdefault(event.call.id, f"fc_{uuid4().hex}")
-            for payload in encode_responses_stream_events(
-                event=event,
+                if isinstance(event, ProxyContentDeltaEvent) or (
+                    isinstance(event, ProxyFinishEvent) and content_emitted
+                ):
+                    message_output_index = _ensure_response_output_item(
+                        output_items, ProxyOutputItemRef(kind="content")
+                    )
+                tool_output_index = 0
+                if isinstance(event, ProxyToolCallEvent):
+                    tool_output_index = _ensure_response_output_item(
+                        output_items,
+                        ProxyOutputItemRef(kind="tool_call", call_id=event.call.id),
+                    )
+                    tool_item_ids.setdefault(event.call.id, f"fc_{uuid4().hex}")
+                for payload in encode_responses_stream_events(
+                    event=event,
+                    response_id=response_id,
+                    model=request.model,
+                    created_at=created_at,
+                    sequence_number=sequence_number,
+                    reasoning_item_id=reasoning_item_id,
+                    message_item_id=message_item_id,
+                    reasoning_output_index=reasoning_output_index,
+                    message_output_index=message_output_index,
+                    tool_output_index=tool_output_index,
+                    tool_item_id=tool_item_ids.get(event.call.id)
+                    if isinstance(event, ProxyToolCallEvent)
+                    else None,
+                    reasoning_text=reasoning_text,
+                    message_text=message_text,
+                    include_output_done=content_emitted,
+                ):
+                    self.wfile.write(encode_responses_stream_sse(payload))
+                    self.wfile.flush()
+                    sequence_number += 1
+        except Exception as exc:
+            self._stream_responses_failure(
                 response_id=response_id,
                 model=request.model,
                 created_at=created_at,
+                error_text=f"{type(exc).__name__}: {exc}",
                 sequence_number=sequence_number,
-                reasoning_item_id=reasoning_item_id,
-                message_item_id=message_item_id,
-                reasoning_output_index=reasoning_output_index,
-                message_output_index=message_output_index,
-                tool_output_index=tool_output_index,
-                tool_item_id=tool_item_ids.get(event.call.id)
-                if isinstance(event, ProxyToolCallEvent)
-                else None,
-                reasoning_text=reasoning_text,
-                message_text=message_text,
-                include_output_done=content_emitted,
-            ):
-                self.wfile.write(encode_responses_stream_sse(payload))
-                self.wfile.flush()
-                sequence_number += 1
+            )
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = self.headers.get("Content-Length")
@@ -314,6 +337,10 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             length = int(content_length)
         except ValueError as exc:
             raise ValueError("invalid Content-Length header") from exc
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise RequestBodyTooLargeError(
+                f"request body exceeds {MAX_REQUEST_BODY_BYTES} bytes"
+            )
         raw = self.rfile.read(length)
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -389,6 +416,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         model: str,
         created_at: int,
         error_text: str,
+        sequence_number: int = 1,
     ) -> None:
         payload = {
             "type": "response.failed",
@@ -404,7 +432,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                     "type": "server_error",
                 },
             },
-            "sequence_number": 1,
+            "sequence_number": sequence_number,
         }
         try:
             self.wfile.write(encode_responses_stream_sse(payload))

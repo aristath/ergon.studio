@@ -16,7 +16,7 @@ from ergon_studio.proxy.config_tui import run_config_tui
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.registry import load_registry
-from ergon_studio.upstream import UpstreamSettings
+from ergon_studio.upstream import UpstreamSettings, validate_upstream_base_url
 from ergon_studio.workspace import ensure_workspace
 
 
@@ -39,12 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_proxy_server(*, definitions_dir: Path, config: ProxyAppConfig) -> int:
-    if not config.upstream_base_url.strip():
-        raise ValueError("missing upstream base URL")
+    upstream_base_url = validate_upstream_base_url(config.upstream_base_url)
     registry = load_registry(
         definitions_dir,
         upstream=UpstreamSettings(
-            base_url=config.upstream_base_url.strip(),
+            base_url=upstream_base_url,
             api_key=config.upstream_api_key.strip() or None,
             instruction_role=config.instruction_role.strip() or None,
             tool_calling=not config.disable_tool_calling,

@@ -20,7 +20,6 @@ class ContinuationState:
     workroom_participants: tuple[str, ...] = ()
     workroom_message: str | None = None
     member_index: int | None = None
-    goal: str | None = None
     worklog: tuple[str, ...] = ()
     workroom_outputs: tuple[str, ...] = ()
 
@@ -52,8 +51,6 @@ def encode_continuation_tool_call(
         payload["pr"] = state.workroom_message
     if state.member_index is not None:
         payload["i"] = state.member_index
-    if state.goal is not None:
-        payload["g"] = state.goal
     if state.worklog:
         payload["h"] = list(state.worklog)
     if state.workroom_outputs:
@@ -87,7 +84,6 @@ def decode_continuation_from_tool_call_id(
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
     member_index = payload.get("i")
-    goal = payload.get("g")
     worklog = payload.get("h", [])
     workroom_outputs = payload.get("o", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
@@ -103,8 +99,6 @@ def decode_continuation_from_tool_call_id(
     if workroom_message is not None and not isinstance(workroom_message, str):
         return None
     if member_index is not None and not isinstance(member_index, int):
-        return None
-    if goal is not None and not isinstance(goal, str):
         return None
     if not isinstance(worklog, list) or not all(
         isinstance(item, str) for item in worklog
@@ -122,7 +116,6 @@ def decode_continuation_from_tool_call_id(
         workroom_participants=tuple(workroom_participants),
         workroom_message=workroom_message,
         member_index=member_index,
-        goal=goal,
         worklog=tuple(worklog),
         workroom_outputs=tuple(workroom_outputs),
     )

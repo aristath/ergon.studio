@@ -61,7 +61,6 @@ class ProxyWorkroomExecutor:
         *,
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
-        goal: str,
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
         state: ProxyTurnState,
@@ -75,6 +74,7 @@ class ProxyWorkroomExecutor:
             participants=participants,
             continuation=continuation,
         )
+        user_request = request.latest_user_text() or ""
         staffed_members = expand_staffed_participants(round_participants)
         start_index = (
             continuation.member_index
@@ -102,7 +102,7 @@ class ProxyWorkroomExecutor:
                 request=request,
                 definition=definition,
                 staffed_members=staffed_members,
-                goal=goal,
+                user_request=user_request,
                 workroom_message=workroom_message,
             )
             if any(
@@ -131,7 +131,6 @@ class ProxyWorkroomExecutor:
                             definition=definition,
                             round_participants=round_participants,
                             workroom_message=workroom_message,
-                            goal=goal,
                             loop_state=loop_state,
                             workroom_outputs=workroom_outputs,
                             staffed_members=staffed_members,
@@ -151,7 +150,7 @@ class ProxyWorkroomExecutor:
                     else None
                 ),
                 role_instance_context=participant_context(participant),
-                goal=goal,
+                user_request=user_request,
                 workroom_message=workroom_message,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workroom_outputs),
@@ -190,7 +189,6 @@ class ProxyWorkroomExecutor:
                         member_index=member_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
-                        goal=goal,
                         worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
@@ -212,7 +210,6 @@ class ProxyWorkroomExecutor:
                     definition=definition,
                     round_participants=round_participants,
                     workroom_message=workroom_message,
-                    goal=goal,
                     loop_state=loop_state,
                     workroom_outputs=workroom_outputs,
                     staffed_members=staffed_members,
@@ -239,7 +236,7 @@ class ProxyWorkroomExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         staffed_members: tuple[StaffedParticipant, ...],
-        goal: str,
+        user_request: str,
         workroom_message: str | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
@@ -248,7 +245,7 @@ class ProxyWorkroomExecutor:
                     request=request,
                     definition=definition,
                     participant=participant,
-                    goal=goal,
+                    user_request=user_request,
                     workroom_message=workroom_message,
                 )
             )
@@ -262,7 +259,7 @@ class ProxyWorkroomExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         participant: StaffedParticipant,
-        goal: str,
+        user_request: str,
         workroom_message: str | None,
     ) -> _AgentAttemptResult:
         prompt = workroom_round_prompt(
@@ -274,7 +271,7 @@ class ProxyWorkroomExecutor:
                 else None
             ),
             role_instance_context=participant_context(participant),
-            goal=goal,
+            user_request=user_request,
             workroom_message=workroom_message,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
@@ -317,7 +314,6 @@ def _active_workroom_state(
     definition: DefinitionDocument,
     round_participants: tuple[str, ...],
     workroom_message: str | None,
-    goal: str,
     loop_state: ProxyDecisionLoopState | None,
     workroom_outputs: list[str],
     staffed_members: tuple[StaffedParticipant, ...],
@@ -331,7 +327,6 @@ def _active_workroom_state(
         workroom_id=definition.id,
         workroom_participants=round_participants,
         workroom_message=workroom_message,
-        goal=goal,
         worklog=loop_state.worklog if loop_state is not None else (),
         workroom_outputs=tuple(workroom_outputs),
     )

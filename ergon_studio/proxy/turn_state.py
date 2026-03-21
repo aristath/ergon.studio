@@ -14,7 +14,6 @@ class ProxyMoveResult:
 
 @dataclass
 class ProxyDecisionLoopState:
-    goal: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
     active_workroom: ContinuationState | None = None
 

@@ -39,7 +39,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute(
                 request=request,
                 definition=_ordered_definition(),
-                goal="Discuss it",
                 state=state,
                 result_sink=captured.append,
             )
@@ -90,7 +89,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute(
                 request=request,
                 definition=_ordered_definition(),
-                goal="Debate it",
                 participants=("architect", "reviewer", "reviewer"),
                 state=state,
                 result_sink=captured.append,
@@ -142,7 +140,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute(
                 request=request,
                 definition=_parallel_definition(),
-                goal="Try a few approaches",
                 state=state,
                 result_sink=captured.append,
             )
@@ -188,7 +185,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute(
                 request=request,
                 definition=_parallel_definition(),
-                goal="Try a few approaches",
                 state=state,
                 result_sink=captured.append,
             )
@@ -230,7 +226,6 @@ class WorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             async for event in executor.execute(
                 request=request,
                 definition=_ordered_definition(),
-                goal="Pick the best one",
                 workroom_message="Choose one clear direction.",
                 participants=("reviewer",),
                 state=state,
@@ -282,7 +277,6 @@ def _continuation_state():
         workroom_participants=("reviewer",),
         member_index=0,
         agent_id="reviewer",
-        goal="Pick the best one",
         workroom_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 

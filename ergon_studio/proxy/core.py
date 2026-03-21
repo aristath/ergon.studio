@@ -165,7 +165,6 @@ class ProxyOrchestrationCore:
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
-                    goal=loop_state.goal,
                     worklog=loop_state.worklog,
                     active_workroom_id=(
                         loop_state.active_workroom.workroom_id
@@ -317,7 +316,6 @@ class ProxyOrchestrationCore:
                 workroom_id=action.preset,
                 participants=action.participants,
                 workroom_message=action.message,
-                goal=loop_state.goal,
                 state=state,
                 result_sink=partial(_store_result, result_holder),
                 loop_state=loop_state,
@@ -357,7 +355,6 @@ class ProxyOrchestrationCore:
         workroom_id: str | None = None,
         participants: tuple[str, ...] = (),
         workroom_message: str | None = None,
-        goal: str | None = None,
         state: ProxyTurnState,
         result_sink: Any,
         continuation: ContinuationState | None = None,
@@ -382,7 +379,6 @@ class ProxyOrchestrationCore:
                 f"Orchestrator: continuing workroom {definition.id} with "
                 f"{continuation.agent_id or '(unknown)'}."
             )
-            goal = continuation.goal or request.latest_user_text() or ""
             participants = continuation.workroom_participants
             workroom_message = continuation.workroom_message
         else:
@@ -403,7 +399,6 @@ class ProxyOrchestrationCore:
         async for event in self._workroom_executor.execute(
             request=request,
             definition=definition,
-            goal=goal or request.latest_user_text() or "",
             participants=participants,
             workroom_message=workroom_message,
             state=state,
@@ -421,17 +416,12 @@ class ProxyOrchestrationCore:
         pending: PendingContinuation | None,
     ) -> ProxyDecisionLoopState:
         if pending is None:
-            goal = request.latest_user_text() or ""
-            return ProxyDecisionLoopState(
-                goal=goal,
-            )
+            return ProxyDecisionLoopState()
         continuation = pending.state
-        goal = continuation.goal or request.latest_user_text() or ""
         active_workroom = (
             continuation if continuation.workroom_id is not None else None
         )
         return ProxyDecisionLoopState(
-            goal=goal,
             worklog=continuation.worklog,
             active_workroom=active_workroom,
         )
@@ -457,7 +447,6 @@ def _orchestrator_continuation_state(
             if active_workroom is not None
             else None
         ),
-        goal=loop_state.goal,
         worklog=loop_state.worklog,
     )
 
@@ -489,7 +478,6 @@ def _update_workroom_message(
         workroom_participants=next_participants,
         workroom_message=message,
         member_index=continuation.member_index,
-        goal=continuation.goal,
         worklog=continuation.worklog,
         workroom_outputs=continuation.workroom_outputs,
     )

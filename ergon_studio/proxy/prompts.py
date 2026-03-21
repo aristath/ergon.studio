@@ -7,7 +7,6 @@ from ergon_studio.proxy.transcript import summarize_conversation
 def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
-    goal: str | None = None,
     worklog: tuple[str, ...] = (),
     active_workroom_id: str | None = None,
     active_workroom_participants: tuple[str, ...] = (),
@@ -35,8 +34,6 @@ def orchestrator_turn_prompt(
         "Latest user request:",
         request.latest_user_text() or "(none)",
     ]
-    if goal:
-        lines.extend(["", "Current goal:", goal])
     if active_workroom_id:
         lines.extend(["", "Workroom currently in progress:", active_workroom_id])
     if active_workroom_participants:
@@ -66,7 +63,7 @@ def workroom_round_prompt(
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
-    goal: str,
+    user_request: str,
     workroom_message: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
@@ -99,7 +96,7 @@ def workroom_round_prompt(
             transcript_summary or "(none)",
             "",
             "Overall goal:",
-            goal or "(none)",
+            user_request or "(none)",
         ]
     )
     if workroom_message:

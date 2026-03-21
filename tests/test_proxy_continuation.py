@@ -37,7 +37,6 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.workroom_id, "standard-build")
         self.assertEqual(decoded.workroom_participants, ())
         self.assertEqual(decoded.member_index, None)
-        self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.workroom_outputs, ())
 
     def test_encode_and_decode_round_trip_with_context(self) -> None:
@@ -54,7 +53,6 @@ class ProxyContinuationTests(unittest.TestCase):
                 workroom_participants=("coder", "coder", "coder", "reviewer"),
                 workroom_message="Polish the selected candidate.",
                 member_index=0,
-                goal="Build calculator",
                 workroom_outputs=("architect: use main.py",),
             ),
         )
@@ -62,7 +60,6 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(
             decoded.workroom_participants,
             ("coder", "coder", "coder", "reviewer"),

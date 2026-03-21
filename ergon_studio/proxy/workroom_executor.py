@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any
 from uuid import uuid4
 
 from ergon_studio.proxy.agent_runner import AgentRunResult
@@ -16,7 +15,6 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.orchestrator_tools import (
-    ReplyLeadDevAction,
     build_workroom_internal_tools,
     is_internal_tool_name,
     parse_reply_lead_dev_action,
@@ -52,7 +50,7 @@ class ProxyWorkroomExecutor:
     def __init__(
         self,
         *,
-        stream_text_agent: Callable[..., Any],
+        stream_text_agent: Callable[..., ResponseStream[str, AgentRunResult]],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     ) -> None:
         self._stream_text_agent = stream_text_agent
@@ -210,18 +208,13 @@ class ProxyWorkroomExecutor:
                             return
                     if internal_tool_calls:
                         action = parse_reply_lead_dev_action(internal_tool_calls[0])
-                        if isinstance(action, ReplyLeadDevAction):
-                            reasoning_delta = (
-                                f"{participant.label}: {action.message.strip()}"
-                            )
-                            state.append_reasoning(reasoning_delta)
-                            yield ProxyReasoningDeltaEvent(reasoning_delta)
-                            room_lines.append(reasoning_delta)
-                            break
-                        raise ValueError(
-                            "unsupported workroom internal action: "
-                            f"{type(action).__name__}"
+                        reasoning_delta = (
+                            f"{participant.label}: {action.message.strip()}"
                         )
+                        state.append_reasoning(reasoning_delta)
+                        yield ProxyReasoningDeltaEvent(reasoning_delta)
+                        room_lines.append(reasoning_delta)
+                        break
                     text_summary = agent_text.strip()
                     if text_summary:
                         room_lines.append(f"{participant.label}: {text_summary}")

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
-from typing import Any
 from uuid import uuid4
 
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
@@ -219,28 +218,26 @@ class ProxyOrchestrationCore:
         self,
         *,
         request: ProxyTurnRequest,
-        action: Any,
+        action: MessageWorkroomAction,
         state: ProxyTurnState,
         worklog: tuple[str, ...],
     ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
-        if isinstance(action, MessageWorkroomAction):
-            if action.preset is None and not action.participants:
-                state.finish_reason = "error"
-                error_text = "message_workroom needs a preset or participants target."
-                state.content = error_text
-                return ResponseStream(
-                    _single_event_stream(ProxyContentDeltaEvent(error_text)),
-                    finalizer=lambda _updates: (),
-                )
-            return self._message_workroom(
-                request=request,
-                workroom_name=action.preset,
-                participants=action.participants,
-                workroom_message=action.message,
-                state=state,
-                worklog=worklog,
+        if action.preset is None and not action.participants:
+            state.finish_reason = "error"
+            error_text = "message_workroom needs a preset or participants target."
+            state.content = error_text
+            return ResponseStream(
+                _single_event_stream(ProxyContentDeltaEvent(error_text)),
+                finalizer=lambda _updates: (),
             )
-        raise ValueError(f"unsupported internal action: {action}")
+        return self._message_workroom(
+            request=request,
+            workroom_name=action.preset,
+            participants=action.participants,
+            workroom_message=action.message,
+            state=state,
+            worklog=worklog,
+        )
 
     def _resume_subtask(
         self,

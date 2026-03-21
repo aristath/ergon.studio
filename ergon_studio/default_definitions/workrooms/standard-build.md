@@ -13,8 +13,6 @@ selection_hints:
   - feature
   - staged_delivery
   - ship_it
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

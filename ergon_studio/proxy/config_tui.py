@@ -711,7 +711,6 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         "  - reviewer\n"
         "selection_hints:\n"
         "  - example_hint\n"
-        "acceptance_mode: delivery\n"
         "---\n\n"
         "## Purpose\n"
         "Describe what this workroom template is for.\n\n"

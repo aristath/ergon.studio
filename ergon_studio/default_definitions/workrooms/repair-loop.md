@@ -12,8 +12,6 @@ selection_hints:
   - revise
   - fix_review_findings
   - stabilize
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

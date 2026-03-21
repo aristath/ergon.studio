@@ -18,7 +18,6 @@ selection_hints:
   - brainstorm
   - challenge_plan
   - tradeoffs
-acceptance_mode: recommendation
 ---
 
 ## Purpose

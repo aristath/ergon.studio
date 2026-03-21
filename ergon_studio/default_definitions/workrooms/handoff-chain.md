@@ -34,8 +34,6 @@ selection_hints:
   - relay
   - staged_handoff
   - long_chain
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

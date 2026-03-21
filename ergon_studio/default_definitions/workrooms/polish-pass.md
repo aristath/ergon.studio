@@ -11,8 +11,6 @@ selection_hints:
   - refine
   - final_pass
   - cleanup
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

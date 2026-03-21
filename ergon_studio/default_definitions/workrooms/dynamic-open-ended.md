@@ -16,8 +16,6 @@ selection_hints:
   - exploratory_build
   - complex_problem
   - open_ended
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

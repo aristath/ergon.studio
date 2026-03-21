@@ -12,8 +12,6 @@ selection_hints:
   - multiple_attempts
   - compare_implementations
   - hard_build
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

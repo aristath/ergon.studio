@@ -360,7 +360,6 @@ def _make_registry():
                     "id": "standard-build",
                     "name": "Standard Build",
                     "shape": "sequential",
-                    "delivery_candidate": True,
                     "selection_hints": ["staged_delivery"],
                     "steps": ["architect", "coder"],
                 },

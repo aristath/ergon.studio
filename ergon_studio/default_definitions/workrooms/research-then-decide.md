@@ -12,7 +12,6 @@ selection_hints:
   - evaluate
   - compare
   - recommendation
-acceptance_mode: recommendation
 ---
 
 ## Purpose

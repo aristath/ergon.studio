@@ -9,8 +9,6 @@ steps:
 selection_hints:
   - build
   - implementation
-delivery_candidate: true
-acceptance_mode: delivery
 ---
 
 ## Purpose

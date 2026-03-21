@@ -24,6 +24,22 @@ def workroom_participants_for_definition(
     return tuple(participants)
 
 
+def workroom_selection_hints_for_definition(
+    definition: DefinitionDocument,
+) -> tuple[str, ...]:
+    configured = definition.metadata.get("selection_hints")
+    if not isinstance(configured, list):
+        return ()
+    hints: list[str] = []
+    for item in configured:
+        if not isinstance(item, str):
+            continue
+        stripped = item.strip()
+        if stripped and stripped not in hints:
+            hints.append(stripped)
+    return tuple(hints)
+
+
 def workroom_max_rounds_for_definition(
     definition: DefinitionDocument, *, default: int = 1
 ) -> int:

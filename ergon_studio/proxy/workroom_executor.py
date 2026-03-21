@@ -81,9 +81,11 @@ class ProxyWorkroomExecutor:
             if continuation and continuation.member_index is not None
             else 0
         )
-        current_brief = (
+        room_brief = (
             continuation.current_brief
             if continuation and continuation.current_brief is not None
+            else workroom_message
+            if workroom_message is not None
             else goal
         )
         workroom_message = (
@@ -97,7 +99,6 @@ class ProxyWorkroomExecutor:
             list(continuation.workroom_outputs) if continuation is not None else []
         )
         round_outputs: list[str] = []
-        round_entry_brief = current_brief
 
         if self._should_try_parallel_round(
             staffed_members=staffed_members,
@@ -109,7 +110,6 @@ class ProxyWorkroomExecutor:
                 definition=definition,
                 staffed_members=staffed_members,
                 goal=goal,
-                current_brief=round_entry_brief,
                 workroom_message=workroom_message,
             )
             if any(
@@ -131,20 +131,16 @@ class ProxyWorkroomExecutor:
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                     round_outputs.append(reasoning_delta)
                 workroom_outputs.extend(round_outputs)
-                current_brief = _round_brief(
-                    round_outputs=round_outputs,
-                    fallback=round_entry_brief,
-                )
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(round_outputs),
-                        current_brief=current_brief,
+                        current_brief=room_brief,
                         active_workroom=_active_workroom_state(
                             definition=definition,
                             round_participants=round_participants,
                             workroom_message=workroom_message,
                             goal=goal,
-                            current_brief=current_brief,
+                            current_brief=room_brief,
                             loop_state=loop_state,
                             workroom_outputs=workroom_outputs,
                             staffed_members=staffed_members,
@@ -165,11 +161,6 @@ class ProxyWorkroomExecutor:
                 ),
                 role_instance_context=participant_context(participant),
                 goal=goal,
-                current_brief=(
-                    round_entry_brief
-                    if _is_parallel_round(staffed_members)
-                    else current_brief
-                ),
                 workroom_message=workroom_message,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workroom_outputs),
@@ -209,7 +200,7 @@ class ProxyWorkroomExecutor:
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
                         goal=goal,
-                        current_brief=agent_text.strip() or round_entry_brief,
+                        current_brief=room_brief,
                         worklog=(
                             loop_state.worklog if loop_state is not None else ()
                         ),
@@ -224,23 +215,16 @@ class ProxyWorkroomExecutor:
             round_output = f"{participant.label}: {agent_text.strip()}"
             round_outputs.append(round_output)
             workroom_outputs.append(round_output)
-            if not _is_parallel_round(staffed_members):
-                current_brief = agent_text.strip() or current_brief
-        if _is_parallel_round(staffed_members):
-            current_brief = _round_brief(
-                round_outputs=round_outputs,
-                fallback=round_entry_brief,
-            )
         result_sink(
             ProxyMoveResult(
                 worklog_lines=tuple(round_outputs),
-                current_brief=current_brief,
+                current_brief=room_brief,
                 active_workroom=_active_workroom_state(
                     definition=definition,
                     round_participants=round_participants,
                     workroom_message=workroom_message,
                     goal=goal,
-                    current_brief=current_brief,
+                    current_brief=room_brief,
                     loop_state=loop_state,
                     workroom_outputs=workroom_outputs,
                     staffed_members=staffed_members,
@@ -268,7 +252,6 @@ class ProxyWorkroomExecutor:
         definition: DefinitionDocument,
         staffed_members: tuple[StaffedParticipant, ...],
         goal: str,
-        current_brief: str,
         workroom_message: str | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
@@ -278,7 +261,6 @@ class ProxyWorkroomExecutor:
                     definition=definition,
                     participant=participant,
                     goal=goal,
-                    current_brief=current_brief,
                     workroom_message=workroom_message,
                 )
             )
@@ -293,7 +275,6 @@ class ProxyWorkroomExecutor:
         definition: DefinitionDocument,
         participant: StaffedParticipant,
         goal: str,
-        current_brief: str,
         workroom_message: str | None,
     ) -> _AgentAttemptResult:
         prompt = workroom_round_prompt(
@@ -306,7 +287,6 @@ class ProxyWorkroomExecutor:
             ),
             role_instance_context=participant_context(participant),
             goal=goal,
-            current_brief=current_brief,
             workroom_message=workroom_message,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
@@ -369,16 +349,6 @@ def _active_workroom_state(
         worklog=loop_state.worklog if loop_state is not None else (),
         workroom_outputs=tuple(workroom_outputs),
     )
-
-
-def _round_brief(*, round_outputs: list[str], fallback: str) -> str:
-    if not round_outputs:
-        return fallback
-    if len(round_outputs) == 1:
-        return round_outputs[0].split(": ", 1)[-1]
-    return "\n".join(round_outputs)
-
-
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:
     if len(staffed_members) <= 1:
         return False

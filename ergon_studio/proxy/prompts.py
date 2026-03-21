@@ -70,7 +70,6 @@ def workroom_round_prompt(
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
     goal: str,
-    current_brief: str,
     workroom_message: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
@@ -104,9 +103,6 @@ def workroom_round_prompt(
             "",
             "Overall goal:",
             goal or "(none)",
-            "",
-            "Current brief:",
-            current_brief or "(none)",
         ]
     )
     if workroom_message:

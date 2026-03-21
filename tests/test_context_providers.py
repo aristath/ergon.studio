@@ -64,4 +64,4 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
         payload = context.instructions[0][1]
         self.assertIn("Agent profile: orchestrator", payload)
         self.assertIn("Available specialists: coder(coder)", payload)
-        self.assertIn("Available workrooms: standard-build(coder)", payload)
+        self.assertIn("Available workroom presets: standard-build(coder)", payload)

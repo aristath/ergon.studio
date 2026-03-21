@@ -50,7 +50,7 @@ requires the `tui` extra. `ergon --serve` does not need it.
 The configuration TUI has separate tabs for:
 - upstream endpoint settings
 - agent definitions
-- workroom definitions
+- workroom presets
 
 The UI uses standard navigation:
 - `Tab` / `Shift+Tab` to move focus
@@ -67,7 +67,7 @@ The first TUI launch creates a local workspace under:
 That workspace contains:
 - `config.json`
 - `definitions/agents/*.md`
-- `definitions/workrooms/*.md`
+- `definitions/workrooms/*.md` for workroom presets
 
 The upstream API key may be left blank. In that case, ergon uses `not-needed` for the upstream client.
 

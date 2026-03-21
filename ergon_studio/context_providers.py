@@ -66,7 +66,7 @@ class AgentProfileContextProvider(BaseContextProvider):
                 + (", ".join(agent_summaries) if agent_summaries else "none")
             )
             lines.append(
-                "Available workrooms: "
+                "Available workroom presets: "
                 + (", ".join(workroom_summaries) if workroom_summaries else "none")
             )
         context.extend_instructions(self.source_id, "\n".join(lines))

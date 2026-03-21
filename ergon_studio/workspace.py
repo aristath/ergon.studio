@@ -23,8 +23,11 @@ def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     workrooms_dir = definitions_dir(app_dir) / "workrooms"
     agents_dir.mkdir(parents=True, exist_ok=True)
     workrooms_dir.mkdir(parents=True, exist_ok=True)
-    _seed_templates(agents_dir, _bundled_templates("agents"))
-    _seed_templates(workrooms_dir, _bundled_templates("workrooms"))
+    _seed_bundled_definitions(agents_dir, _bundled_definition_files("agents"))
+    _seed_bundled_definitions(
+        workrooms_dir,
+        _bundled_definition_files("workrooms"),
+    )
     return WorkspacePaths(
         app_dir=app_dir,
         config_path=config_path(app_dir),
@@ -34,24 +37,26 @@ def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     )
 
 
-def _seed_templates(
+def _seed_bundled_definitions(
     directory: Path,
-    templates: list[tuple[str, str]],
+    definitions: list[tuple[str, str]],
 ) -> None:
-    for filename, content in templates:
+    for filename, content in definitions:
         path = directory / filename
         if path.exists():
             continue
         atomic_write_text(path, content)
 
 
-def _bundled_templates(kind: str) -> list[tuple[str, str]]:
-    template_dir = _bundled_definition_root().joinpath(kind)
-    if not template_dir.is_dir():
-        raise ValueError(f"missing bundled definitions directory: {template_dir}")
+def _bundled_definition_files(kind: str) -> list[tuple[str, str]]:
+    definitions_dir = _bundled_definition_root().joinpath(kind)
+    if not definitions_dir.is_dir():
+        raise ValueError(
+            f"missing bundled definitions directory: {definitions_dir}"
+        )
     return [
         (entry.name, entry.read_text(encoding="utf-8"))
-        for entry in sorted(template_dir.iterdir(), key=lambda item: item.name)
+        for entry in sorted(definitions_dir.iterdir(), key=lambda item: item.name)
         if entry.is_file() and entry.name.endswith(".md")
     ]
 

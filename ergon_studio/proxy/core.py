@@ -86,6 +86,7 @@ class ProxyOrchestrationCore:
             stream_text_agent=agent_runner.stream_text_agent,
             emit_tool_calls=tool_call_emitter.emit_tool_calls,
             emit_workflow_summary=workflow_support.emit_summary,
+            select_comparison_outcome=workflow_support.select_comparison_outcome,
         )
         group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
             stream_text_agent=agent_runner.stream_text_agent,
@@ -264,6 +265,7 @@ class ProxyOrchestrationCore:
             goal=goal,
             current_brief=current_brief,
             worklog=continuation.decision_history,
+            latest_selection_outcome=continuation.selection_outcome,
         )
 
 

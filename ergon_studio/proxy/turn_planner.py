@@ -47,6 +47,11 @@ class ProxyTurnPlanner:
                     and loop_state.workflow_progress is not None
                     else None
                 ),
+                selection_outcome=(
+                    loop_state.latest_selection_outcome
+                    if loop_state is not None
+                    else None
+                ),
             ),
             preamble=build_turn_planner_instructions(self._registry),
             session_id=f"proxy-planner-{uuid4().hex}",

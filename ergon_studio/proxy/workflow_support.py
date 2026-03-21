@@ -13,14 +13,18 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.prompts import (
+    comparison_outcome_instructions,
+    comparison_outcome_prompt,
     handoff_selection_instructions,
     handoff_selection_prompt,
     parse_agent_selection,
+    parse_comparison_outcome,
     summary_instructions,
     workflow_manager_instructions,
     workflow_manager_prompt,
     workflow_summary_prompt,
 )
+from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 ProxyEvent = (
@@ -127,3 +131,46 @@ class ProxyWorkflowSupport:
             model_id_override=model_id_override,
         )
         return parse_agent_selection(raw, participants=allowed)
+
+    async def select_comparison_outcome(
+        self,
+        *,
+        workflow_id: str,
+        goal: str,
+        comparison_mode: str | None,
+        comparison_candidates: tuple[str, ...],
+        stage_outputs: tuple[str, ...],
+        comparison_criteria: str | None,
+        move_rationale: str | None,
+        success_criteria: str | None,
+        model_id_override: str,
+    ) -> ProxySelectionOutcome | None:
+        if (
+            comparison_mode is None
+            or not comparison_candidates
+            or not stage_outputs
+        ):
+            return None
+        raw = await self._run_text_agent(
+            agent_id="orchestrator",
+            prompt=comparison_outcome_prompt(
+                workflow_id=workflow_id,
+                goal=goal,
+                comparison_mode=comparison_mode,
+                comparison_candidates=comparison_candidates,
+                stage_outputs=stage_outputs,
+                comparison_criteria=comparison_criteria,
+                move_rationale=move_rationale,
+                success_criteria=success_criteria,
+            ),
+            preamble=comparison_outcome_instructions(
+                candidate_count=len(comparison_candidates)
+            ),
+            session_id=f"proxy-compare-{uuid4().hex}",
+            model_id_override=model_id_override,
+        )
+        return parse_comparison_outcome(
+            raw,
+            comparison_mode=comparison_mode,
+            comparison_candidates=comparison_candidates,
+        )

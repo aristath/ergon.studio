@@ -18,6 +18,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workflow_step_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
@@ -49,10 +50,12 @@ class ProxyGroupedWorkflowExecutor:
         stream_text_agent: Callable[..., Any],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
         emit_workflow_summary: Callable[..., AsyncIterator[ProxyEvent]],
+        select_comparison_outcome: Callable[..., Any],
     ) -> None:
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
         self._emit_workflow_summary = emit_workflow_summary
+        self._select_comparison_outcome = select_comparison_outcome
 
     async def execute(
         self,
@@ -98,6 +101,15 @@ class ProxyGroupedWorkflowExecutor:
             if continuation is not None
             else False
         )
+        selection_outcome = (
+            continuation.selection_outcome
+            if continuation is not None
+            else (
+                loop_state.latest_selection_outcome
+                if loop_state is not None
+                else None
+            )
+        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -106,6 +118,9 @@ class ProxyGroupedWorkflowExecutor:
             group_start_index = start_agent_index if step_index == start_index else 0
             stage_entry_brief = current_brief
             stage_outputs: list[str] = []
+            comparison_candidates = (
+                tuple(last_stage_outputs) if last_stage_parallel_attempts else ()
+            )
             if self._should_try_parallel_group(
                 group=group,
                 pending=pending,
@@ -118,6 +133,7 @@ class ProxyGroupedWorkflowExecutor:
                     goal=goal,
                     current_brief=stage_entry_brief,
                     loop_state=loop_state,
+                    selection_outcome=selection_outcome,
                 )
                 if any(
                     extract_tool_calls(result.response)
@@ -162,7 +178,10 @@ class ProxyGroupedWorkflowExecutor:
                                     last_stage_parallel_attempts=(
                                         last_stage_parallel_attempts
                                     ),
+                                    selection_outcome=None,
                                 ),
+                                selection_outcome=None,
+                                selection_outcome_changed=True,
                             )
                         )
                         return
@@ -185,11 +204,8 @@ class ProxyGroupedWorkflowExecutor:
                     ),
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workflow_outputs),
-                    comparison_candidates=(
-                        tuple(last_stage_outputs)
-                        if last_stage_parallel_attempts
-                        else ()
-                    ),
+                    comparison_candidates=comparison_candidates,
+                    selection_outcome=selection_outcome,
                     comparison_mode=(
                         loop_state.current_comparison_mode
                         if loop_state is not None
@@ -245,6 +261,7 @@ class ProxyGroupedWorkflowExecutor:
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
                             ),
+                            selection_outcome=selection_outcome,
                             step_index=step_index,
                             agent_index=agent_index,
                             agent_id=agent_id,
@@ -266,17 +283,40 @@ class ProxyGroupedWorkflowExecutor:
                 if not _is_parallel_attempt_group(group):
                     current_brief = agent_text.strip() or current_brief
             if _is_parallel_attempt_group(group):
+                next_selection_outcome = None
+            elif (
+                comparison_candidates
+                and loop_state is not None
+                and loop_state.current_comparison_mode is not None
+            ):
+                next_selection_outcome = await self._select_comparison_outcome(
+                    workflow_id=definition.id,
+                    goal=goal,
+                    comparison_mode=loop_state.current_comparison_mode,
+                    comparison_candidates=comparison_candidates,
+                    stage_outputs=tuple(stage_outputs),
+                    comparison_criteria=loop_state.current_comparison_criteria,
+                    move_rationale=loop_state.current_move_rationale,
+                    success_criteria=loop_state.current_move_success_criteria,
+                    model_id_override=request.model,
+                )
+            else:
+                next_selection_outcome = selection_outcome
+            if _is_parallel_attempt_group(group):
                 current_brief = _stage_brief(
                     stage_outputs=stage_outputs,
                     fallback=stage_entry_brief,
                 )
             last_stage_outputs = list(stage_outputs)
             last_stage_parallel_attempts = _is_parallel_attempt_group(group)
+            selection_outcome = next_selection_outcome
             if result_sink is not None:
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(stage_outputs),
                         current_brief=current_brief,
+                        selection_outcome=selection_outcome,
+                        selection_outcome_changed=True,
                         workflow_progress=self._next_workflow_progress(
                             definition=definition,
                             step_groups=step_groups,
@@ -290,6 +330,7 @@ class ProxyGroupedWorkflowExecutor:
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
                             ),
+                            selection_outcome=selection_outcome,
                         ),
                     )
                 )
@@ -326,6 +367,7 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
+        selection_outcome: ProxySelectionOutcome | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
             asyncio.create_task(
@@ -337,6 +379,7 @@ class ProxyGroupedWorkflowExecutor:
                     goal=goal,
                     current_brief=current_brief,
                     loop_state=loop_state,
+                    selection_outcome=selection_outcome,
                 )
             )
             for agent_index in range(len(group))
@@ -353,6 +396,7 @@ class ProxyGroupedWorkflowExecutor:
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
+        selection_outcome: ProxySelectionOutcome | None,
     ) -> _AgentAttemptResult:
         agent_id = group[agent_index]
         agent_label = _agent_instance_label(group, agent_index)
@@ -366,6 +410,7 @@ class ProxyGroupedWorkflowExecutor:
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
             comparison_candidates=(),
+            selection_outcome=selection_outcome,
             comparison_mode=(
                 loop_state.current_comparison_mode if loop_state is not None else None
             ),
@@ -416,6 +461,7 @@ class ProxyGroupedWorkflowExecutor:
         workflow_outputs: list[str],
         last_stage_outputs: list[str],
         last_stage_parallel_attempts: bool,
+        selection_outcome: ProxySelectionOutcome | None,
     ) -> ContinuationState | None:
         next_step_index = step_index + 1
         if next_step_index >= len(step_groups):
@@ -427,6 +473,7 @@ class ProxyGroupedWorkflowExecutor:
             workflow_specialists=staffed_specialists,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
+            selection_outcome=selection_outcome,
             step_index=next_step_index,
             agent_index=0,
             agent_id=next_group[0],

@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
+from ergon_studio.proxy.selection_outcome import (
+    ProxySelectionOutcome,
+    selection_outcome_lines,
+)
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.workflow_policy import (
     acceptance_mode_for_metadata,
@@ -139,6 +143,7 @@ def build_turn_planner_prompt(
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
     active_workflow_id: str | None = None,
+    selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
         "Conversation transcript:",
@@ -169,6 +174,13 @@ def build_turn_planner_prompt(
                 "",
                 "Team work so far:",
                 *worklog[-12:],
+            ]
+        )
+    if selection_outcome is not None:
+        lines.extend(
+            [
+                "",
+                *selection_outcome_lines(selection_outcome),
             ]
         )
     if active_workflow_id:

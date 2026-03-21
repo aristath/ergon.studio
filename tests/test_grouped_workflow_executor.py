@@ -14,7 +14,12 @@ from ergon_studio.proxy.models import (
     ProxyReasoningDeltaEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 
 
 class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +44,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -87,6 +93,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -145,6 +152,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -202,6 +210,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -256,6 +265,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -306,6 +316,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -344,6 +355,158 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Choose the strongest candidate", reviewer_prompt)
         self.assertIn("Comparison criteria:", reviewer_prompt)
         self.assertIn("Prefer the safer and simpler approach.", reviewer_prompt)
+
+    async def test_comparison_stage_emits_structured_selection_outcome(
+        self,
+    ) -> None:
+        captured_kwargs: dict[str, object] = {}
+
+        async def _stream_text_agent(**_kwargs):
+            yield "Choose coder[2] and polish it"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        async def _select_comparison_outcome(**kwargs):
+            captured_kwargs.update(kwargs)
+            return ProxySelectionOutcome(
+                mode="select_best",
+                selected_candidate_index=1,
+                selected_candidate_text="coder[2]: Idea B",
+                summary="Candidate 2 is clearer and safer.",
+                next_refinement="Polish candidate 2 into the final implementation.",
+            )
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Pick the best one"),),
+        )
+        state = ProxyTurnState()
+
+        async for _event in executor.execute(
+            request=request,
+            definition=_review_then_polish_definition(),
+            goal="Pick the best one",
+            state=state,
+            loop_state=ProxyDecisionLoopState(
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                current_comparison_mode="select_best",
+                current_comparison_criteria="Prefer the safer and simpler approach.",
+            ),
+            continuation=ContinuationState(
+                mode="workflow",
+                workflow_id="best-of-n",
+                workflow_specialists=("coder", "reviewer"),
+                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                last_stage_parallel_attempts=True,
+                step_index=1,
+                agent_index=0,
+                agent_id="reviewer",
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+            ),
+            result_sink=lambda result: captured_kwargs.setdefault("result", result),
+        ):
+            pass
+
+        move_result = captured_kwargs["result"]
+        self.assertIsInstance(move_result, ProxyMoveResult)
+        assert isinstance(move_result, ProxyMoveResult)
+        self.assertEqual(
+            captured_kwargs["comparison_candidates"],
+            ("coder[1]: Idea A", "coder[2]: Idea B"),
+        )
+        self.assertEqual(captured_kwargs["comparison_mode"], "select_best")
+        self.assertIsNotNone(move_result.selection_outcome)
+        assert move_result.selection_outcome is not None
+        self.assertEqual(
+            move_result.selection_outcome.selected_candidate_text,
+            "coder[2]: Idea B",
+        )
+        self.assertTrue(move_result.selection_outcome_changed)
+        self.assertIsNotNone(move_result.workflow_progress)
+        assert move_result.workflow_progress is not None
+        self.assertEqual(
+            move_result.workflow_progress.selection_outcome,
+            move_result.selection_outcome,
+        )
+
+    async def test_next_stage_receives_structured_selection_outcome(
+        self,
+    ) -> None:
+        streamed_prompts: list[str] = []
+
+        async def _stream_text_agent(**kwargs):
+            streamed_prompts.append(kwargs["prompt"])
+            yield "Polished implementation"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Polish the winner"),),
+        )
+        state = ProxyTurnState()
+
+        [event async for event in executor.execute(
+            request=request,
+            definition=_review_then_polish_definition(),
+            goal="Polish the winner",
+            state=state,
+            continuation=ContinuationState(
+                mode="workflow",
+                workflow_id="best-of-n",
+                workflow_specialists=("reviewer", "coder"),
+                selection_outcome=ProxySelectionOutcome(
+                    mode="select_best",
+                    selected_candidate_index=1,
+                    selected_candidate_text="coder[2]: Idea B",
+                    summary="Candidate 2 is clearer and safer.",
+                    next_refinement="Polish candidate 2 into the final implementation.",
+                ),
+                step_index=2,
+                agent_index=0,
+                agent_id="coder",
+                goal="Polish the winner",
+                current_brief="Reviewer picked candidate 2.",
+                workflow_outputs=(
+                    "coder[1]: Idea A",
+                    "coder[2]: Idea B",
+                    "reviewer: Candidate 2 wins",
+                ),
+            ),
+        )]
+
+        coder_prompt = streamed_prompts[0]
+        self.assertIn("Latest structured comparison outcome:", coder_prompt)
+        self.assertIn("Selected candidate:", coder_prompt)
+        self.assertIn("coder[2]: Idea B", coder_prompt)
+        self.assertIn("Suggested refinement:", coder_prompt)
+        self.assertIn(
+            "Polish candidate 2 into the final implementation.",
+            coder_prompt,
+        )
 
 
 def _definition() -> DefinitionDocument:
@@ -388,6 +551,20 @@ def _best_of_n_review_definition() -> DefinitionDocument:
     )
 
 
+def _review_then_polish_definition() -> DefinitionDocument:
+    return DefinitionDocument(
+        id="best-of-n",
+        path=Path("best-of-n.md"),
+        metadata={
+            "id": "best-of-n",
+            "orchestration": "grouped",
+            "step_groups": [["coder", "coder"], ["reviewer"], ["coder"]],
+        },
+        body="## Purpose\nCompare, select, then polish.",
+        sections={"Purpose": "Compare, select, then polish."},
+    )
+
+
 def _host_tool(name: str):
     from ergon_studio.proxy.models import ProxyFunctionTool
 
@@ -420,3 +597,7 @@ def _fake_response_with_tool_call(agent_id: str, call_index: int):
             self.messages = [_FakeMessage()]
 
     return _FakeResponse()
+
+
+async def _select_comparison_outcome(**_kwargs):
+    return None

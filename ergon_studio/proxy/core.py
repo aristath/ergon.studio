@@ -426,8 +426,6 @@ def _update_workroom_request(
         workroom_id=continuation.workroom_id,
         workroom_participants=continuation.workroom_participants,
         workroom_request=message,
-        last_stage_outputs=continuation.last_stage_outputs,
-        last_stage_parallel_attempts=continuation.last_stage_parallel_attempts,
         progress_index=continuation.progress_index,
         member_index=continuation.member_index,
         goal=continuation.goal,

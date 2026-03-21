@@ -247,9 +247,7 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             ("coder[1]: Final 4", "coder[2]: Final 5", "coder[3]: Final 6"),
         )
 
-    async def test_next_stage_receives_parallel_attempts_as_alternatives(
-        self,
-    ) -> None:
+    async def test_next_stage_receives_prior_workroom_outputs(self) -> None:
         streamed_prompts: list[str] = []
 
         async def _stream_text_agent(**kwargs):
@@ -279,8 +277,6 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 mode="workroom",
                 workroom_id="best-of-n",
                 workroom_participants=("coder", "coder", "reviewer"),
-                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
-                last_stage_parallel_attempts=True,
                 progress_index=1,
                 member_index=0,
                 agent_id="reviewer",
@@ -291,10 +287,9 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
         )]
 
         reviewer_prompt = streamed_prompts[0]
-        self.assertIn("Alternative attempts from the previous stage", reviewer_prompt)
+        self.assertIn("Prior workroom outputs:", reviewer_prompt)
         self.assertIn("coder[1]: Idea A", reviewer_prompt)
         self.assertIn("coder[2]: Idea B", reviewer_prompt)
-        self.assertIn("Treat these as competing options", reviewer_prompt)
 
     async def test_stage_prompt_receives_workroom_assignment(self) -> None:
         streamed_prompts: list[str] = []
@@ -327,8 +322,6 @@ class StagedWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
                 mode="workroom",
                 workroom_id="best-of-n",
                 workroom_participants=("coder", "coder", "reviewer"),
-                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
-                last_stage_parallel_attempts=True,
                 progress_index=1,
                 member_index=0,
                 agent_id="reviewer",

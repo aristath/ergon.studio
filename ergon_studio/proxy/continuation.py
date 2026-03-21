@@ -19,8 +19,6 @@ class ContinuationState:
     workroom_id: str | None = None
     workroom_participants: tuple[str, ...] = ()
     workroom_request: str | None = None
-    last_stage_outputs: tuple[str, ...] = ()
-    last_stage_parallel_attempts: bool = False
     progress_index: int | None = None
     member_index: int | None = None
     goal: str | None = None
@@ -54,10 +52,6 @@ def encode_continuation_tool_call(
         payload["p"] = list(state.workroom_participants)
     if state.workroom_request is not None:
         payload["pr"] = state.workroom_request
-    if state.last_stage_outputs:
-        payload["ls"] = list(state.last_stage_outputs)
-    if state.last_stage_parallel_attempts:
-        payload["lp"] = True
     if state.progress_index is not None:
         payload["x"] = state.progress_index
     if state.member_index is not None:
@@ -98,8 +92,6 @@ def decode_continuation_from_tool_call_id(
     workroom_id = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_request = payload.get("pr")
-    last_stage_outputs = payload.get("ls", [])
-    last_stage_parallel_attempts = payload.get("lp", False)
     progress_index = payload.get("x")
     member_index = payload.get("i")
     goal = payload.get("g")
@@ -116,13 +108,7 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in workroom_participants
     ):
         return None
-    if not isinstance(last_stage_outputs, list) or not all(
-        isinstance(item, str) for item in last_stage_outputs
-    ):
-        return None
     if workroom_request is not None and not isinstance(workroom_request, str):
-        return None
-    if not isinstance(last_stage_parallel_attempts, bool):
         return None
     if progress_index is not None and not isinstance(progress_index, int):
         return None
@@ -147,8 +133,6 @@ def decode_continuation_from_tool_call_id(
         workroom_id=workroom_id,
         workroom_participants=tuple(workroom_participants),
         workroom_request=workroom_request,
-        last_stage_outputs=tuple(last_stage_outputs),
-        last_stage_parallel_attempts=last_stage_parallel_attempts,
         progress_index=progress_index,
         member_index=member_index,
         goal=goal,

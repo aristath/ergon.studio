@@ -90,16 +90,6 @@ class ProxyStagedWorkroomExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
-        last_stage_outputs = (
-            list(continuation.last_stage_outputs)
-            if continuation is not None
-            else []
-        )
-        last_stage_parallel_attempts = (
-            continuation.last_stage_parallel_attempts
-            if continuation is not None
-            else False
-        )
         workroom_request = (
             continuation.workroom_request
             if continuation is not None and continuation.workroom_request is not None
@@ -115,9 +105,6 @@ class ProxyStagedWorkroomExecutor:
             group_start_index = start_member_index if stage_index == start_index else 0
             stage_entry_brief = current_brief
             stage_outputs: list[str] = []
-            alternative_attempts = (
-                tuple(last_stage_outputs) if last_stage_parallel_attempts else ()
-            )
             if self._should_try_parallel_group(
                 group=group,
                 pending=pending,
@@ -129,7 +116,6 @@ class ProxyStagedWorkroomExecutor:
                     group=group,
                     goal=goal,
                     current_brief=stage_entry_brief,
-                    loop_state=loop_state,
                     workroom_request=workroom_request,
                 )
                 if any(
@@ -155,8 +141,6 @@ class ProxyStagedWorkroomExecutor:
                         stage_outputs=stage_outputs,
                         fallback=stage_entry_brief,
                     )
-                    last_stage_outputs = list(stage_outputs)
-                    last_stage_parallel_attempts = True
                     result_sink(
                         ProxyMoveResult(
                             worklog_lines=tuple(stage_outputs),
@@ -171,10 +155,6 @@ class ProxyStagedWorkroomExecutor:
                                 current_brief=current_brief,
                                 loop_state=loop_state,
                                 workroom_outputs=workroom_outputs,
-                                last_stage_outputs=last_stage_outputs,
-                                last_stage_parallel_attempts=(
-                                    last_stage_parallel_attempts
-                                ),
                             ),
                         )
                     )
@@ -198,7 +178,6 @@ class ProxyStagedWorkroomExecutor:
                     workroom_request=workroom_request,
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workroom_outputs),
-                    alternative_attempts=alternative_attempts,
                 )
                 agent_text = ""
                 first = True
@@ -231,10 +210,6 @@ class ProxyStagedWorkroomExecutor:
                             workroom_id=definition.id,
                             workroom_participants=staffed_participants,
                             workroom_request=workroom_request,
-                            last_stage_outputs=tuple(last_stage_outputs),
-                            last_stage_parallel_attempts=(
-                                last_stage_parallel_attempts
-                            ),
                             progress_index=stage_index,
                             member_index=member_index,
                             agent_id=agent_id,
@@ -260,8 +235,6 @@ class ProxyStagedWorkroomExecutor:
                     stage_outputs=stage_outputs,
                     fallback=stage_entry_brief,
                 )
-            last_stage_outputs = list(stage_outputs)
-            last_stage_parallel_attempts = _is_parallel_attempt_group(group)
             result_sink(
                 ProxyMoveResult(
                     worklog_lines=tuple(stage_outputs),
@@ -276,10 +249,6 @@ class ProxyStagedWorkroomExecutor:
                         current_brief=current_brief,
                         loop_state=loop_state,
                         workroom_outputs=workroom_outputs,
-                        last_stage_outputs=last_stage_outputs,
-                        last_stage_parallel_attempts=(
-                            last_stage_parallel_attempts
-                        ),
                     ),
                 )
             )
@@ -312,7 +281,6 @@ class ProxyStagedWorkroomExecutor:
         group: tuple[str, ...],
         goal: str,
         current_brief: str,
-        loop_state: ProxyDecisionLoopState | None,
         workroom_request: str | None,
     ) -> list[_AgentAttemptResult]:
         tasks = [
@@ -324,7 +292,6 @@ class ProxyStagedWorkroomExecutor:
                     member_index=member_index,
                     goal=goal,
                     current_brief=current_brief,
-                    loop_state=loop_state,
                     workroom_request=workroom_request,
                 )
             )
@@ -341,7 +308,6 @@ class ProxyStagedWorkroomExecutor:
         member_index: int,
         goal: str,
         current_brief: str,
-        loop_state: ProxyDecisionLoopState | None,
         workroom_request: str | None,
     ) -> _AgentAttemptResult:
         agent_id = group[member_index]
@@ -356,7 +322,6 @@ class ProxyStagedWorkroomExecutor:
             workroom_request=workroom_request,
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
-            alternative_attempts=(),
         )
         text = ""
         response_holder: dict[str, Any] = {}
@@ -389,8 +354,6 @@ class ProxyStagedWorkroomExecutor:
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
         workroom_outputs: list[str],
-        last_stage_outputs: list[str],
-        last_stage_parallel_attempts: bool,
         workroom_request: str | None,
     ) -> ContinuationState | None:
         next_stage_index = stage_index + 1
@@ -402,8 +365,6 @@ class ProxyStagedWorkroomExecutor:
             workroom_id=definition.id,
             workroom_participants=staffed_participants,
             workroom_request=workroom_request,
-            last_stage_outputs=tuple(last_stage_outputs),
-            last_stage_parallel_attempts=last_stage_parallel_attempts,
             progress_index=next_stage_index,
             member_index=0,
             agent_id=next_group[0],

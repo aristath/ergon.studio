@@ -46,6 +46,8 @@ def orchestrator_turn_prompt(
     if worklog:
         lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
+
+
 def workroom_round_prompt(
     *,
     workroom_id: str,
@@ -57,7 +59,6 @@ def workroom_round_prompt(
     workroom_request: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
-    alternative_attempts: tuple[str, ...] = (),
 ) -> str:
     lines = [
         f"You are {agent_id} working inside workroom {workroom_id}.",
@@ -82,15 +83,15 @@ def workroom_round_prompt(
         )
     lines.extend(
         [
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Overall goal:",
-        goal or "(none)",
-        "",
-        "Current brief:",
-        current_brief or "(none)",
+            "",
+            "Conversation summary:",
+            transcript_summary or "(none)",
+            "",
+            "Overall goal:",
+            goal or "(none)",
+            "",
+            "Current brief:",
+            current_brief or "(none)",
         ]
     )
     if workroom_request:
@@ -107,19 +108,6 @@ def workroom_round_prompt(
                 "",
                 "Prior workroom outputs:",
                 *prior_outputs[-6:],
-            ]
-        )
-    if alternative_attempts:
-        lines.extend(
-            [
-                "",
-                "Alternative attempts from the previous stage:",
-                *alternative_attempts[-8:],
-                "",
-                (
-                    "Treat these as competing options to compare, select, or "
-                    "build on deliberately."
-                ),
             ]
         )
     return "\n".join(lines).strip()

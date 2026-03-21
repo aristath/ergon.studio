@@ -20,6 +20,18 @@ The proxy uses:
 
 ## Running ergon
 
+Install the proxy in the mode you want:
+
+```bash
+pip install .
+```
+
+For the configuration TUI, install the `tui` extra:
+
+```bash
+pip install '.[tui]'
+```
+
 Default mode launches the configuration TUI and the local proxy server together:
 
 ```bash
@@ -31,6 +43,9 @@ Headless mode runs just the server:
 ```bash
 ergon --serve
 ```
+
+If `textual` is not installed, `ergon` will tell you that the configuration TUI
+requires the `tui` extra. `ergon --serve` does not need it.
 
 The configuration TUI has separate tabs for:
 - upstream endpoint settings

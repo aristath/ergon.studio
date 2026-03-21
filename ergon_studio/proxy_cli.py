@@ -1,29 +1,32 @@
 from __future__ import annotations
 
 import argparse
+from importlib import import_module
 from pathlib import Path
+from typing import Protocol, cast
 
 from ergon_studio.app_config import (
     ProxyAppConfig,
     config_path,
     default_app_dir,
     load_app_config,
-    validate_proxy_host,
-    validate_proxy_port,
 )
 from ergon_studio.app_config import (
     definitions_dir as default_definitions_dir,
 )
-from ergon_studio.proxy.config_tui import run_config_tui
-from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import serve_proxy
-from ergon_studio.registry import load_registry
-from ergon_studio.upstream import (
-    UpstreamSettings,
-    ensure_upstream_reachable,
-    validate_upstream_base_url,
-)
+from ergon_studio.proxy_runtime import prepare_proxy_runtime
 from ergon_studio.workspace import ensure_workspace
+
+
+class _ConfigTuiModule(Protocol):
+    def run_config_tui(
+        self,
+        *,
+        app_dir: Path,
+        definitions_dir: Path,
+        initial_config: ProxyAppConfig,
+    ) -> int: ...
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,24 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_proxy_server(*, definitions_dir: Path, config: ProxyAppConfig) -> int:
-    upstream_base_url = validate_upstream_base_url(config.upstream_base_url)
-    host = validate_proxy_host(config.host)
-    port = validate_proxy_port(config.port)
-    upstream = UpstreamSettings(
-        base_url=upstream_base_url,
-        api_key=config.upstream_api_key.strip() or None,
-        instruction_role=config.instruction_role.strip() or None,
-        tool_calling=not config.disable_tool_calling,
-    )
-    ensure_upstream_reachable(upstream)
-    registry = load_registry(
-        definitions_dir,
-        upstream=upstream,
+    prepared = prepare_proxy_runtime(
+        definitions_dir=definitions_dir,
+        config=config,
     )
     serve_proxy(
-        host=host,
-        port=port,
-        core=ProxyOrchestrationCore(registry),
+        host=prepared.host,
+        port=prepared.port,
+        core=prepared.core,
     )
     return 0
 
@@ -96,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             disable_tool_calling=args.disable_tool_calling,
         )
         definitions_dir = args.definitions_dir or workspace.definitions_dir
-        return run_config_tui(
+        return _run_config_tui(
             app_dir=workspace.app_dir,
             definitions_dir=definitions_dir,
             initial_config=config,
@@ -130,6 +123,27 @@ def _resolve_config(
             else instruction_role
         ),
         disable_tool_calling=disable_tool_calling or config.disable_tool_calling,
+    )
+
+
+def _run_config_tui(
+    *,
+    app_dir: Path,
+    definitions_dir: Path,
+    initial_config: ProxyAppConfig,
+) -> int:
+    try:
+        config_tui = import_module("ergon_studio.proxy.config_tui")
+    except ModuleNotFoundError as exc:
+        if exc.name != "textual":
+            raise
+        raise ValueError(
+            "the configuration TUI requires the 'textual' dependency to be installed"
+        ) from exc
+    return cast(_ConfigTuiModule, config_tui).run_config_tui(
+        app_dir=app_dir,
+        definitions_dir=definitions_dir,
+        initial_config=initial_config,
     )
 
 

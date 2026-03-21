@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
 from ergon_studio.app_config import ProxyAppConfig
 from ergon_studio.server_control import ProxyServerController
 from ergon_studio.workspace import ensure_workspace
+
+
+@dataclass(frozen=True)
+class _PreparedRuntime:
+    host: str
+    port: int
+    registry: object
+    core: object
 
 
 class ServerControlTests(unittest.TestCase):
@@ -41,10 +50,16 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
+            prepared = _PreparedRuntime(
+                host="0.0.0.0",
+                port=4000,
+                registry=object(),
+                core=object(),
+            )
             with (
                 patch(
-                    "ergon_studio.server_control.ensure_upstream_reachable",
-                    return_value=None,
+                    "ergon_studio.server_control.prepare_proxy_runtime",
+                    return_value=prepared,
                 ),
                 patch(
                     "ergon_studio.server_control.start_proxy_server_in_thread",
@@ -80,10 +95,16 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
+            prepared = _PreparedRuntime(
+                host="127.0.0.1",
+                port=4000,
+                registry=object(),
+                core=object(),
+            )
             with (
                 patch(
-                    "ergon_studio.server_control.ensure_upstream_reachable",
-                    return_value=None,
+                    "ergon_studio.server_control.prepare_proxy_runtime",
+                    side_effect=[prepared, ValueError("unknown agents: coder")],
                 ),
                 patch(
                     "ergon_studio.server_control.start_proxy_server_in_thread",
@@ -96,8 +117,6 @@ class ServerControlTests(unittest.TestCase):
                     ),
                     definitions_dir=workspace.definitions_dir,
                 )
-
-                (workspace.agents_dir / "coder.md").unlink()
 
                 with self.assertRaisesRegex(ValueError, "unknown agents: coder"):
                     controller.start(
@@ -126,10 +145,16 @@ class ServerControlTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
+            prepared = _PreparedRuntime(
+                host="127.0.0.1",
+                port=4000,
+                registry=object(),
+                core=object(),
+            )
             with (
                 patch(
-                    "ergon_studio.server_control.ensure_upstream_reachable",
-                    return_value=None,
+                    "ergon_studio.server_control.prepare_proxy_runtime",
+                    return_value=prepared,
                 ),
                 patch(
                     "ergon_studio.server_control.start_proxy_server_in_thread",
@@ -164,7 +189,7 @@ class ServerControlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = ensure_workspace(Path(temp_dir))
             with patch(
-                "ergon_studio.server_control.ensure_upstream_reachable",
+                "ergon_studio.server_control.prepare_proxy_runtime",
                 side_effect=ValueError("upstream endpoint is not reachable: refused"),
             ):
                 with self.assertRaisesRegex(

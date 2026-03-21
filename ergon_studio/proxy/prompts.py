@@ -190,6 +190,7 @@ def workflow_step_prompt(
     role_instance_context: str | None = None,
     goal: str,
     current_brief: str,
+    playbook_request: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
     comparison_candidates: tuple[str, ...] = (),
@@ -230,6 +231,14 @@ def workflow_step_prompt(
         current_brief or "(none)",
         ]
     )
+    if playbook_request:
+        lines.extend(
+            [
+                "",
+                "Current playbook round assignment:",
+                playbook_request,
+            ]
+        )
     if prior_outputs:
         lines.extend(
             [
@@ -300,6 +309,7 @@ def group_chat_turn_prompt(
     goal: str,
     transcript_summary: str,
     current_brief: str,
+    playbook_request: str | None = None,
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
     success_criteria: str | None = None,
@@ -318,6 +328,14 @@ def group_chat_turn_prompt(
         "Current brief:",
         current_brief or "(none)",
     ]
+    if playbook_request:
+        lines.extend(
+            [
+                "",
+                "Current playbook round assignment:",
+                playbook_request,
+            ]
+        )
     if prior_outputs:
         lines.extend(
             [
@@ -367,6 +385,7 @@ def workflow_manager_prompt(
     workflow_id: str,
     goal: str,
     current_brief: str,
+    playbook_request: str | None,
     participants: tuple[str, ...],
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
@@ -378,6 +397,8 @@ def workflow_manager_prompt(
         f"Current brief: {current_brief or '(none)'}",
         f"Available specialists: {', '.join(participants) or '(none)'}",
     ]
+    if playbook_request:
+        lines.append(f"Current round assignment: {playbook_request}")
     if move_rationale:
         lines.append(f"Why continue this playbook now: {move_rationale}")
     if success_criteria:
@@ -412,6 +433,7 @@ def handoff_selection_prompt(
     current_agent: str,
     goal: str,
     current_brief: str,
+    playbook_request: str | None,
     prior_outputs: tuple[str, ...],
     allowed: tuple[str, ...],
     move_rationale: str | None = None,
@@ -424,6 +446,8 @@ def handoff_selection_prompt(
         f"Current brief: {current_brief or '(none)'}",
         f"You may hand off to: {', '.join(allowed) or '(none)'}",
     ]
+    if playbook_request:
+        lines.append(f"Current round assignment: {playbook_request}")
     if move_rationale:
         lines.append(
             f"Why the lead developer is continuing this handoff now: {move_rationale}"

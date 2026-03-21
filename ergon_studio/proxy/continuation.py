@@ -19,6 +19,7 @@ class ContinuationState:
     workflow_id: str | None = None
     workflow_specialists: tuple[str, ...] = ()
     workflow_specialist_counts: tuple[tuple[str, int], ...] = ()
+    workflow_request: str | None = None
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
     selection_outcome: ProxySelectionOutcome | None = None
@@ -56,6 +57,8 @@ def encode_continuation_tool_call(
         payload["pc"] = {
             agent_id: count for agent_id, count in state.workflow_specialist_counts
         }
+    if state.workflow_request is not None:
+        payload["pr"] = state.workflow_request
     if state.last_stage_outputs:
         payload["ls"] = list(state.last_stage_outputs)
     if state.last_stage_parallel_attempts:
@@ -109,6 +112,7 @@ def decode_continuation_from_tool_call_id(
     workflow_id = payload.get("w")
     workflow_specialists = payload.get("p", [])
     workflow_specialist_counts_payload = payload.get("pc", {})
+    workflow_request = payload.get("pr")
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
     selection_outcome_payload = payload.get("so")
@@ -140,6 +144,8 @@ def decode_continuation_from_tool_call_id(
         isinstance(item, str) for item in last_stage_outputs
     ):
         return None
+    if workflow_request is not None and not isinstance(workflow_request, str):
+        return None
     if not isinstance(last_stage_parallel_attempts, bool):
         return None
     selection_outcome = _decode_selection_outcome(selection_outcome_payload)
@@ -169,6 +175,7 @@ def decode_continuation_from_tool_call_id(
         workflow_id=workflow_id,
         workflow_specialists=tuple(workflow_specialists),
         workflow_specialist_counts=workflow_specialist_counts or (),
+        workflow_request=workflow_request,
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
         selection_outcome=selection_outcome,

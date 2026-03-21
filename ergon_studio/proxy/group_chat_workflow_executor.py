@@ -54,6 +54,7 @@ class ProxyGroupChatWorkflowExecutor:
         definition: DefinitionDocument,
         goal: str,
         specialists: tuple[str, ...] = (),
+        workflow_request: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -96,6 +97,17 @@ class ProxyGroupChatWorkflowExecutor:
             if continuation and continuation.current_brief is not None
             else goal
         )
+        workflow_request = (
+            continuation.workflow_request
+            if continuation is not None and continuation.workflow_request is not None
+            else workflow_request
+            if workflow_request is not None
+            else (
+                loop_state.current_playbook_request
+                if loop_state is not None
+                else None
+            )
+        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -107,6 +119,7 @@ class ProxyGroupChatWorkflowExecutor:
                 goal=goal,
                 transcript_summary=summarize_conversation(request.messages),
                 current_brief=current_brief,
+                playbook_request=workflow_request,
                 prior_outputs=tuple(workflow_outputs),
                 move_rationale=(
                     loop_state.current_move_rationale
@@ -149,6 +162,7 @@ class ProxyGroupChatWorkflowExecutor:
                         workflow_specialists=continuation.workflow_specialists
                         if continuation is not None
                         else specialists,
+                        workflow_request=workflow_request,
                         step_index=turn_index,
                         agent_id=agent_id,
                         goal=goal,
@@ -176,6 +190,7 @@ class ProxyGroupChatWorkflowExecutor:
                         workflow_specialists=continuation.workflow_specialists
                         if continuation is not None
                         else specialists,
+                        workflow_request=workflow_request,
                         step_index=next_turn,
                         agent_id=agent_id,
                         goal=goal,

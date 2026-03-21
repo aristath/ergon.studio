@@ -24,6 +24,7 @@ class ProxyTurnPlan:
     agent_id: str | None = None
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
+    playbook_request: str | None = None
     comparison_mode: str | None = None
     comparison_criteria: str | None = None
     request: str | None = None
@@ -95,6 +96,11 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "role, such as several coders for parallel attempts."
             ),
             (
+                "- For workflow or continue_playbook, you may optionally set "
+                "playbook_request to state the concrete assignment for this "
+                "playbook round."
+            ),
+            (
                 "- When a move is about judging alternatives, you may set "
                 "comparison_mode to select_best, synthesize_best, or critique_options."
             ),
@@ -137,7 +143,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"playbook_request":"","comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -151,6 +157,7 @@ def build_turn_planner_prompt(
     active_workflow_id: str | None = None,
     active_specialists: tuple[str, ...] = (),
     active_specialist_counts: tuple[tuple[str, int], ...] = (),
+    active_playbook_request: str | None = None,
     selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
@@ -197,6 +204,14 @@ def build_turn_planner_prompt(
                 "",
                 "Playbook currently in progress:",
                 active_workflow_id,
+            ]
+        )
+    if active_playbook_request:
+        lines.extend(
+            [
+                "",
+                "Current playbook round assignment:",
+                active_playbook_request,
             ]
         )
     if active_specialists:
@@ -250,6 +265,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         agent_id=agent_id,
         specialists=specialists,
         specialist_counts=specialist_counts,
+        playbook_request=_optional_text(payload.get("playbook_request")),
         comparison_mode=comparison_mode,
         comparison_criteria=_optional_text(payload.get("comparison_criteria")),
         request=_optional_text(payload.get("request")),

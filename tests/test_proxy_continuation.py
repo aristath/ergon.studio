@@ -60,6 +60,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 workflow_id="standard-build",
                 workflow_specialists=("coder", "reviewer"),
                 workflow_specialist_counts=(("coder", 3),),
+                workflow_request="Polish the selected candidate.",
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
                 selection_outcome=ProxySelectionOutcome(
@@ -86,6 +87,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.current_brief, "Updating main.py")
         self.assertEqual(decoded.workflow_specialists, ("coder", "reviewer"))
         self.assertEqual(decoded.workflow_specialist_counts, (("coder", 3),))
+        self.assertEqual(decoded.workflow_request, "Polish the selected candidate.")
         self.assertEqual(
             decoded.last_stage_outputs,
             ("coder[1]: Idea A", "coder[2]: Idea B"),

@@ -417,6 +417,59 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Comparison criteria:", reviewer_prompt)
         self.assertIn("Prefer the safer and simpler approach.", reviewer_prompt)
 
+    async def test_stage_prompt_receives_playbook_round_assignment(self) -> None:
+        streamed_prompts: list[str] = []
+
+        async def _stream_text_agent(**kwargs):
+            streamed_prompts.append(kwargs["prompt"])
+            yield "Reviewer chose candidate 2"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Pick the best one"),),
+        )
+        state = ProxyTurnState()
+
+        [event async for event in executor.execute(
+            request=request,
+            definition=_best_of_n_review_definition(),
+            goal="Pick the best one",
+            workflow_request="Compare the two alternatives and choose one winner.",
+            state=state,
+            continuation=ContinuationState(
+                mode="workflow",
+                workflow_id="best-of-n",
+                workflow_specialists=("coder", "reviewer"),
+                last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+                last_stage_parallel_attempts=True,
+                step_index=1,
+                agent_index=0,
+                agent_id="reviewer",
+                goal="Pick the best one",
+                current_brief="coder[1]: Idea A\ncoder[2]: Idea B",
+                workflow_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
+            ),
+        )]
+
+        reviewer_prompt = streamed_prompts[0]
+        self.assertIn("Current playbook round assignment:", reviewer_prompt)
+        self.assertIn(
+            "Compare the two alternatives and choose one winner.",
+            reviewer_prompt,
+        )
+
     async def test_comparison_stage_emits_structured_selection_outcome(
         self,
     ) -> None:

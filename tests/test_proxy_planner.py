@@ -80,6 +80,21 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertIn("Current role instance counts:", prompt)
         self.assertIn("coder x3", prompt)
 
+    def test_build_turn_planner_prompt_includes_active_playbook_request(self) -> None:
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+
+        prompt = build_turn_planner_prompt(
+            request,
+            active_workflow_id="best-of-n",
+            active_playbook_request="Compare the two alternatives and pick one.",
+        )
+
+        self.assertIn("Current playbook round assignment:", prompt)
+        self.assertIn("Compare the two alternatives and pick one.", prompt)
+
     def test_parse_turn_plan_resolves_known_workflow(self) -> None:
         registry = _make_registry()
 
@@ -165,6 +180,23 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(
             plan.specialist_counts,
             (("coder", 3), ("architect", 1)),
+        )
+
+    def test_parse_turn_plan_parses_playbook_request(self) -> None:
+        registry = _make_registry()
+
+        plan = parse_turn_plan(
+            (
+                '{"mode":"continue_playbook","workflow_id":"best-of-n",'
+                '"playbook_request":"Compare the current options and pick one."}'
+            ),
+            registry=registry,
+        )
+
+        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertEqual(
+            plan.playbook_request,
+            "Compare the current options and pick one.",
         )
 
     def test_resolve_workflow_reference_returns_none_for_ambiguous_hint(self) -> None:

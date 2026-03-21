@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -37,6 +36,20 @@ from ergon_studio.proxy.planner import (
     build_turn_planner_prompt,
     parse_turn_plan,
     summarize_conversation,
+)
+from ergon_studio.proxy.prompts import (
+    delegation_summary_prompt,
+    direct_reply_prompt,
+    group_chat_turn_prompt,
+    handoff_selection_instructions,
+    handoff_selection_prompt,
+    parse_agent_selection,
+    specialist_prompt,
+    summary_instructions,
+    workflow_manager_instructions,
+    workflow_manager_prompt,
+    workflow_step_prompt,
+    workflow_summary_prompt,
 )
 from ergon_studio.proxy.workflow_metadata import (
     workflow_finalizers_for_definition,
@@ -244,7 +257,7 @@ class ProxyOrchestrationCore:
         notice = "Orchestrator: handling this turn directly.\n"
         state.append_reasoning(notice)
         yield ProxyReasoningDeltaEvent(notice)
-        prompt = _direct_reply_prompt(request)
+        prompt = direct_reply_prompt(request)
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
             agent_id="orchestrator",
@@ -284,7 +297,7 @@ class ProxyOrchestrationCore:
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
-        specialist_prompt = _specialist_prompt(
+        prompt_text = specialist_prompt(
             specialist_id=agent_id,
             request_text=plan.request or request.latest_user_text() or "",
             transcript_summary=summarize_conversation(request.messages),
@@ -295,7 +308,7 @@ class ProxyOrchestrationCore:
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
             agent_id=agent_id,
-            prompt=specialist_prompt,
+            prompt=prompt_text,
             session_id=f"proxy-delegate-{agent_id}-{uuid4().hex}",
             model_id_override=request.model,
             host_tools=request.tools,
@@ -328,12 +341,12 @@ class ProxyOrchestrationCore:
                 return
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=_delegation_summary_prompt(
+            prompt=delegation_summary_prompt(
                 request_text=request.latest_user_text() or "",
                 specialist_id=agent_id,
                 specialist_text=specialist_text,
             ),
-            preamble=_summary_instructions(),
+            preamble=summary_instructions(),
             session_id=f"proxy-delegation-summary-{uuid4().hex}",
             model_id_override=request.model,
         )
@@ -510,7 +523,7 @@ class ProxyOrchestrationCore:
             group_start_index = start_agent_index if step_index == start_index else 0
             for agent_index in range(group_start_index, len(group)):
                 agent_id = group[agent_index]
-                specialist_prompt = _workflow_step_prompt(
+                specialist_prompt = workflow_step_prompt(
                     workflow_id=definition.id,
                     agent_id=agent_id,
                     goal=goal,
@@ -613,7 +626,7 @@ class ProxyOrchestrationCore:
         )
         for turn_index in range(start_turn, len(sequence)):
             agent_id = sequence[turn_index]
-            prompt = _group_chat_turn_prompt(
+            prompt = group_chat_turn_prompt(
                 workflow_id=definition.id,
                 agent_id=agent_id,
                 goal=goal,
@@ -716,7 +729,7 @@ class ProxyOrchestrationCore:
                 )
             if agent_id is None:
                 break
-            prompt = _workflow_step_prompt(
+            prompt = workflow_step_prompt(
                 workflow_id=definition.id,
                 agent_id=agent_id,
                 goal=goal,
@@ -816,7 +829,7 @@ class ProxyOrchestrationCore:
         )
 
         while round_index < max_rounds and current_agent:
-            prompt = _workflow_step_prompt(
+            prompt = workflow_step_prompt(
                 workflow_id=definition.id,
                 agent_id=current_agent,
                 goal=goal,
@@ -905,12 +918,12 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=_workflow_summary_prompt(
+            prompt=workflow_summary_prompt(
                 workflow_id=definition.id,
                 goal=goal,
                 outputs=workflow_outputs,
             ),
-            preamble=_summary_instructions(),
+            preamble=summary_instructions(),
             session_id=f"proxy-workflow-summary-{uuid4().hex}",
             model_id_override=request.model,
         )
@@ -932,18 +945,18 @@ class ProxyOrchestrationCore:
     ) -> str | None:
         raw = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=_workflow_manager_prompt(
+            prompt=workflow_manager_prompt(
                 workflow_id=workflow_id,
                 goal=goal,
                 current_brief=current_brief,
                 participants=participants,
                 prior_outputs=prior_outputs,
             ),
-            preamble=_workflow_manager_instructions(participants),
+            preamble=workflow_manager_instructions(participants),
             session_id=f"proxy-workflow-manager-{uuid4().hex}",
             model_id_override=model_id_override,
         )
-        return _parse_agent_selection(raw, participants=participants)
+        return parse_agent_selection(raw, participants=participants)
 
     async def _select_handoff_target(
         self,
@@ -960,7 +973,7 @@ class ProxyOrchestrationCore:
             return None
         raw = await self._run_text_agent(
             agent_id=current_agent,
-            prompt=_handoff_selection_prompt(
+            prompt=handoff_selection_prompt(
                 workflow_id=workflow_id,
                 current_agent=current_agent,
                 goal=goal,
@@ -968,11 +981,11 @@ class ProxyOrchestrationCore:
                 prior_outputs=prior_outputs,
                 allowed=allowed,
             ),
-            preamble=_handoff_selection_instructions(allowed),
+            preamble=handoff_selection_instructions(allowed),
             session_id=f"proxy-handoff-select-{uuid4().hex}",
             model_id_override=model_id_override,
         )
-        return _parse_agent_selection(raw, participants=allowed)
+        return parse_agent_selection(raw, participants=allowed)
 
     async def _run_text_agent(
         self,
@@ -1041,256 +1054,6 @@ class ProxyOrchestrationCore:
         for call in encoded_calls:
             state.record_output_item("tool_call", call_id=call.id)
         return events
-
-def _direct_reply_prompt(request: ProxyTurnRequest) -> str:
-    return "\n".join(
-        [
-            "You are responding to the host user in proxy mode.",
-            "Use the full conversation transcript below as context.",
-            "",
-            summarize_conversation(request.messages, limit=12),
-            "",
-            "Latest user request:",
-            request.latest_user_text() or "(none)",
-        ]
-    ).strip()
-
-
-def _specialist_prompt(
-    *,
-    specialist_id: str,
-    request_text: str,
-    transcript_summary: str,
-    current_brief: str | None = None,
-) -> str:
-    lines = [
-        f"You are the {specialist_id} working inside the orchestration proxy.",
-        "The orchestrator distilled the host conversation for you.",
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Assigned request:",
-        request_text or "(none)",
-    ]
-    if current_brief:
-        lines.extend(
-            [
-                "",
-                "Current progress:",
-                current_brief,
-            ]
-        )
-    return "\n".join(lines).strip()
-
-
-def _workflow_step_prompt(
-    *,
-    workflow_id: str,
-    agent_id: str,
-    goal: str,
-    current_brief: str,
-    transcript_summary: str,
-    prior_outputs: tuple[str, ...],
-) -> str:
-    lines = [
-        f"You are {agent_id} working inside workflow {workflow_id}.",
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Overall goal:",
-        goal or "(none)",
-        "",
-        "Current brief:",
-        current_brief or "(none)",
-    ]
-    if prior_outputs:
-        lines.extend(
-            [
-                "",
-                "Prior workflow outputs:",
-                *prior_outputs[-6:],
-            ]
-        )
-    return "\n".join(lines).strip()
-
-
-def _group_chat_turn_prompt(
-    *,
-    workflow_id: str,
-    agent_id: str,
-    goal: str,
-    transcript_summary: str,
-    current_brief: str,
-    prior_outputs: tuple[str, ...],
-) -> str:
-    lines = [
-        f"You are {agent_id} speaking in group chat workflow {workflow_id}.",
-        "Respond to the current discussion and move the decision forward.",
-        "",
-        "Conversation summary:",
-        transcript_summary or "(none)",
-        "",
-        "Goal:",
-        goal or "(none)",
-        "",
-        "Current brief:",
-        current_brief or "(none)",
-    ]
-    if prior_outputs:
-        lines.extend(
-            [
-                "",
-                "Discussion so far:",
-                *prior_outputs[-8:],
-            ]
-        )
-    return "\n".join(lines).strip()
-
-
-def _workflow_manager_instructions(participants: tuple[str, ...]) -> str:
-    return "\n".join(
-        [
-            "You are selecting the next specialist for an adaptive workflow.",
-            "Return JSON only.",
-            f"Allowed agents: {', '.join(participants) or '(none)'}",
-            (
-                'Return {"agent_id":"<agent>" } to continue or '
-                '{"agent_id":null} to finish.'
-            ),
-        ]
-    )
-
-
-def _workflow_manager_prompt(
-    *,
-    workflow_id: str,
-    goal: str,
-    current_brief: str,
-    participants: tuple[str, ...],
-    prior_outputs: tuple[str, ...],
-) -> str:
-    return "\n".join(
-        [
-            f"Workflow: {workflow_id}",
-            f"Goal: {goal or '(none)'}",
-            f"Current brief: {current_brief or '(none)'}",
-            f"Available specialists: {', '.join(participants) or '(none)'}",
-            "",
-            "Progress so far:",
-            *(prior_outputs[-8:] or ["(none)"]),
-        ]
-    ).strip()
-
-
-def _handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
-    return "\n".join(
-        [
-            "You are choosing the next specialist handoff.",
-            "Return JSON only.",
-            f"Allowed next agents: {', '.join(allowed) or '(none)'}",
-            (
-                'Return {"agent_id":"<agent>" } to continue or '
-                '{"agent_id":null} to finish.'
-            ),
-        ]
-    )
-
-
-def _handoff_selection_prompt(
-    *,
-    workflow_id: str,
-    current_agent: str,
-    goal: str,
-    current_brief: str,
-    prior_outputs: tuple[str, ...],
-    allowed: tuple[str, ...],
-) -> str:
-    return "\n".join(
-        [
-            f"Workflow: {workflow_id}",
-            f"You are {current_agent}.",
-            f"Goal: {goal or '(none)'}",
-            f"Current brief: {current_brief or '(none)'}",
-            f"You may hand off to: {', '.join(allowed) or '(none)'}",
-            "",
-            "Work so far:",
-            *(prior_outputs[-8:] or ["(none)"]),
-        ]
-    ).strip()
-
-
-def _parse_agent_selection(
-    raw: str | None, *, participants: tuple[str, ...]
-) -> str | None:
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    candidate = payload.get("agent_id")
-    if candidate is None:
-        return None
-    if not isinstance(candidate, str):
-        return None
-    stripped = candidate.strip()
-    if not stripped or stripped.casefold() in {"none", "null", "finish", "done"}:
-        return None
-    if stripped not in participants:
-        return None
-    return stripped
-
-
-def _summary_instructions() -> str:
-    return "\n".join(
-        [
-            "Summarize the completed work for the host user.",
-            "Be concise and concrete.",
-            "State what was decided or produced.",
-            "Do not mention hidden chain-of-thought.",
-        ]
-    )
-
-
-def _delegation_summary_prompt(
-    *, request_text: str, specialist_id: str, specialist_text: str
-) -> str:
-    return "\n".join(
-        [
-            f"The specialist {specialist_id} completed delegated work.",
-            "",
-            "Original request:",
-            request_text or "(none)",
-            "",
-            "Specialist output:",
-            specialist_text or "(none)",
-            "",
-            "Write the final host-facing answer.",
-        ]
-    ).strip()
-
-
-def _workflow_summary_prompt(
-    *, workflow_id: str, goal: str, outputs: tuple[str, ...]
-) -> str:
-    return "\n".join(
-        [
-            f"The workflow {workflow_id} completed.",
-            "",
-            "Goal:",
-            goal or "(none)",
-            "",
-            "Workflow outputs:",
-            *(outputs or ("(none)",)),
-            "",
-            "Write the final host-facing answer.",
-        ]
-    ).strip()
-
 
 def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
     scope["response"] = value

@@ -142,10 +142,34 @@ class ProxyGroupChatWorkflowExecutor:
                     return
             workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
+            if result_sink is not None:
+                next_turn = turn_index + 1
+                workflow_progress = None
+                if next_turn < len(sequence):
+                    workflow_progress = ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=next_turn,
+                        agent_id=agent_id,
+                        goal=goal,
+                        current_brief=current_brief,
+                        decision_history=(
+                            loop_state.worklog if loop_state is not None else ()
+                        ),
+                        workflow_outputs=tuple(workflow_outputs),
+                    )
+                result_sink(
+                    ProxyMoveResult(
+                        worklog_lines=(workflow_outputs[-1],),
+                        current_brief=current_brief,
+                        workflow_progress=workflow_progress,
+                    )
+                )
+                return
         if result_sink is not None:
             result_sink(
                 ProxyMoveResult(
-                    worklog_lines=tuple(workflow_outputs),
+                    worklog_lines=(),
                     current_brief=current_brief,
                 )
             )

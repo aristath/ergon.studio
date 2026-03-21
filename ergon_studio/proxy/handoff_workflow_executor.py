@@ -82,12 +82,29 @@ class ProxyHandoffWorkflowExecutor:
             if continuation and continuation.step_index is not None
             else 0
         )
-        current_agent: str | None = (
-            continuation.agent_id
-            if continuation is not None and continuation.agent_id is not None
-            else workflow_start_agent_for_definition(definition)
-            or (participants[0] if participants else "reviewer")
-        )
+        if continuation is not None and pending is not None:
+            current_agent: str | None = continuation.agent_id
+        elif continuation is not None and continuation.agent_id is not None:
+            current_agent = await self._select_handoff_target(
+                workflow_id=definition.id,
+                current_agent=continuation.agent_id,
+                goal=goal,
+                current_brief=current_brief,
+                prior_outputs=tuple(workflow_outputs),
+                allowed=handoffs.get(
+                    continuation.agent_id,
+                    tuple(
+                        agent
+                        for agent in participants
+                        if agent != continuation.agent_id
+                    ),
+                ),
+                model_id_override=request.model,
+            )
+        else:
+            current_agent = workflow_start_agent_for_definition(definition) or (
+                participants[0] if participants else "reviewer"
+            )
 
         while round_index < max_rounds and current_agent:
             prompt = workflow_step_prompt(
@@ -146,7 +163,38 @@ class ProxyHandoffWorkflowExecutor:
             workflow_outputs.append(f"{current_agent}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             if current_agent in finalizers:
+                if result_sink is not None:
+                    result_sink(
+                        ProxyMoveResult(
+                            worklog_lines=(workflow_outputs[-1],),
+                            current_brief=current_brief,
+                        )
+                    )
+                    return
                 break
+            next_round = round_index + 1
+            if result_sink is not None:
+                result_sink(
+                    ProxyMoveResult(
+                        worklog_lines=(workflow_outputs[-1],),
+                        current_brief=current_brief,
+                        workflow_progress=ContinuationState(
+                            mode="workflow",
+                            workflow_id=definition.id,
+                            step_index=next_round,
+                            agent_id=current_agent,
+                            goal=goal,
+                            current_brief=current_brief,
+                            decision_history=(
+                                loop_state.worklog if loop_state is not None else ()
+                            ),
+                            workflow_outputs=tuple(workflow_outputs),
+                        )
+                        if next_round < max_rounds
+                        else None,
+                    )
+                )
+                return
             current_agent = await self._select_handoff_target(
                 workflow_id=definition.id,
                 current_agent=current_agent,
@@ -163,7 +211,7 @@ class ProxyHandoffWorkflowExecutor:
         if result_sink is not None:
             result_sink(
                 ProxyMoveResult(
-                    worklog_lines=tuple(workflow_outputs),
+                    worklog_lines=(),
                     current_brief=current_brief,
                 )
             )

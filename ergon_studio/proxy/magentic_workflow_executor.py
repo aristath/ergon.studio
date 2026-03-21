@@ -79,8 +79,10 @@ class ProxyMagenticWorkflowExecutor:
         )
         while round_index < max_rounds:
             agent_id: str | None
-            if continuation is not None and round_index == (
-                continuation.step_index or 0
+            if (
+                continuation is not None
+                and pending is not None
+                and round_index == (continuation.step_index or 0)
             ):
                 agent_id = continuation.agent_id
             else:
@@ -150,10 +152,33 @@ class ProxyMagenticWorkflowExecutor:
             workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             round_index += 1
+            if result_sink is not None:
+                workflow_progress = None
+                if round_index < max_rounds:
+                    workflow_progress = ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=round_index,
+                        agent_id=agent_id,
+                        goal=goal,
+                        current_brief=current_brief,
+                        decision_history=(
+                            loop_state.worklog if loop_state is not None else ()
+                        ),
+                        workflow_outputs=tuple(workflow_outputs),
+                    )
+                result_sink(
+                    ProxyMoveResult(
+                        worklog_lines=(workflow_outputs[-1],),
+                        current_brief=current_brief,
+                        workflow_progress=workflow_progress,
+                    )
+                )
+                return
         if result_sink is not None:
             result_sink(
                 ProxyMoveResult(
-                    worklog_lines=tuple(workflow_outputs),
+                    worklog_lines=(),
                     current_brief=current_brief,
                 )
             )

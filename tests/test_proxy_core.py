@@ -443,6 +443,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"debate",'
                             '"goal":"Choose an approach"}'
                         ),
+                        '{"mode":"workflow","workflow_id":"debate"}',
+                        '{"mode":"workflow","workflow_id":"debate"}',
+                        '{"mode":"workflow","workflow_id":"debate"}',
                         '{"mode":"act"}',
                         "Debate final summary",
                     ],
@@ -483,7 +486,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"workflow_id":"dynamic-open-ended","goal":"Build it"}'
                         ),
                         '{"agent_id":"architect"}',
+                        '{"mode":"workflow","workflow_id":"dynamic-open-ended"}',
                         '{"agent_id":"reviewer"}',
+                        '{"mode":"workflow","workflow_id":"dynamic-open-ended"}',
                         '{"agent_id":null}',
                         '{"mode":"act"}',
                         "Dynamic final summary",
@@ -523,6 +528,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"workflow_id":"specialist-handoff",'
                             '"goal":"Research and decide"}'
                         ),
+                        '{"mode":"workflow","workflow_id":"specialist-handoff"}',
                         '{"mode":"act"}',
                         "Handoff final summary",
                     ],

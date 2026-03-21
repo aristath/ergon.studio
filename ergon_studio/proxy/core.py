@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
@@ -61,8 +62,36 @@ ProxyEvent = (
     | ProxyToolCallEvent
     | ProxyFinishEvent
 )
-ProxyState = dict[str, Any]
 ProxyToolChoice = str | dict[str, Any] | None
+
+
+@dataclass
+class ProxyTurnState:
+    content: str = ""
+    reasoning: str = ""
+    mode: str = "act"
+    finish_reason: str = "stop"
+    tool_calls: tuple[ProxyToolCall, ...] = ()
+    output_items: tuple[ProxyOutputItemRef, ...] = field(default_factory=tuple)
+
+    def append_content(self, delta: str) -> None:
+        self.content += delta
+        self.record_output_item("content")
+
+    def set_content(self, content: str) -> None:
+        self.content = content
+        if content:
+            self.record_output_item("content")
+
+    def append_reasoning(self, delta: str) -> None:
+        self.reasoning += delta
+        self.record_output_item("reasoning")
+
+    def record_output_item(self, kind: str, *, call_id: str | None = None) -> None:
+        item = ProxyOutputItemRef(kind, call_id)
+        if item in self.output_items:
+            return
+        self.output_items = (*self.output_items, item)
 
 
 class ProxyOrchestrationCore:
@@ -83,20 +112,13 @@ class ProxyOrchestrationCore:
     ) -> ResponseStream[ProxyEvent, ProxyTurnResult]:
         if created_at is None:
             created_at = int(time.time())
-        state: ProxyState = {
-            "content": "",
-            "reasoning": "",
-            "mode": "act",
-            "finish_reason": "stop",
-            "tool_calls": (),
-            "output_items": (),
-        }
+        state = ProxyTurnState()
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
                 pending = latest_pending_continuation(request.messages)
                 if pending is not None:
-                    state["mode"] = pending.state.mode
+                    state.mode = pending.state.mode
                     async for event in self._execute_continuation(
                         request=request,
                         pending=pending,
@@ -106,7 +128,7 @@ class ProxyOrchestrationCore:
                         yield event
                 else:
                     plan = await self._plan_turn(request)
-                    state["mode"] = plan.mode
+                    state.mode = plan.mode
                     async for event in self._execute_plan(
                         request=request,
                         plan=plan,
@@ -115,24 +137,24 @@ class ProxyOrchestrationCore:
                     ):
                         yield event
             except ValueError as exc:
-                state["finish_reason"] = "error"
-                state["content"] = str(exc)
-                yield ProxyContentDeltaEvent(state["content"])
+                state.finish_reason = "error"
+                state.content = str(exc)
+                yield ProxyContentDeltaEvent(state.content)
             except Exception as exc:
-                state["finish_reason"] = "error"
-                state["content"] = f"{type(exc).__name__}: {exc}"
-                yield ProxyContentDeltaEvent(state["content"])
-            yield ProxyFinishEvent(state["finish_reason"])
+                state.finish_reason = "error"
+                state.content = f"{type(exc).__name__}: {exc}"
+                yield ProxyContentDeltaEvent(state.content)
+            yield ProxyFinishEvent(state.finish_reason)
 
         return ResponseStream(
             _events(),
             finalizer=lambda _updates: ProxyTurnResult(
-                finish_reason=state["finish_reason"],
-                content=state["content"],
-                reasoning=state["reasoning"],
-                mode=state["mode"],
-                tool_calls=state["tool_calls"],
-                output_items=state["output_items"],
+                finish_reason=state.finish_reason,
+                content=state.content,
+                reasoning=state.reasoning,
+                mode=state.mode,
+                tool_calls=state.tool_calls,
+                output_items=state.output_items,
             ),
         )
 
@@ -157,7 +179,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         if plan.mode == "delegate" and plan.agent_id is not None:
             async for event in self._execute_delegation(
@@ -182,7 +204,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         pending: PendingContinuation,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
         if continuation.mode == "workflow" and continuation.workflow_id is not None:
@@ -221,12 +243,11 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         notice = "Orchestrator: handling this turn directly.\n"
-        state["reasoning"] += notice
-        _record_output_item(state, "reasoning")
+        state.append_reasoning(notice)
         yield ProxyReasoningDeltaEvent(notice)
         prompt = _direct_reply_prompt(request)
         response_holder: dict[str, Any] = {}
@@ -241,8 +262,7 @@ class ProxyOrchestrationCore:
             pending_continuation=pending,
             final_response_sink=_response_holder_sink(response_holder),
         ):
-            state["content"] += delta
-            _record_output_item(state, "content")
+            state.append_content(delta)
             yield ProxyContentDeltaEvent(delta)
         response = response_holder.get("response")
         if response is not None:
@@ -261,14 +281,13 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         agent_id = plan.agent_id or "coder"
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
-        state["reasoning"] += intro
-        _record_output_item(state, "reasoning")
+        state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         specialist_prompt = _specialist_prompt(
             specialist_id=agent_id,
@@ -293,8 +312,7 @@ class ProxyOrchestrationCore:
             specialist_text += delta
             reasoning_delta = f"{agent_id}: {delta}" if first else delta
             first = False
-            state["reasoning"] += reasoning_delta
-            _record_output_item(state, "reasoning")
+            state.append_reasoning(reasoning_delta)
             yield ProxyReasoningDeltaEvent(reasoning_delta)
         response = response_holder.get("response")
         if response is not None:
@@ -326,9 +344,8 @@ class ProxyOrchestrationCore:
         )
         if not final_text:
             final_text = specialist_text.strip()
-        state["content"] = final_text
+        state.set_content(final_text)
         if final_text:
-            _record_output_item(state, "content")
             yield ProxyContentDeltaEvent(final_text)
 
     async def _execute_workflow(
@@ -337,18 +354,17 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         definition = self.registry.workflow_definitions.get(plan.workflow_id or "")
         if definition is None:
-            state["finish_reason"] = "error"
+            state.finish_reason = "error"
             error_text = f"Unknown workflow: {plan.workflow_id or '(none)'}"
-            state["content"] = error_text
+            state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
         intro = f"Orchestrator: running workflow {definition.id}.\n"
-        state["reasoning"] += intro
-        _record_output_item(state, "reasoning")
+        state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
 
         goal = plan.goal or request.latest_user_text() or ""
@@ -398,24 +414,23 @@ class ProxyOrchestrationCore:
         continuation: ContinuationState,
         pending: PendingContinuation,
         created_at: int,
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         del created_at
         definition = self.registry.workflow_definitions.get(
             continuation.workflow_id or ""
         )
         if definition is None:
-            state["finish_reason"] = "error"
+            state.finish_reason = "error"
             error_text = f"Unknown workflow: {continuation.workflow_id or '(none)'}"
-            state["content"] = error_text
+            state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
         agent_name = continuation.agent_id or "(unknown)"
         intro = (
             f"Orchestrator: continuing workflow {definition.id} with {agent_name}.\n"
         )
-        state["reasoning"] += intro
-        _record_output_item(state, "reasoning")
+        state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
 
         goal = continuation.goal or request.latest_user_text() or ""
@@ -472,7 +487,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        state: ProxyState,
+        state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
@@ -527,8 +542,7 @@ class ProxyOrchestrationCore:
                     agent_text += delta
                     reasoning_delta = f"{agent_id}: {delta}" if first else delta
                     first = False
-                    state["reasoning"] += reasoning_delta
-                    _record_output_item(state, "reasoning")
+                    state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
                 response = response_holder.get("response")
                 if response is not None:
@@ -569,7 +583,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        state: ProxyState,
+        state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
@@ -629,8 +643,7 @@ class ProxyOrchestrationCore:
                 agent_text += delta
                 reasoning_delta = f"{agent_id}: {delta}" if first else delta
                 first = False
-                state["reasoning"] += reasoning_delta
-                _record_output_item(state, "reasoning")
+                state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -670,7 +683,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        state: ProxyState,
+        state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
@@ -736,8 +749,7 @@ class ProxyOrchestrationCore:
                 agent_text += delta
                 reasoning_delta = f"{agent_id}: {delta}" if first else delta
                 first = False
-                state["reasoning"] += reasoning_delta
-                _record_output_item(state, "reasoning")
+                state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -778,7 +790,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         goal: str,
-        state: ProxyState,
+        state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
@@ -837,8 +849,7 @@ class ProxyOrchestrationCore:
                 agent_text += delta
                 reasoning_delta = f"{current_agent}: {delta}" if first else delta
                 first = False
-                state["reasoning"] += reasoning_delta
-                _record_output_item(state, "reasoning")
+                state.append_reasoning(reasoning_delta)
                 yield ProxyReasoningDeltaEvent(reasoning_delta)
             response = response_holder.get("response")
             if response is not None:
@@ -895,7 +906,7 @@ class ProxyOrchestrationCore:
         goal: str,
         current_brief: str,
         workflow_outputs: tuple[str, ...],
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> AsyncIterator[ProxyEvent]:
         final_text = await self._run_text_agent(
             agent_id="orchestrator",
@@ -910,9 +921,8 @@ class ProxyOrchestrationCore:
         )
         if not final_text:
             final_text = current_brief.strip()
-        state["content"] = final_text
+        state.set_content(final_text)
         if final_text:
-            _record_output_item(state, "content")
             yield ProxyContentDeltaEvent(final_text)
 
     async def _select_manager_agent(
@@ -1100,7 +1110,7 @@ class ProxyOrchestrationCore:
         response: Any,
         request: ProxyTurnRequest,
         continuation: ContinuationState,
-        state: ProxyState,
+        state: ProxyTurnState,
     ) -> list[ProxyToolCallEvent]:
         tool_calls = self._validated_tool_calls(
             extract_tool_calls(response),
@@ -1112,10 +1122,10 @@ class ProxyOrchestrationCore:
             encode_continuation_tool_call(tool_call, state=continuation)
             for tool_call in tool_calls
         )
-        state["tool_calls"] = encoded_calls
-        state["finish_reason"] = "tool_calls"
+        state.tool_calls = encoded_calls
+        state.finish_reason = "tool_calls"
         for call in encoded_calls:
-            _record_output_item(state, "tool_call", call_id=call.id)
+            state.record_output_item("tool_call", call_id=call.id)
         return [
             ProxyToolCallEvent(call=call, index=index)
             for index, call in enumerate(encoded_calls)
@@ -1164,19 +1174,6 @@ def _merge_preamble(preamble: str, prompt: str) -> str:
     if preamble and prompt:
         return f"{preamble}\n\n{prompt}"
     return preamble or prompt
-
-
-def _record_output_item(
-    state: ProxyState, kind: str, *, call_id: str | None = None
-) -> None:
-    current = state.get("output_items", ())
-    if not isinstance(current, tuple):
-        current = ()
-    item = ProxyOutputItemRef(kind=kind, call_id=call_id)
-    if item in current:
-        return
-    state["output_items"] = (*current, item)
-
 
 def _direct_reply_prompt(request: ProxyTurnRequest) -> str:
     return "\n".join(

@@ -9,7 +9,6 @@ from agent_framework import ResponseStream
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.proxy.agent_runner import ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
-    ContinuationState,
     PendingContinuation,
     latest_pending_continuation,
 )
@@ -38,6 +37,9 @@ from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
 from ergon_studio.proxy.turn_router import ProxyTurnRouter
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
+from ergon_studio.proxy.workflow_request_executor import (
+    ProxyWorkflowRequestExecutor,
+)
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
 from ergon_studio.registry import RuntimeRegistry
 
@@ -74,12 +76,6 @@ class ProxyOrchestrationCore:
             registry,
             run_text_agent=self._agent_runner.run_text_agent,
         )
-        self._turn_router = ProxyTurnRouter(
-            execute_direct=self._execute_direct,
-            execute_delegation=self._execute_delegation,
-            execute_workflow=self._execute_workflow,
-            execute_workflow_continuation=self._execute_workflow_continuation,
-        )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
@@ -108,6 +104,17 @@ class ProxyOrchestrationCore:
             execute_group_chat_workflow=self._group_chat_workflow_executor.execute,
             execute_magentic_workflow=self._magentic_workflow_executor.execute,
             execute_handoff_workflow=self._handoff_workflow_executor.execute,
+        )
+        self._workflow_request_executor = ProxyWorkflowRequestExecutor(
+            self._workflow_dispatcher,
+        )
+        self._turn_router = ProxyTurnRouter(
+            execute_direct=self._execute_direct,
+            execute_delegation=self._execute_delegation,
+            execute_workflow=self._workflow_request_executor.execute_workflow,
+            execute_workflow_continuation=(
+                self._workflow_request_executor.execute_workflow_continuation
+            ),
         )
 
     def stream_turn(
@@ -191,36 +198,5 @@ class ProxyOrchestrationCore:
             state=state,
             current_brief=current_brief,
             pending=pending,
-        ):
-            yield event
-
-    async def _execute_workflow(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        plan: ProxyTurnPlan,
-        state: ProxyTurnState,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workflow(
-            request=request,
-            workflow_id=plan.workflow_id,
-            goal=plan.goal or request.latest_user_text() or "",
-            state=state,
-        ):
-            yield event
-
-    async def _execute_workflow_continuation(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        continuation: ContinuationState,
-        pending: PendingContinuation,
-        state: ProxyTurnState,
-    ) -> AsyncIterator[ProxyEvent]:
-        async for event in self._workflow_dispatcher.execute_workflow_continuation(
-            request=request,
-            continuation=continuation,
-            pending=pending,
-            state=state,
         ):
             yield event

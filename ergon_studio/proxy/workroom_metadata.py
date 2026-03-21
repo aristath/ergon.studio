@@ -6,8 +6,8 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
 
 
-def workroom_orchestration_for_definition(definition: DefinitionDocument) -> str:
-    value = definition.metadata.get("orchestration", "sequential")
+def workroom_shape_for_definition(definition: DefinitionDocument) -> str:
+    value = definition.metadata.get("shape", "sequential")
     if isinstance(value, str) and value.strip():
         return value.strip()
     return "sequential"

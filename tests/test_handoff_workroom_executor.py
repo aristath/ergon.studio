@@ -177,7 +177,7 @@ def _definition() -> DefinitionDocument:
         path=Path("specialist-handoff.md"),
         metadata={
             "id": "specialist-handoff",
-            "orchestration": "handoff",
+            "shape": "handoff",
             "steps": ["architect", "coder"],
             "start_agent": "architect",
             "handoffs": {"architect": ["coder"]},
@@ -194,7 +194,7 @@ def _repeated_handoff_definition() -> DefinitionDocument:
         path=Path("specialist-handoff.md"),
         metadata={
             "id": "specialist-handoff",
-            "orchestration": "handoff",
+            "shape": "handoff",
             "steps": ["architect", "coder"],
             "start_agent": "architect",
             "handoffs": {"architect": ["architect", "coder"]},

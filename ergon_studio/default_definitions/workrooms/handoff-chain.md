@@ -1,7 +1,7 @@
 ---
 id: handoff-chain
 name: Handoff Chain
-orchestration: handoff
+shape: handoff
 steps:
   - researcher
   - architect

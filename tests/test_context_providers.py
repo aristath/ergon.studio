@@ -17,7 +17,7 @@ class _FakeContext:
 
 
 class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_orchestrator_profile_includes_specialists_and_workflows(
+    async def test_orchestrator_profile_includes_specialists_and_workrooms(
         self,
     ) -> None:
         registry = RuntimeRegistry(
@@ -46,7 +46,7 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=None,
-                    metadata={"id": "standard-build", "orchestration": "sequential"},
+                    metadata={"id": "standard-build", "shape": "sequential"},
                     body="",
                     sections={},
                 )

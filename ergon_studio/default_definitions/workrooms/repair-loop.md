@@ -1,7 +1,7 @@
 ---
 id: repair-loop
 name: Repair Loop
-orchestration: sequential
+shape: sequential
 steps:
   - reviewer
   - coder

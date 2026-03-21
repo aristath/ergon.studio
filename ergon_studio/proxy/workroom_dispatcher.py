@@ -19,7 +19,7 @@ from ergon_studio.proxy.turn_state import (
 )
 from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
 from ergon_studio.proxy.workroom_metadata import (
-    workroom_orchestration_for_definition,
+    workroom_shape_for_definition,
 )
 from ergon_studio.registry import RuntimeRegistry
 
@@ -158,8 +158,8 @@ class ProxyWorkroomDispatcher:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        orchestration = workroom_orchestration_for_definition(definition)
-        if orchestration in {"sequential", "grouped", "concurrent"}:
+        shape = workroom_shape_for_definition(definition)
+        if shape in {"sequential", "grouped", "concurrent"}:
             async for event in self._execute_grouped_workroom(
                 request=request,
                 definition=definition,
@@ -175,7 +175,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        if orchestration == "group_chat":
+        if shape == "group_chat":
             async for event in self._execute_group_chat_workroom(
                 request=request,
                 definition=definition,
@@ -191,7 +191,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        if orchestration == "magentic":
+        if shape == "magentic":
             async for event in self._execute_magentic_workroom(
                 request=request,
                 definition=definition,
@@ -207,7 +207,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        if orchestration == "handoff":
+        if shape == "handoff":
             async for event in self._execute_handoff_workroom(
                 request=request,
                 definition=definition,
@@ -223,7 +223,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        raise ValueError(f"unsupported workroom orchestration: {orchestration}")
+        raise ValueError(f"unsupported workroom shape: {shape}")
 
     def _resolve_workroom_definition(
         self,
@@ -256,7 +256,7 @@ def _workroom_notice(
 def _workroom_intro(definition: DefinitionDocument) -> str:
     if is_ad_hoc_workroom(definition.id):
         return "Orchestrator: opening an ad hoc workroom."
-    return f"Orchestrator: opening workroom template {definition.id}."
+    return f"Orchestrator: opening workroom {definition.id}."
 
 
 def _ad_hoc_workroom_definition(
@@ -274,11 +274,11 @@ def _ad_hoc_workroom_definition(
         expanded_staffing = specialists
     unique_roles = {agent_id for agent_id in expanded_staffing}
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
-        orchestration = "grouped"
+        shape = "grouped"
         steps = list(expanded_staffing)
         max_rounds = len(expanded_staffing)
     else:
-        orchestration = "group_chat"
+        shape = "group_chat"
         steps = list(specialists)
         max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(
@@ -287,7 +287,7 @@ def _ad_hoc_workroom_definition(
         metadata={
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
-            "orchestration": orchestration,
+            "shape": shape,
             "steps": steps,
             "max_rounds": max_rounds,
         },

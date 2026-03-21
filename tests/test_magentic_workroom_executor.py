@@ -140,7 +140,7 @@ def _definition() -> DefinitionDocument:
         path=Path("dynamic-open-ended.md"),
         metadata={
             "id": "dynamic-open-ended",
-            "orchestration": "magentic",
+            "shape": "magentic",
             "steps": ["architect", "coder"],
             "max_rounds": 2,
         },
@@ -155,7 +155,7 @@ def _single_round_definition() -> DefinitionDocument:
         path=Path("dynamic-open-ended.md"),
         metadata={
             "id": "dynamic-open-ended",
-            "orchestration": "magentic",
+            "shape": "magentic",
             "steps": ["coder"],
             "max_rounds": 1,
         },

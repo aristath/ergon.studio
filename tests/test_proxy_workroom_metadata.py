@@ -8,9 +8,9 @@ from ergon_studio.proxy.workroom_metadata import (
     workroom_finalizers_for_definition,
     workroom_handoffs_for_definition,
     workroom_max_rounds_for_definition,
-    workroom_orchestration_for_definition,
     workroom_participants_for_definition,
     workroom_selection_sequence_for_definition,
+    workroom_shape_for_definition,
     workroom_start_agent_for_definition,
 )
 
@@ -22,7 +22,7 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             path=Path("specialist-handoff.md"),
             metadata={
                 "id": "specialist-handoff",
-                "orchestration": "handoff",
+                "shape": "handoff",
                 "step_groups": [
                     [" architect ", "reviewer"],
                     ["reviewer", "brainstormer"],
@@ -39,7 +39,7 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             sections={"Purpose": "Handoff."},
         )
 
-        self.assertEqual(workroom_orchestration_for_definition(definition), "handoff")
+        self.assertEqual(workroom_shape_for_definition(definition), "handoff")
         self.assertEqual(
             workroom_participants_for_definition(definition),
             ("architect", "reviewer", "brainstormer"),

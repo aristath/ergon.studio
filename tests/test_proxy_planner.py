@@ -346,7 +346,7 @@ def _make_registry():
                 metadata={
                     "id": "best-of-n",
                     "name": "Best Of N",
-                    "orchestration": "grouped",
+                    "shape": "grouped",
                     "selection_hints": ["multiple_attempts"],
                     "step_groups": [["coder", "coder"], ["reviewer"]],
                 },
@@ -359,7 +359,7 @@ def _make_registry():
                 metadata={
                     "id": "standard-build",
                     "name": "Standard Build",
-                    "orchestration": "sequential",
+                    "shape": "sequential",
                     "delivery_candidate": True,
                     "selection_hints": ["staged_delivery"],
                     "steps": ["architect", "coder"],

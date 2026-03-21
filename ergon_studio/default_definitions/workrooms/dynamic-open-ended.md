@@ -1,7 +1,7 @@
 ---
 id: dynamic-open-ended
 name: Dynamic Open Ended
-orchestration: magentic
+shape: magentic
 steps:
   - researcher
   - architect

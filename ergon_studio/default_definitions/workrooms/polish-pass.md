@@ -1,7 +1,7 @@
 ---
 id: polish-pass
 name: Polish Pass
-orchestration: sequential
+shape: sequential
 steps:
   - reviewer
   - coder

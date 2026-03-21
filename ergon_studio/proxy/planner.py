@@ -39,13 +39,13 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
         hints = ", ".join(
             workroom_selection_hints_for_metadata(definition.metadata)
         ) or "none"
-        orchestration = definition.metadata.get("orchestration", "unknown")
+        shape = definition.metadata.get("shape", "unknown")
         delivery_candidate = workroom_delivery_candidate_for_metadata(
             definition.metadata
         )
         acceptance_mode = workroom_acceptance_mode_for_metadata(definition.metadata)
         workroom_lines.append(
-            f"- {workroom_id}: orchestration={orchestration} "
+            f"- {workroom_id}: shape={shape} "
             f"delivery_candidate={delivery_candidate} "
             f"acceptance={acceptance_mode} "
             f"selection_hints={hints}"
@@ -79,7 +79,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             '- "delegate": message one specialist with a focused assignment.',
             (
                 '- "open_workroom": open a staffed collaboration room. '
-                "You may target a named template or leave target null for an "
+                "You may target a named preset or leave target null for an "
                 "ad-hoc room."
             ),
             '- "continue_workroom": continue the room already in progress.',
@@ -92,7 +92,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "very next move."
             ),
             (
-                "- target names the specialist, a workroom template, or "
+                "- target names the specialist, a workroom preset, or "
                 "'current' for continue_workroom."
             ),
             (
@@ -142,7 +142,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "request and transcript."
             ),
             "",
-            "Available workroom templates:",
+            "Available workroom presets:",
             *workroom_lines,
             "",
             "Available specialists:",

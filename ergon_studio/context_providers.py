@@ -67,8 +67,8 @@ class AgentProfileContextProvider(BaseContextProvider):
             for workroom_id, definition in sorted(
                 self.registry.workroom_definitions.items()
             ):
-                orchestration = str(definition.metadata.get("orchestration", "unknown"))
-                workroom_summaries.append(f"{workroom_id}({orchestration})")
+                shape = str(definition.metadata.get("shape", "unknown"))
+                workroom_summaries.append(f"{workroom_id}({shape})")
             lines.append(
                 "Available specialists: "
                 + (", ".join(agent_summaries) if agent_summaries else "none")

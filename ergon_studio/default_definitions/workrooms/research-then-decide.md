@@ -1,7 +1,7 @@
 ---
 id: research-then-decide
 name: Research And Synthesis
-orchestration: sequential
+shape: sequential
 steps:
   - researcher
   - architect

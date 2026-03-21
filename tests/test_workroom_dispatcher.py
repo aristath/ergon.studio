@@ -82,7 +82,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
         self.assertIsInstance(events[1], ProxyContentDeltaEvent)
         self.assertIn(
-            "opening workroom template standard-build",
+            "opening workroom standard-build",
             state.reasoning.lower(),
         )
 
@@ -142,7 +142,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                     kwargs["definition"].id,
                     kwargs["goal"],
                     tuple(kwargs["definition"].metadata["steps"]),
-                    str(kwargs["definition"].metadata["orchestration"]),
+                    str(kwargs["definition"].metadata["shape"]),
                 )
             )
             yield ProxyContentDeltaEvent("done")
@@ -223,7 +223,7 @@ def _registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "orchestration": "sequential",
+                    "shape": "sequential",
                     "steps": ["architect"],
                 },
                 body="## Purpose\nBuild.",

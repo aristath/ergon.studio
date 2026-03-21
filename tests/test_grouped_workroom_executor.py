@@ -410,7 +410,7 @@ def _definition() -> DefinitionDocument:
         path=Path("standard-build.md"),
         metadata={
             "id": "standard-build",
-            "orchestration": "sequential",
+            "shape": "sequential",
             "steps": ["architect", "coder"],
         },
         body="## Purpose\nBuild.",
@@ -424,7 +424,7 @@ def _best_of_n_definition() -> DefinitionDocument:
         path=Path("best-of-n.md"),
         metadata={
             "id": "best-of-n",
-            "orchestration": "grouped",
+            "shape": "grouped",
             "step_groups": [["coder", "coder", "coder"]],
         },
         body="## Purpose\nCompare attempts.",
@@ -438,7 +438,7 @@ def _best_of_n_review_definition() -> DefinitionDocument:
         path=Path("best-of-n.md"),
         metadata={
             "id": "best-of-n",
-            "orchestration": "grouped",
+            "shape": "grouped",
             "step_groups": [["coder", "coder"], ["reviewer"]],
         },
         body="## Purpose\nCompare attempts.",
@@ -452,7 +452,7 @@ def _review_then_polish_definition() -> DefinitionDocument:
         path=Path("best-of-n.md"),
         metadata={
             "id": "best-of-n",
-            "orchestration": "grouped",
+            "shape": "grouped",
             "step_groups": [["coder", "coder"], ["reviewer"], ["coder"]],
         },
         body="## Purpose\nCompare, select, then polish.",

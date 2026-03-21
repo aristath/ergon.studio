@@ -174,7 +174,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("workroom template standard-build", reasoning)
+        self.assertIn("workroom standard-build", reasoning)
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(result.content, "Workroom final summary")
@@ -243,7 +243,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             path=Path("reviewed-build.md"),
             metadata={
                 "id": "reviewed-build",
-                "orchestration": "concurrent",
+                "shape": "concurrent",
                 "step_groups": [["architect", "coder", "reviewer"]],
             },
             body="## Purpose\nReviewed build.",
@@ -1043,7 +1043,7 @@ class _FakeRegistry:
                     path=Path("standard-build.md"),
                     metadata={
                         "id": "standard-build",
-                        "orchestration": "sequential",
+                        "shape": "sequential",
                         "steps": ["architect", "coder"],
                     },
                     body="## Purpose\nBuild.",
@@ -1109,7 +1109,7 @@ def _grouped_workflow_registry():
         path=Path("grouped-build.md"),
         metadata={
             "id": "grouped-build",
-            "orchestration": "concurrent",
+            "shape": "concurrent",
             "step_groups": [["architect", "coder", "reviewer"]],
         },
         body="## Purpose\nGrouped build.",
@@ -1175,7 +1175,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 path=Path("debate.md"),
                 metadata={
                     "id": "debate",
-                    "orchestration": "group_chat",
+                    "shape": "group_chat",
                     "step_groups": [["architect", "brainstormer", "reviewer"]],
                     "selection_sequence": [
                         "architect",
@@ -1193,7 +1193,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 path=Path("dynamic-open-ended.md"),
                 metadata={
                     "id": "dynamic-open-ended",
-                    "orchestration": "magentic",
+                    "shape": "magentic",
                     "step_groups": [["architect", "reviewer"]],
                     "max_rounds": 3,
                 },
@@ -1205,7 +1205,7 @@ def _advanced_workflow_registry() -> RuntimeRegistry:
                 path=Path("specialist-handoff.md"),
                 metadata={
                     "id": "specialist-handoff",
-                    "orchestration": "handoff",
+                    "shape": "handoff",
                     "step_groups": [["architect", "reviewer"]],
                     "start_agent": "architect",
                     "finalizers": ["reviewer"],

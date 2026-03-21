@@ -16,7 +16,7 @@ class WorkroomCompilerTests(unittest.TestCase):
                 """---
 id: best-of-n
 name: Best of N
-orchestration: concurrent
+shape: concurrent
 step_groups:
   - [coder, coder, coder]
   - [reviewer]
@@ -60,7 +60,7 @@ Broken.
                 """---
 id: broken
 name: Broken
-orchestration: sequential
+shape: sequential
 ---
 ## Purpose
 Broken.
@@ -81,7 +81,7 @@ Broken.
                 """---
 id: debate
 name: Debate
-orchestration: group_chat
+shape: group_chat
 step_groups:
   - [architect, brainstormer, reviewer]
 ---

@@ -1,7 +1,7 @@
 ---
 id: debate
 name: Debate
-orchestration: group_chat
+shape: group_chat
 steps:
   - architect
   - coder

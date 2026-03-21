@@ -1,7 +1,7 @@
 ---
 id: best-of-n
 name: Best Of N
-orchestration: grouped
+shape: grouped
 step_groups:
   - [coder, coder, coder]
   - [reviewer]

@@ -14,10 +14,9 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     latest_pending_continuation,
 )
-from ergon_studio.proxy.group_chat_workroom_executor import (
-    ProxyGroupChatWorkroomExecutor,
+from ergon_studio.proxy.discussion_workroom_executor import (
+    ProxyDiscussionWorkroomExecutor,
 )
-from ergon_studio.proxy.grouped_workroom_executor import ProxyGroupedWorkroomExecutor
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -36,6 +35,7 @@ from ergon_studio.proxy.orchestrator_tools import (
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.staged_workroom_executor import ProxyStagedWorkroomExecutor
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
@@ -79,20 +79,20 @@ class ProxyOrchestrationCore:
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
         )
-        grouped_workroom_executor = ProxyGroupedWorkroomExecutor(
+        staged_workroom_executor = ProxyStagedWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
         )
-        group_chat_workroom_executor = ProxyGroupChatWorkroomExecutor(
+        discussion_workroom_executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
         )
         workroom_dispatcher = ProxyWorkroomDispatcher(
             registry,
-            execute_grouped_workroom=grouped_workroom_executor.execute,
-            execute_group_chat_workroom=group_chat_workroom_executor.execute,
+            execute_staged_workroom=staged_workroom_executor.execute,
+            execute_discussion_workroom=discussion_workroom_executor.execute,
         )
         self._workroom_request_executor = ProxyWorkroomRequestExecutor(
             workroom_dispatcher

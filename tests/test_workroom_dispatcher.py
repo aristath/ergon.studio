@@ -20,8 +20,8 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_workroom_reports_unknown_workroom(self) -> None:
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workroom=_empty_handler,
-            execute_group_chat_workroom=_empty_handler,
+            execute_staged_workroom=_empty_handler,
+            execute_discussion_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -55,8 +55,8 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workroom=_grouped_handler,
-            execute_group_chat_workroom=_empty_handler,
+            execute_staged_workroom=_grouped_handler,
+            execute_discussion_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -97,8 +97,8 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workroom=_empty_handler,
-            execute_group_chat_workroom=_group_chat_handler,
+            execute_staged_workroom=_empty_handler,
+            execute_discussion_workroom=_group_chat_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -143,8 +143,8 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         dispatcher = ProxyWorkroomDispatcher(
             _registry(),
-            execute_grouped_workroom=_grouped_handler,
-            execute_group_chat_workroom=_empty_handler,
+            execute_staged_workroom=_grouped_handler,
+            execute_discussion_workroom=_empty_handler,
         )
         request = ProxyTurnRequest(
             model="qwen",

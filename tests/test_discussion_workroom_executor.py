@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.proxy.group_chat_workroom_executor import (
-    ProxyGroupChatWorkroomExecutor,
+from ergon_studio.proxy.discussion_workroom_executor import (
+    ProxyDiscussionWorkroomExecutor,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -16,7 +16,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.turn_state import ProxyTurnState
 
 
-class GroupChatWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
+class DiscussionWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_sequence_and_emits_summary(self) -> None:
         streamed_agents: list[str] = []
         summary_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -34,7 +34,7 @@ class GroupChatWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             )
             yield ProxyContentDeltaEvent("Shared result")
 
-        executor = ProxyGroupChatWorkroomExecutor(
+        executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workroom_summary=_emit_workroom_summary,
@@ -86,7 +86,7 @@ class GroupChatWorkroomExecutorTests(unittest.IsolatedAsyncioTestCase):
             )
             yield ProxyContentDeltaEvent("Shared result")
 
-        executor = ProxyGroupChatWorkroomExecutor(
+        executor = ProxyDiscussionWorkroomExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
             emit_workroom_summary=_emit_workroom_summary,

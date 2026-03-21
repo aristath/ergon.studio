@@ -19,7 +19,7 @@ from ergon_studio.proxy.playbook_staffing import (
     participant_by_label,
     participant_context,
 )
-from ergon_studio.proxy.prompts import group_chat_turn_prompt
+from ergon_studio.proxy.prompts import discussion_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
@@ -41,7 +41,7 @@ ProxyEvent = (
 )
 
 
-class ProxyGroupChatWorkroomExecutor:
+class ProxyDiscussionWorkroomExecutor:
     def __init__(
         self,
         *,
@@ -129,7 +129,7 @@ class ProxyGroupChatWorkroomExecutor:
             participant = participant_by_label(participants, sequence[turn_index])
             if participant is None:
                 continue
-            prompt = group_chat_turn_prompt(
+            prompt = discussion_turn_prompt(
                 workroom_id=definition.id,
                 agent_id=participant.agent_id,
                 role_instance_label=(

@@ -42,7 +42,7 @@ class _AgentAttemptResult:
     response: Any
 
 
-class ProxyGroupedWorkroomExecutor:
+class ProxyStagedWorkroomExecutor:
     def __init__(
         self,
         *,

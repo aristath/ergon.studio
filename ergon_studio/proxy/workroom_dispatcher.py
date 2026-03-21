@@ -41,12 +41,12 @@ class ProxyWorkroomDispatcher:
         self,
         registry: RuntimeRegistry,
         *,
-        execute_grouped_workroom: WorkroomHandler,
-        execute_group_chat_workroom: WorkroomHandler,
+        execute_staged_workroom: WorkroomHandler,
+        execute_discussion_workroom: WorkroomHandler,
     ) -> None:
         self.registry = registry
-        self._execute_grouped_workroom = execute_grouped_workroom
-        self._execute_group_chat_workroom = execute_group_chat_workroom
+        self._execute_staged_workroom = execute_staged_workroom
+        self._execute_discussion_workroom = execute_discussion_workroom
 
     async def execute_workroom(
         self,
@@ -156,7 +156,7 @@ class ProxyWorkroomDispatcher:
     ) -> AsyncIterator[ProxyEvent]:
         shape = workroom_shape_for_definition(definition)
         if shape == "staged":
-            async for event in self._execute_grouped_workroom(
+            async for event in self._execute_staged_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,
@@ -172,7 +172,7 @@ class ProxyWorkroomDispatcher:
                 yield event
             return
         if shape == "discussion":
-            async for event in self._execute_group_chat_workroom(
+            async for event in self._execute_discussion_workroom(
                 request=request,
                 definition=definition,
                 goal=goal,

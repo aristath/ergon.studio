@@ -156,7 +156,7 @@ def workroom_round_prompt(
     return "\n".join(lines).strip()
 
 
-def group_chat_turn_prompt(
+def discussion_turn_prompt(
     *,
     workroom_id: str,
     agent_id: str,

@@ -41,6 +41,7 @@ def resolve_agent_tool_policy(
     tool_choice: str | dict | None,
     parallel_tool_calls: bool | None,
 ) -> tuple[tuple[ProxyFunctionTool, ...], dict]:
+    tool_choice = validate_tool_choice(tool_choice, tools=tools)
     resolved_tools = tools
     run_options: dict = {}
     if tool_choice == "none":

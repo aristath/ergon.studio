@@ -64,3 +64,11 @@ class ProxyToolPolicyTests(unittest.TestCase):
 
         self.assertEqual(tools, ())
         self.assertEqual(options, {"tool_choice": "none"})
+
+    def test_resolve_agent_tool_policy_rejects_malformed_function_selector(self) -> None:
+        with self.assertRaisesRegex(ValueError, "function object"):
+            resolve_agent_tool_policy(
+                tools=(_tool("read_file"),),
+                tool_choice={"type": "function"},
+                parallel_tool_calls=None,
+            )

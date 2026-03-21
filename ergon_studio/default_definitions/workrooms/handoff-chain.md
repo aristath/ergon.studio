@@ -2,7 +2,7 @@
 id: handoff-chain
 name: Handoff Chain
 shape: staged
-steps:
+stages:
   - researcher
   - architect
   - coder

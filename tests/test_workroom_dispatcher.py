@@ -90,7 +90,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 (
                     kwargs["definition"].id,
                     kwargs["goal"],
-                    tuple(kwargs["definition"].metadata["steps"]),
+                    tuple(kwargs["definition"].metadata["turns"]),
                 )
             )
             yield ProxyContentDeltaEvent("done")
@@ -135,7 +135,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                 (
                     kwargs["definition"].id,
                     kwargs["goal"],
-                    tuple(kwargs["definition"].metadata["steps"]),
+                    tuple(kwargs["definition"].metadata["stages"]),
                     str(kwargs["definition"].metadata["shape"]),
                 )
             )
@@ -216,7 +216,7 @@ def _registry() -> RuntimeRegistry:
                 metadata={
                     "id": "standard-build",
                     "shape": "staged",
-                    "steps": ["architect"],
+                    "stages": ["architect"],
                 },
                 body="## Purpose\nBuild.",
                 sections={"Purpose": "Build."},

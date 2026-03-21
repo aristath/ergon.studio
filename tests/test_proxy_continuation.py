@@ -26,7 +26,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 mode="workroom",
                 agent_id="architect",
                 workroom_id="standard-build",
-                step_index=2,
+                progress_index=2,
             ),
         )
 
@@ -39,8 +39,8 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertEqual(decoded.workroom_specialists, ())
         self.assertEqual(decoded.last_stage_outputs, ())
         self.assertFalse(decoded.last_stage_parallel_attempts)
-        self.assertEqual(decoded.step_index, 2)
-        self.assertEqual(decoded.agent_index, None)
+        self.assertEqual(decoded.progress_index, 2)
+        self.assertEqual(decoded.member_index, None)
         self.assertEqual(decoded.request_text, None)
         self.assertEqual(decoded.goal, None)
         self.assertEqual(decoded.current_brief, None)
@@ -62,8 +62,8 @@ class ProxyContinuationTests(unittest.TestCase):
                 workroom_request="Polish the selected candidate.",
                 last_stage_outputs=("coder[1]: Idea A", "coder[2]: Idea B"),
                 last_stage_parallel_attempts=True,
-                step_index=1,
-                agent_index=0,
+                progress_index=1,
+                member_index=0,
                 request_text="Implement A",
                 goal="Build calculator",
                 current_brief="Updating main.py",
@@ -86,7 +86,7 @@ class ProxyContinuationTests(unittest.TestCase):
         )
         self.assertTrue(decoded.last_stage_parallel_attempts)
         self.assertEqual(decoded.workroom_outputs, ("architect: use main.py",))
-        self.assertEqual(decoded.agent_index, 0)
+        self.assertEqual(decoded.member_index, 0)
 
     def test_latest_continuation_uses_latest_tool_message(self) -> None:
         first_call = encode_continuation_tool_call(

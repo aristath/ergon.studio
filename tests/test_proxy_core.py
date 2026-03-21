@@ -957,7 +957,7 @@ class _FakeRegistry:
                     metadata={
                         "id": "standard-build",
                         "shape": "staged",
-                        "steps": ["architect", "coder"],
+                        "stages": ["architect", "coder"],
                     },
                     body="## Purpose\nBuild.",
                     sections={"Purpose": "Build."},
@@ -1023,7 +1023,7 @@ def _grouped_workroom_registry():
         metadata={
             "id": "grouped-build",
             "shape": "staged",
-            "step_groups": [["architect", "coder", "reviewer"]],
+            "stages": [["architect", "coder", "reviewer"]],
         },
         body="## Purpose\nGrouped build.",
         sections={"Purpose": "Grouped build."},
@@ -1096,7 +1096,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "debate",
                     "shape": "discussion",
-                    "steps": [
+                    "turns": [
                         "architect",
                         "brainstormer",
                         "architect",
@@ -1113,7 +1113,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "dynamic-open-ended",
                     "shape": "discussion",
-                    "steps": ["architect", "reviewer"],
+                    "turns": ["architect", "reviewer"],
                     "max_rounds": 3,
                 },
                 body="## Purpose\nAdaptive.",
@@ -1125,7 +1125,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "handoff-chain",
                     "shape": "staged",
-                    "step_groups": [["researcher"], ["reviewer"]],
+                    "stages": [["researcher"], ["reviewer"]],
                     "max_rounds": 3,
                 },
                 body="## Purpose\nHandoff.",

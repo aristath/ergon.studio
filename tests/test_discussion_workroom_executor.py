@@ -143,7 +143,7 @@ def _definition() -> DefinitionDocument:
         metadata={
             "id": "debate",
             "shape": "discussion",
-            "steps": ["architect", "reviewer"],
+            "turns": ["architect", "reviewer"],
         },
         body="## Purpose\nDebate.",
         sections={"Purpose": "Debate."},

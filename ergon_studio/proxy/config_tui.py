@@ -706,7 +706,7 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         f"id: {definition_id}\n"
         f"name: {definition_id.replace('-', ' ').title()}\n"
         "shape: staged\n"
-        "steps:\n"
+        "stages:\n"
         "  - coder\n"
         "  - reviewer\n"
         "---\n\n"

@@ -20,10 +20,7 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             metadata={
                 "id": "discussion-room",
                 "shape": "discussion",
-                "step_groups": [
-                    [" architect ", "reviewer"],
-                    ["reviewer", "brainstormer"],
-                ],
+                "turns": [" architect ", "reviewer", "reviewer", "brainstormer"],
                 "max_rounds": 6,
             },
             body="## Purpose\nDiscussion.",

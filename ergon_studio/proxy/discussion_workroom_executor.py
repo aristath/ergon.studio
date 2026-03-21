@@ -102,8 +102,8 @@ class ProxyDiscussionWorkroomExecutor:
         else:
             sequence = sequence[:max_rounds]
         start_turn = (
-            continuation.step_index
-            if continuation and continuation.step_index is not None
+            continuation.progress_index
+            if continuation and continuation.progress_index is not None
             else 0
         )
         current_brief = (
@@ -178,7 +178,7 @@ class ProxyDiscussionWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        step_index=turn_index,
+                        progress_index=turn_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
                         goal=goal,
@@ -210,7 +210,7 @@ class ProxyDiscussionWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        step_index=next_turn,
+                        progress_index=next_turn,
                         agent_id=(
                             next_participant.agent_id
                             if next_participant is not None

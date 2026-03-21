@@ -2,7 +2,7 @@
 id: debate
 name: Debate
 shape: discussion
-steps:
+turns:
   - architect
   - coder
   - critic

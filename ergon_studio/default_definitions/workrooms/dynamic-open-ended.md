@@ -2,7 +2,7 @@
 id: dynamic-open-ended
 name: Dynamic Open Ended
 shape: discussion
-steps:
+turns:
   - researcher
   - architect
   - coder

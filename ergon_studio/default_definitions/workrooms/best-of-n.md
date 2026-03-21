@@ -2,7 +2,7 @@
 id: best-of-n
 name: Best Of N
 shape: staged
-step_groups:
+stages:
   - [coder, coder, coder]
   - [reviewer]
   - [coder]

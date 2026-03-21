@@ -2,7 +2,7 @@
 id: standard-build
 name: Standard Build
 shape: staged
-steps:
+stages:
   - architect
   - coder
   - reviewer

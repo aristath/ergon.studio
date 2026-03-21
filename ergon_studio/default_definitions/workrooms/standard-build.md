@@ -2,7 +2,7 @@
 id: standard-build
 name: Staged Build
 shape: staged
-steps:
+stages:
   - architect
   - coder
   - tester
@@ -19,5 +19,5 @@ Common delivery playbook for new features or meaningful code changes.
 - the work is non-trivial but not chaotic enough to require open-ended staffing
 
 ## Notes
-This is a playbook, not a law. The lead developer may skip steps, revisit them,
+This is a playbook, not a law. The lead developer may skip stages, revisit them,
 or use a different tactic entirely.

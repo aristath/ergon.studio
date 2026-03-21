@@ -24,7 +24,7 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
+from ergon_studio.workroom_layout import staged_groups_for_definition
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -79,19 +79,19 @@ class ProxyStagedWorkroomExecutor:
             if continuation is not None
             else specialist_counts
         )
-        step_groups = _filtered_step_groups(
+        stage_groups = _filtered_stage_groups(
             definition,
             staffed_specialists,
             staffed_specialist_counts,
         )
         start_index = (
-            continuation.step_index
-            if continuation and continuation.step_index is not None
+            continuation.progress_index
+            if continuation and continuation.progress_index is not None
             else 0
         )
-        start_agent_index = (
-            continuation.agent_index
-            if continuation and continuation.agent_index is not None
+        start_member_index = (
+            continuation.member_index
+            if continuation and continuation.member_index is not None
             else 0
         )
         current_brief = (
@@ -123,9 +123,9 @@ class ProxyStagedWorkroomExecutor:
         workroom_outputs: list[str] = (
             list(continuation.workroom_outputs) if continuation is not None else []
         )
-        for step_index in range(start_index, len(step_groups)):
-            group = step_groups[step_index]
-            group_start_index = start_agent_index if step_index == start_index else 0
+        for stage_index in range(start_index, len(stage_groups)):
+            group = stage_groups[stage_index]
+            group_start_index = start_member_index if stage_index == start_index else 0
             stage_entry_brief = current_brief
             stage_outputs: list[str] = []
             comparison_candidates = (
@@ -177,13 +177,13 @@ class ProxyStagedWorkroomExecutor:
                                 current_brief=current_brief,
                                 workroom_progress=self._next_workroom_progress(
                                     definition=definition,
-                                    step_groups=step_groups,
+                                    stage_groups=stage_groups,
                                     staffed_specialists=staffed_specialists,
                                     staffed_specialist_counts=(
                                         staffed_specialist_counts
                                     ),
                                     workroom_request=workroom_request,
-                                    step_index=step_index,
+                                    stage_index=stage_index,
                                     goal=goal,
                                     current_brief=current_brief,
                                     loop_state=loop_state,
@@ -197,16 +197,16 @@ class ProxyStagedWorkroomExecutor:
                         )
                         return
                     continue
-            for agent_index in range(group_start_index, len(group)):
-                agent_id = group[agent_index]
-                agent_label = _agent_instance_label(group, agent_index)
+            for member_index in range(group_start_index, len(group)):
+                agent_id = group[member_index]
+                agent_label = _agent_instance_label(group, member_index)
                 prompt = workroom_round_prompt(
                     workroom_id=definition.id,
                     agent_id=agent_id,
                     role_instance_label=(
                         agent_label if agent_label != agent_id else None
                     ),
-                    role_instance_context=_agent_instance_context(group, agent_index),
+                    role_instance_context=_agent_instance_context(group, member_index),
                     goal=goal,
                     current_brief=(
                         stage_entry_brief
@@ -230,7 +230,7 @@ class ProxyStagedWorkroomExecutor:
                     tool_choice=request.tool_choice,
                     parallel_tool_calls=request.parallel_tool_calls,
                     pending_continuation=pending
-                    if step_index == start_index and agent_index == group_start_index
+                    if stage_index == start_index and member_index == group_start_index
                     else None,
                     final_response_sink=response_holder_sink(response_holder),
                 ):
@@ -254,8 +254,8 @@ class ProxyStagedWorkroomExecutor:
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
                             ),
-                            step_index=step_index,
-                            agent_index=agent_index,
+                            progress_index=stage_index,
+                            member_index=member_index,
                             agent_id=agent_id,
                             goal=goal,
                             current_brief=agent_text.strip() or stage_entry_brief,
@@ -288,11 +288,11 @@ class ProxyStagedWorkroomExecutor:
                         current_brief=current_brief,
                         workroom_progress=self._next_workroom_progress(
                             definition=definition,
-                            step_groups=step_groups,
+                            stage_groups=stage_groups,
                             staffed_specialists=staffed_specialists,
                             staffed_specialist_counts=staffed_specialist_counts,
                             workroom_request=workroom_request,
-                            step_index=step_index,
+                            stage_index=stage_index,
                             goal=goal,
                             current_brief=current_brief,
                             loop_state=loop_state,
@@ -345,14 +345,14 @@ class ProxyStagedWorkroomExecutor:
                     request=request,
                     definition=definition,
                     group=group,
-                    agent_index=agent_index,
+                    member_index=member_index,
                     goal=goal,
                     current_brief=current_brief,
                     loop_state=loop_state,
                     workroom_request=workroom_request,
                 )
             )
-            for agent_index in range(len(group))
+            for member_index in range(len(group))
         ]
         return list(await asyncio.gather(*tasks))
 
@@ -362,19 +362,19 @@ class ProxyStagedWorkroomExecutor:
         request: ProxyTurnRequest,
         definition: DefinitionDocument,
         group: tuple[str, ...],
-        agent_index: int,
+        member_index: int,
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
         workroom_request: str | None,
     ) -> _AgentAttemptResult:
-        agent_id = group[agent_index]
-        agent_label = _agent_instance_label(group, agent_index)
+        agent_id = group[member_index]
+        agent_label = _agent_instance_label(group, member_index)
         prompt = workroom_round_prompt(
             workroom_id=definition.id,
             agent_id=agent_id,
             role_instance_label=(agent_label if agent_label != agent_id else None),
-            role_instance_context=_agent_instance_context(group, agent_index),
+            role_instance_context=_agent_instance_context(group, member_index),
             goal=goal,
             current_brief=current_brief,
             workroom_request=workroom_request,
@@ -406,10 +406,10 @@ class ProxyStagedWorkroomExecutor:
         self,
         *,
         definition: DefinitionDocument,
-        step_groups: tuple[tuple[str, ...], ...],
+        stage_groups: tuple[tuple[str, ...], ...],
         staffed_specialists: tuple[str, ...],
         staffed_specialist_counts: tuple[tuple[str, int], ...],
-        step_index: int,
+        stage_index: int,
         goal: str,
         current_brief: str,
         loop_state: ProxyDecisionLoopState | None,
@@ -418,10 +418,10 @@ class ProxyStagedWorkroomExecutor:
         last_stage_parallel_attempts: bool,
         workroom_request: str | None,
     ) -> ContinuationState | None:
-        next_step_index = step_index + 1
-        if next_step_index >= len(step_groups):
+        next_stage_index = stage_index + 1
+        if next_stage_index >= len(stage_groups):
             return None
-        next_group = step_groups[next_step_index]
+        next_group = stage_groups[next_stage_index]
         return ContinuationState(
             mode="workroom",
             workroom_id=definition.id,
@@ -430,8 +430,8 @@ class ProxyStagedWorkroomExecutor:
             workroom_request=workroom_request,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
-            step_index=next_step_index,
-            agent_index=0,
+            progress_index=next_stage_index,
+            member_index=0,
             agent_id=next_group[0],
             goal=goal,
             current_brief=current_brief,
@@ -442,20 +442,20 @@ class ProxyStagedWorkroomExecutor:
         )
 
 
-def _filtered_step_groups(
+def _filtered_stage_groups(
     definition: DefinitionDocument,
     specialists: tuple[str, ...],
     specialist_counts: tuple[tuple[str, int], ...],
 ) -> tuple[tuple[str, ...], ...]:
-    step_groups = workroom_step_groups_for_definition(definition)
+    stage_groups = staged_groups_for_definition(definition)
     if not specialists and not specialist_counts:
-        return step_groups
+        return stage_groups
     count_map = dict(specialist_counts)
     allowed = set(specialists) if specialists else None
     if allowed is not None:
         allowed.update(count_map)
     filtered: list[tuple[str, ...]] = []
-    for group in step_groups:
+    for group in stage_groups:
         filtered_group = _expand_group_staffing(
             group=group,
             allowed=allowed,
@@ -498,24 +498,24 @@ def _stage_brief(*, stage_outputs: list[str], fallback: str) -> str:
     return "\n".join(stage_outputs)
 
 
-def _agent_instance_label(group: tuple[str, ...], agent_index: int) -> str:
-    agent_id = group[agent_index]
+def _agent_instance_label(group: tuple[str, ...], member_index: int) -> str:
+    agent_id = group[member_index]
     total_instances = sum(1 for candidate in group if candidate == agent_id)
     if total_instances <= 1:
         return agent_id
     current_instance = sum(
-        1 for candidate in group[: agent_index + 1] if candidate == agent_id
+        1 for candidate in group[: member_index + 1] if candidate == agent_id
     )
     return f"{agent_id}[{current_instance}]"
 
 
-def _agent_instance_context(group: tuple[str, ...], agent_index: int) -> str | None:
-    agent_id = group[agent_index]
+def _agent_instance_context(group: tuple[str, ...], member_index: int) -> str | None:
+    agent_id = group[member_index]
     total_instances = sum(1 for candidate in group if candidate == agent_id)
     if total_instances <= 1:
         return None
     current_instance = sum(
-        1 for candidate in group[: agent_index + 1] if candidate == agent_id
+        1 for candidate in group[: member_index + 1] if candidate == agent_id
     )
     return (
         f"You are instance {current_instance} of {total_instances} for the "

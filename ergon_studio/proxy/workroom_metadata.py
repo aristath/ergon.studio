@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from ergon_studio.definitions import DefinitionDocument
-from ergon_studio.workroom_compiler import workroom_step_groups_for_definition
+from ergon_studio.workroom_layout import (
+    discussion_turns_for_definition,
+    referenced_agents_for_definition,
+)
 
 
 def workroom_shape_for_definition(definition: DefinitionDocument) -> str:
@@ -15,21 +18,18 @@ def workroom_participants_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
     participants: list[str] = []
-    for group in workroom_step_groups_for_definition(definition):
-        for agent_id in group:
-            if agent_id not in participants:
-                participants.append(agent_id)
+    for agent_id in referenced_agents_for_definition(definition):
+        if agent_id not in participants:
+            participants.append(agent_id)
     return tuple(participants)
 
 
 def workroom_turn_sequence_for_definition(
     definition: DefinitionDocument,
 ) -> tuple[str, ...]:
-    return tuple(
-        agent_id
-        for group in workroom_step_groups_for_definition(definition)
-        for agent_id in group
-    )
+    if workroom_shape_for_definition(definition) != "discussion":
+        return ()
+    return discussion_turns_for_definition(definition)
 
 
 def workroom_max_rounds_for_definition(

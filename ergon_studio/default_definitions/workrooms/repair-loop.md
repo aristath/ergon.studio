@@ -2,7 +2,7 @@
 id: repair-loop
 name: Repair Loop
 shape: staged
-steps:
+stages:
   - reviewer
   - coder
   - tester

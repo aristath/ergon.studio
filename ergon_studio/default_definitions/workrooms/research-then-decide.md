@@ -2,7 +2,7 @@
 id: research-then-decide
 name: Research And Synthesis
 shape: staged
-steps:
+stages:
   - researcher
   - architect
   - critic

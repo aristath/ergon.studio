@@ -237,11 +237,11 @@ def _ad_hoc_workroom_definition(
     unique_roles = {agent_id for agent_id in expanded_staffing}
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
         shape = "staged"
-        steps = list(expanded_staffing)
+        metadata: dict[str, object] = {"stages": list(expanded_staffing)}
         max_rounds = len(expanded_staffing)
     else:
         shape = "discussion"
-        steps = list(specialists)
+        metadata = {"turns": list(specialists)}
         max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(
         id=AD_HOC_WORKROOM_ID,
@@ -250,8 +250,8 @@ def _ad_hoc_workroom_definition(
             "id": AD_HOC_WORKROOM_ID,
             "name": "Ad Hoc Workroom",
             "shape": shape,
-            "steps": steps,
             "max_rounds": max_rounds,
+            **metadata,
         },
         body=(
             "## Purpose\n"

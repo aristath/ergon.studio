@@ -1258,7 +1258,7 @@ def _proxy_registry() -> RuntimeRegistry:
                 metadata={
                     "id": "standard-build",
                     "shape": "staged",
-                    "steps": ["architect", "coder"],
+                    "stages": ["architect", "coder"],
                 },
                 body="## Purpose\nBuild.",
                 sections={"Purpose": "Build."},

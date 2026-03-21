@@ -22,8 +22,8 @@ class ContinuationState:
     workroom_request: str | None = None
     last_stage_outputs: tuple[str, ...] = ()
     last_stage_parallel_attempts: bool = False
-    step_index: int | None = None
-    agent_index: int | None = None
+    progress_index: int | None = None
+    member_index: int | None = None
     request_text: str | None = None
     goal: str | None = None
     current_brief: str | None = None
@@ -64,10 +64,10 @@ def encode_continuation_tool_call(
         payload["ls"] = list(state.last_stage_outputs)
     if state.last_stage_parallel_attempts:
         payload["lp"] = True
-    if state.step_index is not None:
-        payload["s"] = state.step_index
-    if state.agent_index is not None:
-        payload["i"] = state.agent_index
+    if state.progress_index is not None:
+        payload["x"] = state.progress_index
+    if state.member_index is not None:
+        payload["i"] = state.member_index
     if state.request_text is not None:
         payload["r"] = state.request_text
     if state.goal is not None:
@@ -109,8 +109,8 @@ def decode_continuation_from_tool_call_id(
     workroom_request = payload.get("pr")
     last_stage_outputs = payload.get("ls", [])
     last_stage_parallel_attempts = payload.get("lp", False)
-    step_index = payload.get("s")
-    agent_index = payload.get("i")
+    progress_index = payload.get("x")
+    member_index = payload.get("i")
     request_text = payload.get("r")
     goal = payload.get("g")
     current_brief = payload.get("c")
@@ -143,9 +143,9 @@ def decode_continuation_from_tool_call_id(
         return None
     if not isinstance(last_stage_parallel_attempts, bool):
         return None
-    if step_index is not None and not isinstance(step_index, int):
+    if progress_index is not None and not isinstance(progress_index, int):
         return None
-    if agent_index is not None and not isinstance(agent_index, int):
+    if member_index is not None and not isinstance(member_index, int):
         return None
     if request_text is not None and not isinstance(request_text, str):
         return None
@@ -171,8 +171,8 @@ def decode_continuation_from_tool_call_id(
         workroom_request=workroom_request,
         last_stage_outputs=tuple(last_stage_outputs),
         last_stage_parallel_attempts=last_stage_parallel_attempts,
-        step_index=step_index,
-        agent_index=agent_index,
+        progress_index=progress_index,
+        member_index=member_index,
         request_text=request_text,
         goal=goal,
         current_brief=current_brief,

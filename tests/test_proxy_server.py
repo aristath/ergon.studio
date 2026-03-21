@@ -167,6 +167,35 @@ class ProxyServerTests(unittest.TestCase):
         self.assertIn('"content":"Done."', body)
         self.assertIn("data: [DONE]", body)
 
+    def test_chat_completions_streams_error_chunks_for_unexpected_failures(
+        self,
+    ) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FailingCore(RuntimeError("planner exploded")),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+        self.assertIn('RuntimeError: planner exploded', body)
+        self.assertIn('"finish_reason":"error"', body)
+        self.assertIn("data: [DONE]", body)
+
     def test_responses_returns_non_stream_response(self) -> None:
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
@@ -879,6 +908,39 @@ class ProxyServerTests(unittest.TestCase):
         self.assertNotIn("response.output_text.done", event_types)
         self.assertEqual(event_types[-1], "response.completed")
 
+    def test_responses_streams_failure_event_for_unexpected_failures(self) -> None:
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FailingCore(RuntimeError("planner exploded")),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/responses",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "input": "Hi",
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payloads = [
+                json.loads(line[6:])
+                for line in response.read().decode("utf-8").splitlines()
+                if line.startswith("data: {")
+            ]
+
+        self.assertEqual(payloads[-1]["type"], "response.failed")
+        self.assertEqual(
+            payloads[-1]["response"]["error"]["message"],
+            "RuntimeError: planner exploded",
+        )
+
 
 class _FakeCore:
     def __init__(self, events, *, tool_calls=(), output_items=()):
@@ -918,6 +980,37 @@ class _FakeCore:
                 mode="act",
                 tool_calls=self._tool_calls,
                 output_items=self._output_items,
+            ),
+        )
+
+
+class _FailingCore:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+        self.registry = type(
+            "Registry",
+            (),
+            {
+                "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
+                "agent_definitions": {},
+                "workflow_definitions": {},
+            },
+        )()
+
+    def stream_turn(self, request, *, created_at: int | None = None):
+        del request, created_at
+
+        async def _event_iter():
+            raise self._exc
+            yield None  # pragma: no cover
+
+        return ResponseStream(
+            _event_iter(),
+            finalizer=lambda _updates: ProxyTurnResult(
+                finish_reason="error",
+                content=str(self._exc),
+                reasoning="",
+                mode="act",
             ),
         )
 

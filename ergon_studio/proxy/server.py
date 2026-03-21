@@ -100,8 +100,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                         created_at=created_at,
                     )
                 )
-            except BrokenPipeError:
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 return
+            except Exception as exc:
+                self._stream_chat_failure(
+                    completion_id=completion_id,
+                    model=request.model,
+                    created_at=created_at,
+                    error_text=f"{type(exc).__name__}: {exc}",
+                )
             return
 
         try:
@@ -178,8 +185,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                         created_at=created_at,
                     )
                 )
-            except BrokenPipeError:
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 return
+            except Exception as exc:
+                self._stream_responses_failure(
+                    response_id=response_id,
+                    model=request.model,
+                    created_at=created_at,
+                    error_text=f"{type(exc).__name__}: {exc}",
+                )
             return
 
         try:
@@ -337,6 +351,66 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 }
             },
         )
+
+    def _stream_chat_failure(
+        self,
+        *,
+        completion_id: str,
+        model: str,
+        created_at: int,
+        error_text: str,
+    ) -> None:
+        try:
+            self.wfile.write(
+                encode_chat_stream_sse(
+                    ProxyContentDeltaEvent(error_text),
+                    completion_id=completion_id,
+                    model=model,
+                    created_at=created_at,
+                )
+            )
+            self.wfile.write(
+                encode_chat_stream_sse(
+                    ProxyFinishEvent("error"),
+                    completion_id=completion_id,
+                    model=model,
+                    created_at=created_at,
+                )
+            )
+            self.wfile.write(encode_chat_stream_done())
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
+    def _stream_responses_failure(
+        self,
+        *,
+        response_id: str,
+        model: str,
+        created_at: int,
+        error_text: str,
+    ) -> None:
+        payload = {
+            "type": "response.failed",
+            "event_id": f"event_{uuid4().hex}",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created_at": created_at,
+                "model": model,
+                "status": "failed",
+                "error": {
+                    "message": error_text,
+                    "type": "server_error",
+                },
+            },
+            "sequence_number": 1,
+        }
+        try:
+            self.wfile.write(encode_responses_stream_sse(payload))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
 
 
 def serve_proxy(*, host: str, port: int, core: ProxyOrchestrationCore) -> None:

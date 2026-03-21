@@ -118,6 +118,10 @@ class ProxyOrchestrationCore:
                 state["finish_reason"] = "error"
                 state["content"] = str(exc)
                 yield ProxyContentDeltaEvent(state["content"])
+            except Exception as exc:
+                state["finish_reason"] = "error"
+                state["content"] = f"{type(exc).__name__}: {exc}"
+                yield ProxyContentDeltaEvent(state["content"])
             yield ProxyFinishEvent(state["finish_reason"])
 
         return ResponseStream(

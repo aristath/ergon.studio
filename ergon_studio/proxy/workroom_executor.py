@@ -133,7 +133,7 @@ class ProxyWorkroomExecutor:
             participant_move_count = 0
             while True:
                 prompt = workroom_round_prompt(
-                    workroom_id=workroom_name,
+                    workroom_name=workroom_name,
                     agent_id=participant.agent_id,
                     role_instance_label=(
                         participant.label
@@ -290,7 +290,7 @@ class ProxyWorkroomExecutor:
         workroom_message: str | None,
     ) -> _AgentAttemptResult:
         prompt = workroom_round_prompt(
-            workroom_id=workroom_name,
+            workroom_name=workroom_name,
             agent_id=participant.agent_id,
             role_instance_label=(
                 participant.label

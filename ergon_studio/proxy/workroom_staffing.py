@@ -21,7 +21,6 @@ def expand_staffed_participants(
     base_counts = _participant_counts(base_participants)
     staffed_participants: list[StaffedParticipant] = []
     emitted_counts: dict[str, int] = {}
-    emitted_totals: dict[str, int] = {}
     for agent_id in base_participants:
         if allowed is not None and agent_id not in allowed:
             continue
@@ -34,7 +33,6 @@ def expand_staffed_participants(
         emitted_counts[agent_id] = instance_index
         if instance_index > total_instances:
             continue
-        emitted_totals[agent_id] = total_instances
         staffed_participants.append(
             StaffedParticipant(
                 agent_id=agent_id,

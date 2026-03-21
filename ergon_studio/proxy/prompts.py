@@ -42,7 +42,7 @@ def orchestrator_turn_prompt(
 
 def workroom_round_prompt(
     *,
-    workroom_id: str,
+    workroom_name: str,
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
@@ -52,7 +52,7 @@ def workroom_round_prompt(
     prior_work: tuple[str, ...],
 ) -> str:
     lines = [
-        f"You are {agent_id} working inside workroom {workroom_id}.",
+        f"You are {agent_id} working inside workroom {workroom_name}.",
         (
             "The lead developer is using this workroom for collaboration, not as "
             "a rigid script."

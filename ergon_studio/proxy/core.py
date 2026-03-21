@@ -292,10 +292,11 @@ class ProxyOrchestrationCore:
         worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
         if continuation is not None:
-            workroom_name = continuation.workroom_name or "ad hoc"
+            assert continuation.workroom_name is not None
+            workroom_name = continuation.workroom_name
             intro = _workroom_notice(
                 f"Orchestrator: continuing workroom {workroom_name} with "
-                f"{continuation.agent_id or '(unknown)'}."
+                f"{continuation.agent_id}."
             )
             participants = continuation.workroom_participants
             workroom_message = continuation.workroom_message
@@ -317,7 +318,7 @@ class ProxyOrchestrationCore:
         yield ProxyReasoningDeltaEvent(intro)
         async for event in self._workroom_executor.execute(
             request=request,
-            workroom_name=workroom_name or "ad hoc",
+            workroom_name=workroom_name,
             participants=participants,
             workroom_message=workroom_message,
             state=state,

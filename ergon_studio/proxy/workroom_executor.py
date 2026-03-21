@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -16,7 +17,6 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
-from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
@@ -188,7 +188,7 @@ class ProxyWorkroomExecutor:
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending if member_index == start_index else None,
-                final_response_sink=response_holder_sink(response_holder),
+                final_response_sink=partial(_store_response, response_holder),
             ):
                 agent_text += delta
                 reasoning_delta = f"{participant.label}: {delta}" if first else delta
@@ -321,7 +321,7 @@ class ProxyWorkroomExecutor:
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
-            final_response_sink=response_holder_sink(response_holder),
+            final_response_sink=partial(_store_response, response_holder),
         ):
             text += delta
         return _AgentAttemptResult(
@@ -384,3 +384,7 @@ def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:
         return False
     agent_ids = {participant.agent_id for participant in staffed_members}
     return len(agent_ids) == 1
+
+
+def _store_response(holder: dict[str, Any], value: object) -> None:
+    holder["response"] = value

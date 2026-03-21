@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -31,7 +32,6 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_internal_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
-from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
@@ -39,7 +39,6 @@ from ergon_studio.proxy.turn_state import (
     ProxyMoveResult,
     ProxyTurnState,
 )
-from ergon_studio.proxy.workroom import AD_HOC_WORKROOM_ID, is_ad_hoc_workroom
 from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 
@@ -49,6 +48,8 @@ ProxyEvent = (
     | ProxyToolCallEvent
     | ProxyFinishEvent
 )
+
+AD_HOC_WORKROOM_ID = "ad-hoc-workroom"
 
 
 class ProxyOrchestrationCore:
@@ -190,7 +191,7 @@ class ProxyOrchestrationCore:
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending,
-                final_response_sink=response_holder_sink(response_holder),
+                final_response_sink=partial(_store_response, response_holder),
             ):
                 buffered_deltas.append(delta)
             pending = None
@@ -548,6 +549,10 @@ def _should_continue_active_workroom(
     return action.workroom_id == active_workroom.workroom_id
 
 
+def _store_response(holder: dict[str, Any], value: object) -> None:
+    holder["response"] = value
+
+
 def _resolve_workroom_definition(
     *,
     registry: RuntimeRegistry,
@@ -556,7 +561,7 @@ def _resolve_workroom_definition(
 ) -> DefinitionDocument | None:
     if workroom_id is None and participants:
         return _ad_hoc_workroom_definition(participants=participants)
-    if is_ad_hoc_workroom(workroom_id):
+    if _is_ad_hoc_workroom(workroom_id):
         if not participants:
             return None
         return _ad_hoc_workroom_definition(participants=participants)
@@ -568,7 +573,7 @@ def _workroom_notice(base: str) -> str:
 
 
 def _workroom_intro(definition: DefinitionDocument) -> str:
-    if is_ad_hoc_workroom(definition.id):
+    if _is_ad_hoc_workroom(definition.id):
         return "Orchestrator: opening an ad hoc workroom."
     return f"Orchestrator: opening workroom {definition.id}."
 
@@ -597,3 +602,7 @@ def _ad_hoc_workroom_definition(
             )
         },
     )
+
+
+def _is_ad_hoc_workroom(workroom_id: str | None) -> bool:
+    return workroom_id == AD_HOC_WORKROOM_ID

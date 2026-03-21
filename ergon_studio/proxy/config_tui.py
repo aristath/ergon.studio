@@ -44,6 +44,12 @@ class DefinitionMutation:
     content: str | None = None
 
 
+@dataclass(frozen=True)
+class DefinitionRollback:
+    restore_content: str | None = None
+    delete_path: bool = False
+
+
 class DefinitionListItem(ListItem):
     def __init__(self, path: Path) -> None:
         super().__init__(Label(path.stem))
@@ -434,6 +440,7 @@ class ProxyConfigApp(App[None]):
 
     def _apply_definition_mutation(self, mutation: DefinitionMutation) -> str:
         self._validate_definition_mutation(mutation)
+        rollback = self._capture_definition_rollback(mutation)
         try:
             if mutation.action == "delete":
                 mutation.path.unlink()
@@ -442,7 +449,11 @@ class ProxyConfigApp(App[None]):
         except OSError as exc:
             raise ValueError(f"could not persist {mutation.path.name}: {exc}") from exc
         message = _mutation_message(mutation)
-        self._restart_server(message)
+        try:
+            self._restart_server(message)
+        except ValueError:
+            self._restore_definition_rollback(mutation.path, rollback)
+            raise
         return message
 
     def _restart_server(self, reason: str) -> None:
@@ -453,7 +464,7 @@ class ProxyConfigApp(App[None]):
             )
         except Exception as exc:
             self._show_server_status(reason=f"{reason} | Server error: {exc}")
-            return
+            raise ValueError(f"server restart failed: {exc}") from exc
         self.query_one("#server-status", Static).update(
             _status_text(status.message, status.url, reason)
         )
@@ -490,6 +501,26 @@ class ProxyConfigApp(App[None]):
                     str(temp_definitions_dir), str(self.definitions_dir)
                 )
                 raise ValueError(rendered) from exc
+
+    def _capture_definition_rollback(
+        self, mutation: DefinitionMutation
+    ) -> DefinitionRollback:
+        if mutation.path.exists():
+            return DefinitionRollback(
+                restore_content=mutation.path.read_text(encoding="utf-8")
+            )
+        return DefinitionRollback(delete_path=True)
+
+    def _restore_definition_rollback(
+        self, path: Path, rollback: DefinitionRollback
+    ) -> None:
+        if rollback.delete_path:
+            if path.exists():
+                path.unlink()
+            return
+        if rollback.restore_content is None:
+            return
+        atomic_write_text(path, rollback.restore_content)
 
 
 def run_config_tui(

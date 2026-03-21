@@ -297,6 +297,48 @@ class ConfigTuiTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(controller.start_calls), 1)
 
+    async def test_definition_edit_rolls_back_when_restart_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            controller = _FakeController(fail_on_start=1)
+            app = ProxyConfigApp(
+                app_dir=workspace.app_dir,
+                definitions_dir=workspace.definitions_dir,
+                initial_config=ProxyAppConfig(
+                    upstream_base_url="http://localhost:8080/v1"
+                ),
+                server_controller=controller,
+            )
+
+            target_path = workspace.agents_dir / "architect.md"
+            original = target_path.read_text(encoding="utf-8")
+
+            async with app.run_test() as pilot:
+                tabs = app.query_one(TabbedContent)
+                tabs.active = "agents-tab"
+                await pilot.pause()
+
+                editor_widget = app.query(DefinitionEditor).first()
+                editor_widget._handle_list_navigation(target_path)
+                app.query_one("#agent-editor", TextArea).load_text(
+                    "---\n"
+                    "id: architect\n"
+                    "role: architect\n"
+                    "---\n\n"
+                    "## Identity\n"
+                    "Updated architect.\n"
+                )
+                editor_widget._save_definition()
+                await pilot.pause()
+
+                self.assertIn(
+                    "server restart failed",
+                    str(app.query_one("#agent-message", Static).render()),
+                )
+
+            self.assertEqual(target_path.read_text(encoding="utf-8"), original)
+            self.assertEqual(len(controller.start_calls), 2)
+
 
 class _FakeController:
     def __init__(self, *, fail_on_start: int | None = None) -> None:

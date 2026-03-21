@@ -22,6 +22,9 @@ from ergon_studio.proxy.group_chat_workflow_executor import (
     ProxyGroupChatWorkflowExecutor,
 )
 from ergon_studio.proxy.grouped_workflow_executor import ProxyGroupedWorkflowExecutor
+from ergon_studio.proxy.magentic_workflow_executor import (
+    ProxyMagenticWorkflowExecutor,
+)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -98,6 +101,12 @@ class ProxyOrchestrationCore:
             stream_text_agent=self._stream_text_agent,
             emit_tool_calls=self._emit_tool_calls,
             emit_workflow_summary=self._emit_workflow_summary,
+        )
+        self._magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
+            stream_text_agent=self._stream_text_agent,
+            emit_tool_calls=self._emit_tool_calls,
+            emit_workflow_summary=self._emit_workflow_summary,
+            select_manager_agent=self._select_manager_agent,
         )
 
     def stream_turn(
@@ -429,100 +438,13 @@ class ProxyOrchestrationCore:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = workflow_participants_for_definition(definition)
-        max_rounds = workflow_max_rounds_for_definition(
-            definition, default=max(len(participants), 1)
-        )
-        current_brief = (
-            continuation.current_brief
-            if continuation and continuation.current_brief is not None
-            else goal
-        )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
-        )
-        round_index = (
-            continuation.step_index
-            if continuation and continuation.step_index is not None
-            else 0
-        )
-        while round_index < max_rounds:
-            agent_id: str | None
-            if continuation is not None and round_index == (
-                continuation.step_index or 0
-            ):
-                agent_id = continuation.agent_id
-            else:
-                agent_id = await self._select_manager_agent(
-                    workflow_id=definition.id,
-                    goal=goal,
-                    current_brief=current_brief,
-                    participants=participants,
-                    prior_outputs=tuple(workflow_outputs),
-                    model_id_override=request.model,
-                )
-            if agent_id is None:
-                break
-            prompt = workflow_step_prompt(
-                workflow_id=definition.id,
-                agent_id=agent_id,
-                goal=goal,
-                current_brief=current_brief,
-                transcript_summary=summarize_conversation(request.messages),
-                prior_outputs=tuple(workflow_outputs),
-            )
-            agent_text = ""
-            first = True
-            response_holder: dict[str, Any] = {}
-            async for delta in self._stream_text_agent(
-                agent_id=agent_id,
-                prompt=prompt,
-                session_id=f"proxy-magentic-{definition.id}-{agent_id}-{uuid4().hex}",
-                model_id_override=request.model,
-                host_tools=request.tools,
-                tool_choice=request.tool_choice,
-                parallel_tool_calls=request.parallel_tool_calls,
-                pending_continuation=pending
-                if continuation is not None
-                and round_index == (continuation.step_index or 0)
-                else None,
-                final_response_sink=_response_holder_sink(response_holder),
-            ):
-                agent_text += delta
-                reasoning_delta = f"{agent_id}: {delta}" if first else delta
-                first = False
-                state.append_reasoning(reasoning_delta)
-                yield ProxyReasoningDeltaEvent(reasoning_delta)
-            response = response_holder.get("response")
-            if response is not None:
-                emitted = self._emit_tool_calls(
-                    response=response,
-                    request=request,
-                    continuation=ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        step_index=round_index,
-                        agent_id=agent_id,
-                        goal=goal,
-                        current_brief=agent_text.strip() or current_brief,
-                        workflow_outputs=tuple(workflow_outputs),
-                    ),
-                    state=state,
-                )
-                if emitted:
-                    for tool_event in emitted:
-                        yield tool_event
-                    return
-            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
-            current_brief = agent_text.strip() or current_brief
-            round_index += 1
-        async for summary_event in self._emit_workflow_summary(
+        async for summary_event in self._magentic_workflow_executor.execute(
             request=request,
             definition=definition,
             goal=goal,
-            current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
             state=state,
+            continuation=continuation,
+            pending=pending,
         ):
             yield summary_event
 

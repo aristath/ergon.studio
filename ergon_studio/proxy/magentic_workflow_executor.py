@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+from uuid import uuid4
+
+from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyFinishEvent,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCallEvent,
+    ProxyTurnRequest,
+)
+from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.prompts import workflow_step_prompt
+from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.workflow_metadata import (
+    workflow_max_rounds_for_definition,
+    workflow_participants_for_definition,
+)
+
+ProxyEvent = (
+    ProxyReasoningDeltaEvent
+    | ProxyContentDeltaEvent
+    | ProxyToolCallEvent
+    | ProxyFinishEvent
+)
+
+
+class ProxyMagenticWorkflowExecutor:
+    def __init__(
+        self,
+        *,
+        stream_text_agent: Callable[..., Any],
+        emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
+        emit_workflow_summary: Callable[..., AsyncIterator[ProxyEvent]],
+        select_manager_agent: Callable[..., Any],
+    ) -> None:
+        self._stream_text_agent = stream_text_agent
+        self._emit_tool_calls = emit_tool_calls
+        self._emit_workflow_summary = emit_workflow_summary
+        self._select_manager_agent = select_manager_agent
+
+    async def execute(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        definition: DefinitionDocument,
+        goal: str,
+        state: ProxyTurnState,
+        continuation: ContinuationState | None = None,
+        pending: PendingContinuation | None = None,
+    ) -> AsyncIterator[ProxyEvent]:
+        participants = workflow_participants_for_definition(definition)
+        max_rounds = workflow_max_rounds_for_definition(
+            definition, default=max(len(participants), 1)
+        )
+        current_brief = (
+            continuation.current_brief
+            if continuation and continuation.current_brief is not None
+            else goal
+        )
+        workflow_outputs: list[str] = (
+            list(continuation.workflow_outputs) if continuation is not None else []
+        )
+        round_index = (
+            continuation.step_index
+            if continuation and continuation.step_index is not None
+            else 0
+        )
+        while round_index < max_rounds:
+            agent_id: str | None
+            if continuation is not None and round_index == (
+                continuation.step_index or 0
+            ):
+                agent_id = continuation.agent_id
+            else:
+                agent_id = await self._select_manager_agent(
+                    workflow_id=definition.id,
+                    goal=goal,
+                    current_brief=current_brief,
+                    participants=participants,
+                    prior_outputs=tuple(workflow_outputs),
+                    model_id_override=request.model,
+                )
+            if agent_id is None:
+                break
+            prompt = workflow_step_prompt(
+                workflow_id=definition.id,
+                agent_id=agent_id,
+                goal=goal,
+                current_brief=current_brief,
+                transcript_summary=summarize_conversation(request.messages),
+                prior_outputs=tuple(workflow_outputs),
+            )
+            agent_text = ""
+            first = True
+            response_holder: dict[str, Any] = {}
+            async for delta in self._stream_text_agent(
+                agent_id=agent_id,
+                prompt=prompt,
+                session_id=f"proxy-magentic-{definition.id}-{agent_id}-{uuid4().hex}",
+                model_id_override=request.model,
+                host_tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                pending_continuation=pending
+                if continuation is not None
+                and round_index == (continuation.step_index or 0)
+                else None,
+                final_response_sink=_response_holder_sink(response_holder),
+            ):
+                agent_text += delta
+                reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                first = False
+                state.append_reasoning(reasoning_delta)
+                yield ProxyReasoningDeltaEvent(reasoning_delta)
+            response = response_holder.get("response")
+            if response is not None:
+                emitted = self._emit_tool_calls(
+                    response=response,
+                    request=request,
+                    continuation=ContinuationState(
+                        mode="workflow",
+                        workflow_id=definition.id,
+                        step_index=round_index,
+                        agent_id=agent_id,
+                        goal=goal,
+                        current_brief=agent_text.strip() or current_brief,
+                        workflow_outputs=tuple(workflow_outputs),
+                    ),
+                    state=state,
+                )
+                if emitted:
+                    for tool_event in emitted:
+                        yield tool_event
+                    return
+            workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+            current_brief = agent_text.strip() or current_brief
+            round_index += 1
+        async for summary_event in self._emit_workflow_summary(
+            request=request,
+            definition=definition,
+            goal=goal,
+            current_brief=current_brief,
+            workflow_outputs=tuple(workflow_outputs),
+            state=state,
+        ):
+            yield summary_event
+
+
+def _set_response_holder(scope: dict[str, Any], value: Any) -> None:
+    scope["response"] = value
+
+
+def _response_holder_sink(scope: dict[str, Any]) -> Callable[[Any], None]:
+    return lambda value: _set_response_holder(scope, value)

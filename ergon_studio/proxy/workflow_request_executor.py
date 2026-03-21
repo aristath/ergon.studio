@@ -11,7 +11,11 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 
 ProxyEvent = (
@@ -32,9 +36,27 @@ class ProxyWorkflowRequestExecutor:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         state: ProxyTurnState,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
+        workflow_progress = (
+            loop_state.workflow_progress
+            if loop_state is not None
+            and loop_state.workflow_progress is not None
+            and loop_state.workflow_progress.workflow_id == plan.workflow_id
+            else None
+        )
+        if workflow_progress is not None:
+            async for event in self._workflow_dispatcher.execute_workflow_continuation(
+                request=request,
+                continuation=workflow_progress,
+                pending=None,
+                state=state,
+                result_sink=result_sink,
+                loop_state=loop_state,
+            ):
+                yield event
+            return
         async for event in self._workflow_dispatcher.execute_workflow(
             request=request,
             workflow_id=plan.workflow_id,
@@ -52,7 +74,7 @@ class ProxyWorkflowRequestExecutor:
         continuation: ContinuationState,
         pending: PendingContinuation,
         state: ProxyTurnState,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         async for event in self._workflow_dispatcher.execute_workflow_continuation(

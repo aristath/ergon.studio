@@ -111,6 +111,7 @@ def build_turn_planner_prompt(
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
+    active_workflow_id: str | None = None,
 ) -> str:
     lines = [
         "Conversation transcript:",
@@ -141,6 +142,14 @@ def build_turn_planner_prompt(
                 "",
                 "Team work so far:",
                 *worklog[-12:],
+            ]
+        )
+    if active_workflow_id:
+        lines.extend(
+            [
+                "",
+                "Playbook currently in progress:",
+                active_workflow_id,
             ]
         )
     return "\n".join(lines).strip()

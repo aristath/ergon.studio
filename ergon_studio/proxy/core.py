@@ -35,7 +35,11 @@ from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
 from ergon_studio.proxy.turn_router import ProxyTurnRouter
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_request_executor import (
     ProxyWorkflowRequestExecutor,
@@ -148,8 +152,7 @@ class ProxyOrchestrationCore:
                         pass
                     elif result_holder:
                         loop_state.absorb_result(
-                            worklog_lines=_result_lines(result_holder),
-                            current_brief=_result_brief(result_holder, loop_state),
+                            result=_result(result_holder, loop_state)
                         )
                         async for event in self._run_decision_loop(
                             request=request,
@@ -216,10 +219,7 @@ class ProxyOrchestrationCore:
                 return
             if not result_holder:
                 return
-            loop_state.absorb_result(
-                worklog_lines=_result_lines(result_holder),
-                current_brief=_result_brief(result_holder, loop_state),
-            )
+            loop_state.absorb_result(result=_result(result_holder, loop_state))
 
         async for event in self._turn_router.execute_plan(
             request=request,
@@ -253,26 +253,21 @@ class ProxyOrchestrationCore:
 
 def _result_sink(
     holder: dict[str, object],
-) -> Callable[[tuple[str, ...], str], None]:
-    def _capture(worklog_lines: tuple[str, ...], current_brief: str) -> None:
-        holder["worklog_lines"] = worklog_lines
-        holder["current_brief"] = current_brief
+) -> Callable[[ProxyMoveResult], None]:
+    def _capture(result: ProxyMoveResult) -> None:
+        holder["result"] = result
 
     return _capture
 
 
-def _result_lines(holder: dict[str, object]) -> tuple[str, ...]:
-    value = holder.get("worklog_lines")
-    if isinstance(value, tuple):
-        return tuple(line for line in value if isinstance(line, str))
-    return ()
-
-
-def _result_brief(
+def _result(
     holder: dict[str, object],
     loop_state: ProxyDecisionLoopState,
-) -> str:
-    value = holder.get("current_brief")
-    if isinstance(value, str) and value:
+) -> ProxyMoveResult:
+    value = holder.get("result")
+    if isinstance(value, ProxyMoveResult):
         return value
-    return loop_state.current_brief
+    return ProxyMoveResult(
+        worklog_lines=(),
+        current_brief=loop_state.current_brief,
+    )

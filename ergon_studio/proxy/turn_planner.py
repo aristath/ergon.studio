@@ -40,6 +40,12 @@ class ProxyTurnPlanner:
                     loop_state.current_brief if loop_state is not None else None
                 ),
                 worklog=loop_state.worklog if loop_state is not None else (),
+                active_workflow_id=(
+                    loop_state.workflow_progress.workflow_id
+                    if loop_state is not None
+                    and loop_state.workflow_progress is not None
+                    else None
+                ),
             ),
             preamble=build_turn_planner_instructions(self._registry),
             session_id=f"proxy-planner-{uuid4().hex}",

@@ -11,7 +11,11 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -44,7 +48,7 @@ class ProxyTurnRouter:
         plan: ProxyTurnPlan,
         state: ProxyTurnState,
         loop_state: ProxyDecisionLoopState | None = None,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         if plan.mode == "delegate" and plan.agent_id is not None:
             async for event in self._execute_delegation(
@@ -80,7 +84,7 @@ class ProxyTurnRouter:
         pending: PendingContinuation,
         state: ProxyTurnState,
         loop_state: ProxyDecisionLoopState | None = None,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
         if continuation.mode == "workflow" and continuation.workflow_id is not None:

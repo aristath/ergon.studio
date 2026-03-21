@@ -11,7 +11,11 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 from ergon_studio.proxy.workflow_metadata import workflow_orchestration_for_definition
 from ergon_studio.registry import RuntimeRegistry
 
@@ -51,7 +55,7 @@ class ProxyWorkflowDispatcher:
         workflow_id: str | None,
         goal: str,
         state: ProxyTurnState,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         definition = self.registry.workflow_definitions.get(workflow_id or "")
@@ -79,9 +83,9 @@ class ProxyWorkflowDispatcher:
         *,
         request: ProxyTurnRequest,
         continuation: ContinuationState,
-        pending: PendingContinuation,
+        pending: PendingContinuation | None,
         state: ProxyTurnState,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         definition = self.registry.workflow_definitions.get(
@@ -120,7 +124,7 @@ class ProxyWorkflowDispatcher:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         orchestration = workflow_orchestration_for_definition(definition)

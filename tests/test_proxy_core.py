@@ -151,6 +151,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"standard-build",'
                             '"goal":"Build calculator"}'
                         ),
+                        '{"mode":"workflow","workflow_id":"standard-build"}',
                         '{"mode":"act"}',
                         "Workflow final summary",
                     ],
@@ -267,7 +268,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
-                    "orchestrator": ['{"mode":"act"}', "Workflow final summary"],
+                    "orchestrator": [
+                        '{"mode":"workflow","workflow_id":"standard-build"}',
+                        '{"mode":"act"}',
+                        "Workflow final summary",
+                    ],
                 }
             ),
         )

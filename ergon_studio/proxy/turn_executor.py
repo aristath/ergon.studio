@@ -20,7 +20,11 @@ from ergon_studio.proxy.prompts import (
     summary_instructions,
 )
 from ergon_studio.proxy.response_sink import response_holder_sink
-from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
+from ergon_studio.proxy.turn_state import (
+    ProxyDecisionLoopState,
+    ProxyMoveResult,
+    ProxyTurnState,
+)
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -103,7 +107,7 @@ class ProxyTurnExecutor:
         state: ProxyTurnState,
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
-        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         agent_id = plan.agent_id or "coder"
@@ -161,7 +165,12 @@ class ProxyTurnExecutor:
                 return
         final_text = specialist_text.strip() or current_brief or "(no output)"
         if result_sink is not None:
-            result_sink((f"{agent_id}: {final_text}",), final_text)
+            result_sink(
+                ProxyMoveResult(
+                    worklog_lines=(f"{agent_id}: {final_text}",),
+                    current_brief=final_text,
+                )
+            )
             return
         summary_text = await self._run_text_agent(
             agent_id="orchestrator",

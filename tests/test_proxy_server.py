@@ -587,6 +587,7 @@ class ProxyServerTests(unittest.TestCase):
                             '{"mode":"workflow","workflow_id":"standard-build",'
                             '"goal":"Build calculator"}'
                         ),
+                        '{"mode":"workflow","workflow_id":"standard-build"}',
                         '{"mode":"act"}',
                         "Workflow final summary",
                     ],

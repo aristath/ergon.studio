@@ -296,7 +296,7 @@ class ProxyOrchestrationCore:
             workroom_name = continuation.workroom_name
             intro = _workroom_notice(
                 f"Orchestrator: continuing workroom {workroom_name} with "
-                f"{continuation.agent_id}."
+                f"{continuation.actor}."
             )
             participants = continuation.workroom_participants
             workroom_message = continuation.workroom_message
@@ -334,7 +334,7 @@ def _orchestrator_continuation_state(
     worklog: tuple[str, ...],
 ) -> ContinuationState:
     return ContinuationState(
-        agent_id="orchestrator",
+        actor="orchestrator",
         worklog=worklog,
     )
 

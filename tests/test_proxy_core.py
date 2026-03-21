@@ -415,7 +415,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.tool_calls[0].name, "read_file")
         continuation = decode_continuation_from_tool_call_id(result.tool_calls[0].id)
         self.assertIsNotNone(continuation)
-        self.assertEqual(continuation.agent_id, "orchestrator")
+        self.assertEqual(continuation.actor, "orchestrator")
         self.assertIsNone(continuation.workroom_name)
 
     async def test_stream_turn_resumes_workroom_from_tool_result(self) -> None:
@@ -521,7 +521,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
         tool_call = _host_continuation_tool_call(
             state=ContinuationState(
-                agent_id="coder",
+                actor="coder",
                 workroom_name="ad hoc",
                 workroom_participants=("coder",),
             ),
@@ -931,7 +931,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         tool_call = _host_continuation_tool_call(
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
             call_id="call_1",
             name="read_file",
         )
@@ -979,7 +979,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         tool_call = _host_continuation_tool_call(
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
             call_id="call_1",
             name="read_file",
         )

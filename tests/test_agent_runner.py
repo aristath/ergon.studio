@@ -60,10 +60,10 @@ class AgentRunnerTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
         )
         pending = PendingContinuation(
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
             assistant_message=ProxyInputMessage(
                 role="assistant",
                 content="",
@@ -106,10 +106,10 @@ class AgentRunnerTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
         )
         pending = PendingContinuation(
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
             assistant_message=None,
             tool_results=(
                 ProxyInputMessage(

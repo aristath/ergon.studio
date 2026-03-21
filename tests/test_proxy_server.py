@@ -887,7 +887,7 @@ class ProxyServerTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(agent_id="orchestrator"),
+            state=ContinuationState(actor="orchestrator"),
         ).id
         request = Request(
             f"http://127.0.0.1:{handle.port}/v1/responses",

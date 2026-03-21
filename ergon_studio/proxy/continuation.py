@@ -13,11 +13,10 @@ _TOKEN_VERSION = 1
 
 @dataclass(frozen=True)
 class ContinuationState:
-    agent_id: str
+    actor: str
     workroom_name: str | None = None
     workroom_participants: tuple[str, ...] = ()
     workroom_message: str | None = None
-    participant_label: str | None = None
     worklog: tuple[str, ...] = ()
 
 
@@ -33,7 +32,7 @@ def encode_continuation_tool_call(
 ) -> ProxyToolCall:
     payload = {
         "v": _TOKEN_VERSION,
-        "a": state.agent_id,
+        "a": state.actor,
         "tn": tool_call.name,
         "ta": tool_call.arguments_json,
     }
@@ -43,8 +42,6 @@ def encode_continuation_tool_call(
         payload["p"] = list(state.workroom_participants)
     if state.workroom_message is not None:
         payload["pr"] = state.workroom_message
-    if state.participant_label is not None:
-        payload["pl"] = state.participant_label
     if state.worklog:
         payload["h"] = list(state.worklog)
     encoded = (
@@ -69,13 +66,12 @@ def decode_continuation_from_tool_call_id(
         return None
     if payload.get("v") != _TOKEN_VERSION:
         return None
-    agent_id = payload.get("a")
+    actor = payload.get("a")
     workroom_name = payload.get("w")
     workroom_participants = payload.get("p", [])
     workroom_message = payload.get("pr")
-    participant_label = payload.get("pl")
     worklog = payload.get("h", [])
-    if not isinstance(agent_id, str):
+    if not isinstance(actor, str):
         return None
     if workroom_name is not None and not isinstance(workroom_name, str):
         return None
@@ -85,18 +81,15 @@ def decode_continuation_from_tool_call_id(
         return None
     if workroom_message is not None and not isinstance(workroom_message, str):
         return None
-    if participant_label is not None and not isinstance(participant_label, str):
-        return None
     if not isinstance(worklog, list) or not all(
         isinstance(item, str) for item in worklog
     ):
         return None
     return ContinuationState(
-        agent_id=agent_id,
+        actor=actor,
         workroom_name=workroom_name,
         workroom_participants=tuple(workroom_participants),
         workroom_message=workroom_message,
-        participant_label=participant_label,
         worklog=tuple(worklog),
     )
 

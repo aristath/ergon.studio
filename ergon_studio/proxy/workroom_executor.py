@@ -205,8 +205,7 @@ class ProxyWorkroomExecutor:
                             workroom_name=workroom_name,
                             workroom_participants=round_participants,
                             workroom_message=workroom_message,
-                            agent_id=participant.agent_id,
-                            participant_label=participant.label,
+                            actor=participant.label,
                             worklog=(*persisted_worklog, *room_lines),
                         ),
                         state=state,
@@ -341,12 +340,8 @@ def _continuation_start_index(
 ) -> int:
     if continuation is None:
         return 0
-    if continuation.participant_label is not None:
-        for index, participant in enumerate(staffed_members):
-            if participant.label == continuation.participant_label:
-                return index
     for index, participant in enumerate(staffed_members):
-        if participant.agent_id == continuation.agent_id:
+        if participant.label == continuation.actor:
             return index
     return 0
 

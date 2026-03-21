@@ -313,8 +313,7 @@ def _continuation_state():
     return ContinuationState(
         workroom_name="debate",
         workroom_participants=("reviewer",),
-        agent_id="reviewer",
-        participant_label="reviewer",
+        actor="reviewer",
         worklog=("coder[1]: Idea A", "coder[2]: Idea B"),
     )
 

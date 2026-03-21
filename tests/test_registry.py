@@ -3,55 +3,183 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from uuid import UUID
 
-from ergon_studio.config import save_global_config
-from ergon_studio.paths import StudioPaths
 from ergon_studio.registry import load_registry
-from ergon_studio.seed import seed_default_definitions
+from ergon_studio.upstream import UpstreamSettings
 
 
 class RegistryTests(unittest.TestCase):
-    def test_load_registry_returns_config_and_definition_maps(self) -> None:
+    def test_load_registry_returns_upstream_and_definition_maps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            base = Path(temp_dir)
-            home_dir = base / "home"
-            project_root = base / "repo"
-            home_dir.mkdir()
-            project_root.mkdir()
-            paths = StudioPaths(
-                home_dir=home_dir,
-                project_root=project_root,
-                project_uuid=UUID("12345678-1234-5678-1234-567812345678"),
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workrooms_dir = root_dir / "workrooms"
+            agents_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
             )
-            paths.ensure_global_layout()
-            save_global_config(
-                paths.config_path,
-                {
-                    "providers": {"default": {"base_url": "http://localhost:8080/v1"}},
-                    "role_assignments": {"orchestrator": "default"},
-                    "approvals": {"default": "ask"},
-                    "ui": {"theme": "default"},
-                },
+            (agents_dir / "architect.md").write_text(
+                (
+                    "---\n"
+                    "id: architect\n"
+                    "role: architect\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Architect.\n"
+                ),
+                encoding="utf-8",
             )
-            seed_default_definitions(paths.agents_dir, paths.workflows_dir)
+            (agents_dir / "reviewer.md").write_text(
+                (
+                    "---\n"
+                    "id: reviewer\n"
+                    "role: reviewer\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Reviewer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (agents_dir / "researcher.md").write_text(
+                (
+                    "---\n"
+                    "id: researcher\n"
+                    "role: researcher\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Researcher.\n"
+                ),
+                encoding="utf-8",
+            )
+            (agents_dir / "coder.md").write_text(
+                (
+                    "---\n"
+                    "id: coder\n"
+                    "role: coder\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Coder.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "standard-build.md").write_text(
+                (
+                    "---\n"
+                    "id: standard-build\n"
+                    "participants:\n"
+                    "  - architect\n"
+                    "  - coder\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Build.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "research-then-decide.md").write_text(
+                (
+                    "---\n"
+                    "id: research-then-decide\n"
+                    "participants:\n"
+                    "  - researcher\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Research.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workrooms_dir / "debate.md").write_text(
+                (
+                    "---\n"
+                    "id: debate\n"
+                    "participants:\n"
+                    "  - architect\n"
+                    "  - reviewer\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Debate.\n"
+                ),
+                encoding="utf-8",
+            )
 
-            registry = load_registry(paths)
+            registry = load_registry(
+                root_dir,
+                upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+            )
 
             self.assertIn("orchestrator", registry.agent_definitions)
-            self.assertIn("standard-build", registry.workflow_definitions)
-            self.assertIn("research-then-decide", registry.workflow_definitions)
-            self.assertIn("debate", registry.workflow_definitions)
-            self.assertEqual(
-                registry.config["role_assignments"]["orchestrator"],
-                "default",
+            self.assertIn("standard-build", registry.workroom_definitions)
+            self.assertIn("research-then-decide", registry.workroom_definitions)
+            self.assertIn("debate", registry.workroom_definitions)
+            self.assertEqual(registry.upstream.base_url, "http://localhost:8080/v1")
+
+    def test_load_registry_requires_agents_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            root_dir.mkdir()
+            with self.assertRaisesRegex(ValueError, "missing agents directory"):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_requires_orchestrator_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            (root_dir / "agents").mkdir(parents=True)
+            (root_dir / "workrooms").mkdir(parents=True)
+            with self.assertRaisesRegex(
+                ValueError, "missing required agent definition"
+            ):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_rejects_workrooms_with_unknown_agents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workrooms_dir = root_dir / "workrooms"
+            agents_dir.mkdir(parents=True)
+            workrooms_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
             )
-            single_agent = registry.workflow_definitions["single-agent-execution"]
-            self.assertEqual(single_agent.metadata["max_repair_cycles"], 3)
-            self.assertEqual(
-                single_agent.metadata["repair_step_groups"],
-                [["tester"], ["fixer"], ["tester"], ["reviewer"]],
+            (workrooms_dir / "standard-build.md").write_text(
+                (
+                    "---\n"
+                    "id: standard-build\n"
+                    "participants:\n"
+                    "  - coder\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Build.\n"
+                ),
+                encoding="utf-8",
             )
-            self.assertTrue(single_agent.metadata["delivery_candidate"])
-            self.assertTrue(registry.workflow_definitions["standard-build"].metadata["delivery_candidate"])
-            self.assertTrue(registry.workflow_definitions["dynamic-open-ended"].metadata["delivery_candidate"])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "workroom preset 'standard-build' references unknown agents: coder",
+            ):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )

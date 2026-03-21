@@ -6,19 +6,48 @@ from ergon_studio.proxy.models import ProxyTurnRequest
 from ergon_studio.proxy.planner import summarize_conversation
 
 
-def direct_reply_prompt(request: ProxyTurnRequest) -> str:
-    return "\n".join(
-        [
-            "You are the lead developer replying to the product manager.",
-            "Be practical, collaborative, and decisive.",
-            "Use the full conversation transcript below as context.",
-            "",
-            summarize_conversation(request.messages, limit=12),
-            "",
-            "Latest user request:",
-            request.latest_user_text() or "(none)",
-        ]
-    ).strip()
+def direct_reply_prompt(
+    request: ProxyTurnRequest,
+    *,
+    goal: str | None = None,
+    current_brief: str | None = None,
+    worklog: tuple[str, ...] = (),
+) -> str:
+    lines = [
+        "You are the lead developer replying to the product manager.",
+        "Be practical, collaborative, and decisive.",
+        "Use the full conversation transcript below as context.",
+        "",
+        summarize_conversation(request.messages, limit=12),
+        "",
+        "Latest user request:",
+        request.latest_user_text() or "(none)",
+    ]
+    if goal:
+        lines.extend(
+            [
+                "",
+                "Current goal:",
+                goal,
+            ]
+        )
+    if current_brief:
+        lines.extend(
+            [
+                "",
+                "Current brief:",
+                current_brief,
+            ]
+        )
+    if worklog:
+        lines.extend(
+            [
+                "",
+                "Team work so far:",
+                *worklog[-12:],
+            ]
+        )
+    return "\n".join(lines).strip()
 
 
 def specialist_prompt(

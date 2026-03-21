@@ -11,6 +11,7 @@ from ergon_studio.proxy.planner import (
     build_turn_planner_prompt,
     parse_turn_plan,
 )
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState
 from ergon_studio.registry import RuntimeRegistry
 
 
@@ -24,10 +25,22 @@ class ProxyTurnPlanner:
         self._registry = registry
         self._run_text_agent = run_text_agent
 
-    async def plan_turn(self, request: ProxyTurnRequest) -> ProxyTurnPlan:
+    async def plan_turn(
+        self,
+        request: ProxyTurnRequest,
+        *,
+        loop_state: ProxyDecisionLoopState | None = None,
+    ) -> ProxyTurnPlan:
         planner_text = await self._run_text_agent(
             agent_id="orchestrator",
-            prompt=build_turn_planner_prompt(request),
+            prompt=build_turn_planner_prompt(
+                request,
+                goal=loop_state.goal if loop_state is not None else None,
+                current_brief=(
+                    loop_state.current_brief if loop_state is not None else None
+                ),
+                worklog=loop_state.worklog if loop_state is not None else (),
+            ),
             preamble=build_turn_planner_instructions(self._registry),
             session_id=f"proxy-planner-{uuid4().hex}",
             model_id_override=request.model,

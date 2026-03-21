@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
 from ergon_studio.proxy.models import (
@@ -11,7 +11,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 
 ProxyEvent = (
@@ -32,12 +32,16 @@ class ProxyWorkflowRequestExecutor:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         state: ProxyTurnState,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         async for event in self._workflow_dispatcher.execute_workflow(
             request=request,
             workflow_id=plan.workflow_id,
             goal=plan.goal or request.latest_user_text() or "",
             state=state,
+            result_sink=result_sink,
+            loop_state=loop_state,
         ):
             yield event
 
@@ -48,11 +52,15 @@ class ProxyWorkflowRequestExecutor:
         continuation: ContinuationState,
         pending: PendingContinuation,
         state: ProxyTurnState,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         async for event in self._workflow_dispatcher.execute_workflow_continuation(
             request=request,
             continuation=continuation,
             pending=pending,
             state=state,
+            result_sink=result_sink,
+            loop_state=loop_state,
         ):
             yield event

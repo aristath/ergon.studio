@@ -11,7 +11,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -43,12 +43,16 @@ class ProxyTurnRouter:
         request: ProxyTurnRequest,
         plan: ProxyTurnPlan,
         state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState | None = None,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         if plan.mode == "delegate" and plan.agent_id is not None:
             async for event in self._execute_delegation(
                 request=request,
                 plan=plan,
                 state=state,
+                loop_state=loop_state,
+                result_sink=result_sink,
             ):
                 yield event
             return
@@ -57,12 +61,15 @@ class ProxyTurnRouter:
                 request=request,
                 plan=plan,
                 state=state,
+                loop_state=loop_state,
+                result_sink=result_sink,
             ):
                 yield event
             return
         async for event in self._execute_direct(
             request=request,
             state=state,
+            loop_state=loop_state,
         ):
             yield event
 
@@ -72,6 +79,8 @@ class ProxyTurnRouter:
         request: ProxyTurnRequest,
         pending: PendingContinuation,
         state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState | None = None,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         continuation = pending.state
         if continuation.mode == "workflow" and continuation.workflow_id is not None:
@@ -80,6 +89,8 @@ class ProxyTurnRouter:
                 continuation=continuation,
                 pending=pending,
                 state=state,
+                loop_state=loop_state,
+                result_sink=result_sink,
             ):
                 yield event
             return
@@ -95,6 +106,8 @@ class ProxyTurnRouter:
                 state=state,
                 current_brief=continuation.current_brief,
                 pending=pending,
+                loop_state=loop_state,
+                result_sink=result_sink,
             ):
                 yield event
             return
@@ -102,5 +115,6 @@ class ProxyTurnRouter:
             request=request,
             state=state,
             pending=pending,
+            loop_state=loop_state,
         ):
             yield event

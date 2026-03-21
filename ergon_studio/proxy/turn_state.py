@@ -6,6 +6,24 @@ from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 
 
 @dataclass
+class ProxyDecisionLoopState:
+    goal: str
+    current_brief: str
+    worklog: tuple[str, ...] = field(default_factory=tuple)
+
+    def absorb_result(
+        self,
+        *,
+        worklog_lines: tuple[str, ...],
+        current_brief: str,
+    ) -> None:
+        if worklog_lines:
+            self.worklog = (*self.worklog, *worklog_lines)
+        if current_brief:
+            self.current_brief = current_brief
+
+
+@dataclass
 class ProxyTurnState:
     content: str = ""
     reasoning: str = ""

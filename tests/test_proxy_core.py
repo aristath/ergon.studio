@@ -115,6 +115,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"delegate","agent_id":"coder",'
                             '"request":"Implement it"}'
                         ),
+                        '{"mode":"act"}',
                         "Final summary",
                     ],
                     "coder": ["Patch", " applied"],
@@ -138,7 +139,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("delegating", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(result.content, "Final summary")
-        self.assertEqual(result.mode, "delegate")
+        self.assertEqual(result.mode, "act")
 
     async def test_stream_turn_handles_workflow_mode(self) -> None:
         core = ProxyOrchestrationCore(
@@ -150,6 +151,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"standard-build",'
                             '"goal":"Build calculator"}'
                         ),
+                        '{"mode":"act"}',
                         "Workflow final summary",
                     ],
                     "architect": ["Plan"],
@@ -175,7 +177,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(result.content, "Workflow final summary")
-        self.assertEqual(result.mode, "workflow")
+        self.assertEqual(result.mode, "act")
 
     async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
         core = ProxyOrchestrationCore(
@@ -265,7 +267,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
-                    "orchestrator": ["Workflow final summary"],
+                    "orchestrator": ['{"mode":"act"}', "Workflow final summary"],
                 }
             ),
         )
@@ -391,7 +393,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "reviewer": ["Reviewed result"],
-                    "orchestrator": ["Workflow final summary"],
+                    "orchestrator": ['{"mode":"act"}', "Workflow final summary"],
                 }
             ),
         )
@@ -436,6 +438,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"debate",'
                             '"goal":"Choose an approach"}'
                         ),
+                        '{"mode":"act"}',
                         "Debate final summary",
                     ],
                     "architect": ["Option A", "Refined option A"],
@@ -477,6 +480,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         '{"agent_id":"architect"}',
                         '{"agent_id":"reviewer"}',
                         '{"agent_id":null}',
+                        '{"mode":"act"}',
                         "Dynamic final summary",
                     ],
                     "architect": ["Architecture pass"],
@@ -514,6 +518,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"workflow_id":"specialist-handoff",'
                             '"goal":"Research and decide"}'
                         ),
+                        '{"mode":"act"}',
                         "Handoff final summary",
                     ],
                     "architect": ["Initial direction", '{"agent_id":"reviewer"}'],

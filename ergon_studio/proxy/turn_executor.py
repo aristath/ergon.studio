@@ -20,7 +20,7 @@ from ergon_studio.proxy.prompts import (
     summary_instructions,
 )
 from ergon_studio.proxy.response_sink import response_holder_sink
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -49,11 +49,17 @@ class ProxyTurnExecutor:
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         pending: PendingContinuation | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         notice = "Orchestrator: handling this turn directly.\n"
         state.append_reasoning(notice)
         yield ProxyReasoningDeltaEvent(notice)
-        prompt = direct_reply_prompt(request)
+        prompt = direct_reply_prompt(
+            request,
+            goal=loop_state.goal if loop_state is not None else None,
+            current_brief=loop_state.current_brief if loop_state is not None else None,
+            worklog=loop_state.worklog if loop_state is not None else (),
+        )
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
             agent_id="orchestrator",
@@ -73,7 +79,17 @@ class ProxyTurnExecutor:
             emitted = self._emit_tool_calls(
                 response=response,
                 request=request,
-                continuation=ContinuationState(mode="act", agent_id="orchestrator"),
+                continuation=ContinuationState(
+                    mode="act",
+                    agent_id="orchestrator",
+                    goal=loop_state.goal if loop_state is not None else None,
+                    current_brief=(
+                        loop_state.current_brief if loop_state is not None else None
+                    ),
+                    decision_history=(
+                        loop_state.worklog if loop_state is not None else ()
+                    ),
+                ),
                 state=state,
             )
             for event in emitted:
@@ -87,6 +103,8 @@ class ProxyTurnExecutor:
         state: ProxyTurnState,
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         agent_id = plan.agent_id or "coder"
         intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
@@ -127,6 +145,13 @@ class ProxyTurnExecutor:
                     agent_id=agent_id,
                     request_text=plan.request or request.latest_user_text(),
                     current_brief=specialist_text.strip() or current_brief,
+                    goal=(
+                        plan.goal
+                        or (loop_state.goal if loop_state is not None else None)
+                    ),
+                    decision_history=(
+                        loop_state.worklog if loop_state is not None else ()
+                    ),
                 ),
                 state=state,
             )
@@ -134,7 +159,11 @@ class ProxyTurnExecutor:
                 for tool_event in emitted:
                     yield tool_event
                 return
-        final_text = await self._run_text_agent(
+        final_text = specialist_text.strip() or current_brief or "(no output)"
+        if result_sink is not None:
+            result_sink((f"{agent_id}: {final_text}",), final_text)
+            return
+        summary_text = await self._run_text_agent(
             agent_id="orchestrator",
             prompt=delegation_summary_prompt(
                 request_text=request.latest_user_text() or "",
@@ -145,8 +174,8 @@ class ProxyTurnExecutor:
             session_id=f"proxy-delegation-summary-{uuid4().hex}",
             model_id_override=request.model,
         )
-        if not final_text:
-            final_text = specialist_text.strip()
-        state.set_content(final_text)
-        if final_text:
-            yield ProxyContentDeltaEvent(final_text)
+        if not summary_text:
+            summary_text = final_text
+        state.set_content(summary_text)
+        if summary_text:
+            yield ProxyContentDeltaEvent(summary_text)

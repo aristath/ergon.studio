@@ -16,7 +16,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import group_chat_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 from ergon_studio.proxy.workflow_metadata import (
     workflow_max_rounds_for_definition,
     workflow_participants_for_definition,
@@ -52,6 +52,8 @@ class ProxyGroupChatWorkflowExecutor:
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
+        result_sink: Callable[[tuple[str, ...], str], None] | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         participants = workflow_participants_for_definition(definition)
         sequence = workflow_selection_sequence_for_definition(definition)
@@ -123,6 +125,9 @@ class ProxyGroupChatWorkflowExecutor:
                         agent_id=agent_id,
                         goal=goal,
                         current_brief=agent_text.strip() or current_brief,
+                        decision_history=(
+                            loop_state.worklog if loop_state is not None else ()
+                        ),
                         workflow_outputs=tuple(workflow_outputs),
                     ),
                     state=state,
@@ -133,6 +138,9 @@ class ProxyGroupChatWorkflowExecutor:
                     return
             workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
+        if result_sink is not None:
+            result_sink(tuple(workflow_outputs), current_brief)
+            return
         async for summary_event in self._emit_workflow_summary(
             request=request,
             definition=definition,

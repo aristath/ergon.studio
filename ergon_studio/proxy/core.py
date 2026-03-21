@@ -8,7 +8,10 @@ from agent_framework import ResponseStream
 
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.proxy.agent_runner import ProxyAgentRunner
-from ergon_studio.proxy.continuation import latest_pending_continuation
+from ergon_studio.proxy.continuation import (
+    PendingContinuation,
+    latest_pending_continuation,
+)
 from ergon_studio.proxy.group_chat_workflow_executor import (
     ProxyGroupChatWorkflowExecutor,
 )
@@ -27,11 +30,12 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
     ProxyTurnResult,
 )
+from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
 from ergon_studio.proxy.turn_router import ProxyTurnRouter
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_request_executor import (
     ProxyWorkflowRequestExecutor,
@@ -48,6 +52,8 @@ ProxyEvent = (
 
 
 class ProxyOrchestrationCore:
+    _MAX_INTERNAL_MOVES = 6
+
     def __init__(
         self,
         registry: RuntimeRegistry,
@@ -126,21 +132,36 @@ class ProxyOrchestrationCore:
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
                 pending = latest_pending_continuation(request.messages)
+                loop_state = self._initial_loop_state(request, pending=pending)
                 if pending is not None:
                     state.mode = pending.state.mode
+                    result_holder: dict[str, object] = {}
                     async for event in self._turn_router.execute_continuation(
                         request=request,
                         pending=pending,
                         state=state,
+                        loop_state=loop_state,
+                        result_sink=_result_sink(result_holder),
                     ):
                         yield event
+                    if state.finish_reason == "tool_calls":
+                        pass
+                    elif result_holder:
+                        loop_state.absorb_result(
+                            worklog_lines=_result_lines(result_holder),
+                            current_brief=_result_brief(result_holder, loop_state),
+                        )
+                        async for event in self._run_decision_loop(
+                            request=request,
+                            state=state,
+                            loop_state=loop_state,
+                        ):
+                            yield event
                 else:
-                    plan = await self._turn_planner.plan_turn(request)
-                    state.mode = plan.mode
-                    async for event in self._turn_router.execute_plan(
+                    async for event in self._run_decision_loop(
                         request=request,
-                        plan=plan,
                         state=state,
+                        loop_state=loop_state,
                     ):
                         yield event
             except ValueError as exc:
@@ -164,3 +185,94 @@ class ProxyOrchestrationCore:
                 output_items=state.output_items,
             ),
         )
+
+    async def _run_decision_loop(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState,
+    ) -> AsyncIterator[ProxyEvent]:
+        for _ in range(self._MAX_INTERNAL_MOVES):
+            plan = await self._turn_planner.plan_turn(
+                request,
+                loop_state=loop_state,
+            )
+            state.mode = plan.mode
+            if plan.goal:
+                loop_state.goal = plan.goal
+            result_holder: dict[str, object] = {}
+            async for event in self._turn_router.execute_plan(
+                request=request,
+                plan=plan,
+                state=state,
+                loop_state=loop_state,
+                result_sink=_result_sink(result_holder),
+            ):
+                yield event
+            if state.finish_reason == "tool_calls":
+                return
+            if plan.mode == "act":
+                return
+            if not result_holder:
+                return
+            loop_state.absorb_result(
+                worklog_lines=_result_lines(result_holder),
+                current_brief=_result_brief(result_holder, loop_state),
+            )
+
+        async for event in self._turn_router.execute_plan(
+            request=request,
+            plan=ProxyTurnPlan(mode="act"),
+            state=state,
+            loop_state=loop_state,
+        ):
+            yield event
+
+    def _initial_loop_state(
+        self,
+        request: ProxyTurnRequest,
+        *,
+        pending: PendingContinuation | None,
+    ) -> ProxyDecisionLoopState:
+        if pending is None:
+            goal = request.latest_user_text() or ""
+            return ProxyDecisionLoopState(
+                goal=goal,
+                current_brief=goal,
+            )
+        continuation = pending.state
+        goal = continuation.goal or request.latest_user_text() or ""
+        current_brief = continuation.current_brief or goal
+        return ProxyDecisionLoopState(
+            goal=goal,
+            current_brief=current_brief,
+            worklog=continuation.decision_history,
+        )
+
+
+def _result_sink(
+    holder: dict[str, object],
+) -> Callable[[tuple[str, ...], str], None]:
+    def _capture(worklog_lines: tuple[str, ...], current_brief: str) -> None:
+        holder["worklog_lines"] = worklog_lines
+        holder["current_brief"] = current_brief
+
+    return _capture
+
+
+def _result_lines(holder: dict[str, object]) -> tuple[str, ...]:
+    value = holder.get("worklog_lines")
+    if isinstance(value, tuple):
+        return tuple(line for line in value if isinstance(line, str))
+    return ()
+
+
+def _result_brief(
+    holder: dict[str, object],
+    loop_state: ProxyDecisionLoopState,
+) -> str:
+    value = holder.get("current_brief")
+    if isinstance(value, str) and value:
+        return value
+    return loop_state.current_brief

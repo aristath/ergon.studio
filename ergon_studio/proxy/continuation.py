@@ -21,6 +21,7 @@ class ContinuationState:
     request_text: str | None = None
     goal: str | None = None
     current_brief: str | None = None
+    decision_history: tuple[str, ...] = ()
     workflow_outputs: tuple[str, ...] = ()
 
 
@@ -53,6 +54,8 @@ def encode_continuation_tool_call(
         payload["g"] = state.goal
     if state.current_brief is not None:
         payload["c"] = state.current_brief
+    if state.decision_history:
+        payload["h"] = list(state.decision_history)
     if state.workflow_outputs:
         payload["o"] = list(state.workflow_outputs)
     encoded = (
@@ -85,6 +88,7 @@ def decode_continuation_from_tool_call_id(
     request_text = payload.get("r")
     goal = payload.get("g")
     current_brief = payload.get("c")
+    decision_history = payload.get("h", [])
     workflow_outputs = payload.get("o", [])
     if not isinstance(mode, str) or not isinstance(agent_id, str):
         return None
@@ -100,6 +104,10 @@ def decode_continuation_from_tool_call_id(
         return None
     if current_brief is not None and not isinstance(current_brief, str):
         return None
+    if not isinstance(decision_history, list) or not all(
+        isinstance(item, str) for item in decision_history
+    ):
+        return None
     if not isinstance(workflow_outputs, list) or not all(
         isinstance(item, str) for item in workflow_outputs
     ):
@@ -113,6 +121,7 @@ def decode_continuation_from_tool_call_id(
         request_text=request_text,
         goal=goal,
         current_brief=current_brief,
+        decision_history=tuple(decision_history),
         workflow_outputs=tuple(workflow_outputs),
     )
 

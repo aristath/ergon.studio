@@ -105,16 +105,45 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
     )
 
 
-def build_turn_planner_prompt(request: ProxyTurnRequest) -> str:
-    return "\n".join(
-        [
-            "Conversation transcript:",
-            *_transcript_lines(request.messages),
-            "",
-            "Latest user request:",
-            request.latest_user_text() or "(none)",
-        ]
-    ).strip()
+def build_turn_planner_prompt(
+    request: ProxyTurnRequest,
+    *,
+    goal: str | None = None,
+    current_brief: str | None = None,
+    worklog: tuple[str, ...] = (),
+) -> str:
+    lines = [
+        "Conversation transcript:",
+        *_transcript_lines(request.messages),
+        "",
+        "Latest user request:",
+        request.latest_user_text() or "(none)",
+    ]
+    if goal:
+        lines.extend(
+            [
+                "",
+                "Current delivery goal:",
+                goal,
+            ]
+        )
+    if current_brief:
+        lines.extend(
+            [
+                "",
+                "Current brief:",
+                current_brief,
+            ]
+        )
+    if worklog:
+        lines.extend(
+            [
+                "",
+                "Team work so far:",
+                *worklog[-12:],
+            ]
+        )
+    return "\n".join(lines).strip()
 
 
 def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:

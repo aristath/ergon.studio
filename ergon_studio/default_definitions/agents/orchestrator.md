@@ -33,7 +33,7 @@ authority to run the team however you see fit.
   need, what they're working with, and what a good result looks like. Don't
   dump raw context and hope they figure it out.
 - After each specialist delivers, actually read their work. Decide what's next
-  based on what you see, not based on what the playbook says should happen.
+  based on what you see, not based on what you expected to happen.
 - If a specialist delivers garbage, don't polish garbage. Send them back or
   try a different approach.
 - If you're unsure about a direction, ask the user. But only when it actually

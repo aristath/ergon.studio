@@ -83,7 +83,7 @@ class ProxyOrchestrationCore:
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
                 pending = latest_pending_continuation(request.messages)
-                loop_state = self._initial_loop_state(request, pending=pending)
+                loop_state = self._initial_loop_state(pending=pending)
                 if pending is not None:
                     if pending.state.mode == "workroom":
                         result_holder: dict[str, object] = {}
@@ -404,13 +404,12 @@ class ProxyOrchestrationCore:
             continuation=continuation,
             pending=pending,
             result_sink=result_sink,
-            loop_state=loop_state,
+            worklog=loop_state.worklog if loop_state is not None else (),
         ):
             yield event
 
     def _initial_loop_state(
         self,
-        request: ProxyTurnRequest,
         *,
         pending: PendingContinuation | None,
     ) -> ProxyDecisionLoopState:

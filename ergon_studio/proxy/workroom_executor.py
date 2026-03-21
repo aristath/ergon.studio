@@ -21,7 +21,6 @@ from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ActiveWorkroom,
-    ProxyDecisionLoopState,
     ProxyMoveResult,
     ProxyTurnState,
 )
@@ -68,7 +67,7 @@ class ProxyWorkroomExecutor:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         result_sink: Callable[[ProxyMoveResult], None],
-        loop_state: ProxyDecisionLoopState | None = None,
+        worklog: tuple[str, ...] = (),
     ) -> AsyncIterator[ProxyEvent]:
         round_participants = _round_participants(
             definition=definition,
@@ -150,7 +149,7 @@ class ProxyWorkroomExecutor:
                 workroom_message=workroom_message,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_work=_prior_work(
-                    loop_state=loop_state,
+                    worklog=worklog,
                     round_outputs=round_outputs,
                 ),
             )
@@ -187,9 +186,7 @@ class ProxyWorkroomExecutor:
                         workroom_message=workroom_message,
                         member_index=member_index,
                         agent_id=participant.agent_id,
-                        worklog=(
-                            loop_state.worklog if loop_state is not None else ()
-                        ),
+                        worklog=worklog,
                         round_outputs=tuple(round_outputs),
                     ),
                     state=state,
@@ -320,11 +317,11 @@ def _active_workroom_state(
 
 def _prior_work(
     *,
-    loop_state: ProxyDecisionLoopState | None,
+    worklog: tuple[str, ...],
     round_outputs: list[str],
 ) -> tuple[str, ...]:
     prior_work = [
-        *(loop_state.worklog if loop_state is not None else ()),
+        *worklog,
         *round_outputs,
     ]
     if not prior_work:

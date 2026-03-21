@@ -65,6 +65,12 @@ class ProxyTurnPlanner:
                     and loop_state.workflow_progress is not None
                     else None
                 ),
+                active_playbook_focus=(
+                    loop_state.workflow_progress.workflow_focus
+                    if loop_state is not None
+                    and loop_state.workflow_progress is not None
+                    else None
+                ),
                 selection_outcome=(
                     loop_state.latest_selection_outcome
                     if loop_state is not None

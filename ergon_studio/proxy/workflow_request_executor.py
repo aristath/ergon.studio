@@ -80,6 +80,7 @@ class ProxyWorkflowRequestExecutor:
             specialists=plan.specialists,
             specialist_counts=plan.specialist_counts,
             workflow_request=plan.playbook_request,
+            workflow_focus=plan.playbook_focus,
             goal=plan.goal or request.latest_user_text() or "",
             state=state,
             result_sink=result_sink,
@@ -134,10 +135,16 @@ def _override_active_staffing(
         if plan is not None and plan.playbook_request
         else continuation.workflow_request
     )
+    workflow_focus = (
+        plan.playbook_focus
+        if plan is not None and plan.playbook_focus
+        else continuation.workflow_focus
+    )
     if (
         workflow_specialists == continuation.workflow_specialists
         and workflow_specialist_counts == continuation.workflow_specialist_counts
         and workflow_request == continuation.workflow_request
+        and workflow_focus == continuation.workflow_focus
     ):
         return continuation
     return replace(
@@ -145,4 +152,5 @@ def _override_active_staffing(
         workflow_specialists=workflow_specialists,
         workflow_specialist_counts=workflow_specialist_counts,
         workflow_request=workflow_request,
+        workflow_focus=workflow_focus,
     )

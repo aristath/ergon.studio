@@ -417,7 +417,9 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Comparison criteria:", reviewer_prompt)
         self.assertIn("Prefer the safer and simpler approach.", reviewer_prompt)
 
-    async def test_stage_prompt_receives_playbook_round_assignment(self) -> None:
+    async def test_stage_prompt_receives_playbook_round_assignment_and_focus(
+        self,
+    ) -> None:
         streamed_prompts: list[str] = []
 
         async def _stream_text_agent(**kwargs):
@@ -447,6 +449,7 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             definition=_best_of_n_review_definition(),
             goal="Pick the best one",
             workflow_request="Compare the two alternatives and choose one winner.",
+            workflow_focus="compare",
             state=state,
             continuation=ContinuationState(
                 mode="workflow",
@@ -469,6 +472,9 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             "Compare the two alternatives and choose one winner.",
             reviewer_prompt,
         )
+        self.assertIn("Current playbook round focus:", reviewer_prompt)
+        self.assertIn("compare", reviewer_prompt)
+        self.assertIn("Judge alternatives", reviewer_prompt)
 
     async def test_comparison_stage_emits_structured_selection_outcome(
         self,
@@ -568,6 +574,46 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
             move_result.workflow_progress.selection_outcome,
             move_result.selection_outcome,
         )
+
+    async def test_grouped_workflow_progress_preserves_playbook_focus(self) -> None:
+        captured: dict[str, ProxyMoveResult] = {}
+
+        async def _stream_text_agent(**_kwargs):
+            yield "Plan"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        async def _emit_workflow_summary(**_kwargs):
+            yield ProxyContentDeltaEvent("Final summary")
+
+        executor = ProxyGroupedWorkflowExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+            emit_workflow_summary=_emit_workflow_summary,
+            select_comparison_outcome=_select_comparison_outcome,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        state = ProxyTurnState()
+
+        async for _event in executor.execute(
+            request=request,
+            definition=_definition(),
+            goal="Build it",
+            workflow_focus="plan",
+            state=state,
+            result_sink=lambda result: captured.setdefault("result", result),
+        ):
+            pass
+
+        move_result = captured["result"]
+        self.assertIsNotNone(move_result.workflow_progress)
+        assert move_result.workflow_progress is not None
+        self.assertEqual(move_result.workflow_progress.workflow_focus, "plan")
+
 
     async def test_next_stage_receives_structured_selection_outcome(
         self,

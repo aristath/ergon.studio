@@ -55,6 +55,7 @@ class ProxyGroupChatWorkflowExecutor:
         goal: str,
         specialists: tuple[str, ...] = (),
         workflow_request: str | None = None,
+        workflow_focus: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -108,6 +109,17 @@ class ProxyGroupChatWorkflowExecutor:
                 else None
             )
         )
+        workflow_focus = (
+            continuation.workflow_focus
+            if continuation is not None and continuation.workflow_focus is not None
+            else workflow_focus
+            if workflow_focus is not None
+            else (
+                loop_state.current_playbook_focus
+                if loop_state is not None
+                else None
+            )
+        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -120,6 +132,7 @@ class ProxyGroupChatWorkflowExecutor:
                 transcript_summary=summarize_conversation(request.messages),
                 current_brief=current_brief,
                 playbook_request=workflow_request,
+                playbook_focus=workflow_focus,
                 prior_outputs=tuple(workflow_outputs),
                 move_rationale=(
                     loop_state.current_move_rationale
@@ -163,6 +176,7 @@ class ProxyGroupChatWorkflowExecutor:
                         if continuation is not None
                         else specialists,
                         workflow_request=workflow_request,
+                        workflow_focus=workflow_focus,
                         step_index=turn_index,
                         agent_id=agent_id,
                         goal=goal,
@@ -191,6 +205,7 @@ class ProxyGroupChatWorkflowExecutor:
                         if continuation is not None
                         else specialists,
                         workflow_request=workflow_request,
+                        workflow_focus=workflow_focus,
                         step_index=next_turn,
                         agent_id=agent_id,
                         goal=goal,

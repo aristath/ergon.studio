@@ -139,6 +139,42 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             "Compare three implementations and pick one.",
         )
 
+    async def test_execute_workflow_forwards_playbook_focus(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("workflow")
+
+        async def _execute_workflow_continuation(**kwargs):
+            raise AssertionError("not expected")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+
+        [event async for event in executor.execute_workflow(
+            request=request,
+            plan=ProxyTurnPlan(
+                mode="workflow",
+                workflow_id="best-of-n",
+                playbook_focus="compare",
+            ),
+            state=ProxyTurnState(),
+        )]
+
+        self.assertEqual(calls[0]["workflow_focus"], "compare")
+
     async def test_execute_workflow_continuation_forwards_pending_state(
         self,
     ) -> None:
@@ -347,6 +383,56 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             continuation.workflow_request,
             "Polish the selected candidate into a final draft.",
         )
+
+    async def test_execute_active_workflow_can_override_playbook_focus(
+        self,
+    ) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            raise AssertionError("not expected")
+
+        async def _execute_workflow_continuation(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("continued")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+        loop_state = ProxyDecisionLoopState(
+            goal="Build calculator",
+            current_brief="Architecture ready",
+            workflow_progress=ContinuationState(
+                mode="workflow",
+                agent_id="architect",
+                workflow_id="standard-build",
+                workflow_focus="plan",
+            ),
+        )
+
+        [event async for event in executor.execute_active_workflow(
+            request=request,
+            plan=ProxyTurnPlan(
+                mode="continue_playbook",
+                workflow_id="standard-build",
+                playbook_focus="verify",
+            ),
+            state=ProxyTurnState(),
+            loop_state=loop_state,
+        )]
+
+        continuation = calls[0]["continuation"]
+        self.assertEqual(continuation.workflow_focus, "verify")
 
     async def test_execute_active_workflow_errors_without_progress(self) -> None:
         executor = ProxyWorkflowRequestExecutor(

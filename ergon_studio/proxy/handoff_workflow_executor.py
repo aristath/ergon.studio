@@ -59,6 +59,7 @@ class ProxyHandoffWorkflowExecutor:
         goal: str,
         specialists: tuple[str, ...] = (),
         workflow_request: str | None = None,
+        workflow_focus: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
@@ -92,6 +93,17 @@ class ProxyHandoffWorkflowExecutor:
                 else None
             )
         )
+        workflow_focus = (
+            continuation.workflow_focus
+            if continuation is not None and continuation.workflow_focus is not None
+            else workflow_focus
+            if workflow_focus is not None
+            else (
+                loop_state.current_playbook_focus
+                if loop_state is not None
+                else None
+            )
+        )
         workflow_outputs: list[str] = (
             list(continuation.workflow_outputs) if continuation is not None else []
         )
@@ -109,6 +121,7 @@ class ProxyHandoffWorkflowExecutor:
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
+                playbook_focus=workflow_focus,
                 prior_outputs=tuple(workflow_outputs),
                 allowed=handoffs.get(
                     continuation.agent_id,
@@ -143,6 +156,7 @@ class ProxyHandoffWorkflowExecutor:
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
+                playbook_focus=workflow_focus,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workflow_outputs),
                 move_rationale=(
@@ -188,6 +202,7 @@ class ProxyHandoffWorkflowExecutor:
                         workflow_id=definition.id,
                         workflow_specialists=staffed_specialists,
                         workflow_request=workflow_request,
+                        workflow_focus=workflow_focus,
                         step_index=round_index,
                         agent_id=current_agent,
                         goal=goal,
@@ -226,6 +241,7 @@ class ProxyHandoffWorkflowExecutor:
                             workflow_id=definition.id,
                             workflow_specialists=staffed_specialists,
                             workflow_request=workflow_request,
+                            workflow_focus=workflow_focus,
                             step_index=next_round,
                             agent_id=current_agent,
                             goal=goal,
@@ -246,6 +262,7 @@ class ProxyHandoffWorkflowExecutor:
                 goal=goal,
                 current_brief=current_brief,
                 playbook_request=workflow_request,
+                playbook_focus=workflow_focus,
                 prior_outputs=tuple(workflow_outputs),
                 allowed=handoffs.get(
                     current_agent,

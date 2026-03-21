@@ -24,6 +24,7 @@ class ProxyDecisionLoopState:
     workflow_progress: ContinuationState | None = None
     latest_selection_outcome: ProxySelectionOutcome | None = None
     current_playbook_request: str | None = None
+    current_playbook_focus: str | None = None
     current_move_rationale: str | None = None
     current_move_success_criteria: str | None = None
     current_comparison_mode: str | None = None
@@ -42,6 +43,7 @@ class ProxyDecisionLoopState:
         if result.selection_outcome_changed:
             self.latest_selection_outcome = result.selection_outcome
         self.current_playbook_request = None
+        self.current_playbook_focus = None
         self.current_move_rationale = None
         self.current_move_success_criteria = None
         self.current_comparison_mode = None

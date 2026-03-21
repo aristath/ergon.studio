@@ -214,6 +214,7 @@ class ProxyOrchestrationCore:
             loop_state.current_comparison_mode = plan.comparison_mode
             loop_state.current_comparison_criteria = plan.comparison_criteria
             loop_state.current_playbook_request = plan.playbook_request
+            loop_state.current_playbook_focus = plan.playbook_focus
             result_holder: dict[str, object] = {}
             async for event in self._turn_router.execute_plan(
                 request=request,
@@ -231,6 +232,7 @@ class ProxyOrchestrationCore:
                 loop_state.current_comparison_mode = None
                 loop_state.current_comparison_criteria = None
                 loop_state.current_playbook_request = None
+                loop_state.current_playbook_focus = None
                 return
             if not result_holder:
                 loop_state.current_move_rationale = None
@@ -238,6 +240,7 @@ class ProxyOrchestrationCore:
                 loop_state.current_comparison_mode = None
                 loop_state.current_comparison_criteria = None
                 loop_state.current_playbook_request = None
+                loop_state.current_playbook_focus = None
                 return
             loop_state.absorb_result(result=_result(result_holder, loop_state))
 
@@ -270,6 +273,7 @@ class ProxyOrchestrationCore:
             worklog=continuation.decision_history,
             latest_selection_outcome=continuation.selection_outcome,
             current_playbook_request=continuation.workflow_request,
+            current_playbook_focus=continuation.workflow_focus,
         )
 
 

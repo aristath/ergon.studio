@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
+from ergon_studio.proxy.playbook_focus import (
+    PLAYBOOK_FOCUS_VALUES,
+    normalize_playbook_focus,
+)
 from ergon_studio.proxy.selection_outcome import (
     ProxySelectionOutcome,
     selection_outcome_lines,
@@ -25,6 +29,7 @@ class ProxyTurnPlan:
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
     playbook_request: str | None = None
+    playbook_focus: str | None = None
     comparison_mode: str | None = None
     comparison_criteria: str | None = None
     request: str | None = None
@@ -35,6 +40,7 @@ class ProxyTurnPlan:
 
 
 def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
+    focus_values = ", ".join(PLAYBOOK_FOCUS_VALUES)
     workflow_lines = []
     for workflow_id, definition in sorted(registry.workflow_definitions.items()):
         hints = ", ".join(selection_hints_for_metadata(definition.metadata)) or "none"
@@ -101,6 +107,11 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "playbook round."
             ),
             (
+                "- For workflow or continue_playbook, you may optionally set "
+                "playbook_focus to describe the kind of round this is. Allowed "
+                f"values: {focus_values}."
+            ),
+            (
                 "- When a move is about judging alternatives, you may set "
                 "comparison_mode to select_best, synthesize_best, or critique_options."
             ),
@@ -143,7 +154,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"playbook_request":"","comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"specialists":[],"specialist_counts":{},"playbook_request":"","playbook_focus":null,"comparison_mode":null,"comparison_criteria":"","request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -158,6 +169,7 @@ def build_turn_planner_prompt(
     active_specialists: tuple[str, ...] = (),
     active_specialist_counts: tuple[tuple[str, int], ...] = (),
     active_playbook_request: str | None = None,
+    active_playbook_focus: str | None = None,
     selection_outcome: ProxySelectionOutcome | None = None,
 ) -> str:
     lines = [
@@ -214,6 +226,14 @@ def build_turn_planner_prompt(
                 active_playbook_request,
             ]
         )
+    if active_playbook_focus:
+        lines.extend(
+            [
+                "",
+                "Current playbook round focus:",
+                active_playbook_focus,
+            ]
+        )
     if active_specialists:
         lines.extend(
             [
@@ -259,6 +279,11 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         registry=registry,
     )
     comparison_mode = _normalize_comparison_mode(payload.get("comparison_mode"))
+    playbook_focus = normalize_playbook_focus(payload.get("playbook_focus"))
+    if mode not in {"workflow", "continue_playbook"}:
+        playbook_focus = None
+    elif comparison_mode is not None and playbook_focus is None:
+        playbook_focus = "compare"
     return ProxyTurnPlan(
         mode=mode,
         workflow_id=workflow_id,
@@ -266,6 +291,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         specialists=specialists,
         specialist_counts=specialist_counts,
         playbook_request=_optional_text(payload.get("playbook_request")),
+        playbook_focus=playbook_focus,
         comparison_mode=comparison_mode,
         comparison_criteria=_optional_text(payload.get("comparison_criteria")),
         request=_optional_text(payload.get("request")),

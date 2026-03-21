@@ -4,6 +4,7 @@ import json
 
 from ergon_studio.proxy.models import ProxyTurnRequest
 from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.playbook_focus import playbook_focus_instruction
 from ergon_studio.proxy.selection_outcome import (
     ProxySelectionOutcome,
     selection_outcome_lines,
@@ -191,6 +192,7 @@ def workflow_step_prompt(
     goal: str,
     current_brief: str,
     playbook_request: str | None = None,
+    playbook_focus: str | None = None,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
     comparison_candidates: tuple[str, ...] = (),
@@ -237,6 +239,15 @@ def workflow_step_prompt(
                 "",
                 "Current playbook round assignment:",
                 playbook_request,
+            ]
+        )
+    if playbook_focus:
+        lines.extend(
+            [
+                "",
+                "Current playbook round focus:",
+                playbook_focus,
+                playbook_focus_instruction(playbook_focus),
             ]
         )
     if prior_outputs:
@@ -310,6 +321,7 @@ def group_chat_turn_prompt(
     transcript_summary: str,
     current_brief: str,
     playbook_request: str | None = None,
+    playbook_focus: str | None = None,
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
     success_criteria: str | None = None,
@@ -334,6 +346,15 @@ def group_chat_turn_prompt(
                 "",
                 "Current playbook round assignment:",
                 playbook_request,
+            ]
+        )
+    if playbook_focus:
+        lines.extend(
+            [
+                "",
+                "Current playbook round focus:",
+                playbook_focus,
+                playbook_focus_instruction(playbook_focus),
             ]
         )
     if prior_outputs:
@@ -386,6 +407,7 @@ def workflow_manager_prompt(
     goal: str,
     current_brief: str,
     playbook_request: str | None,
+    playbook_focus: str | None,
     participants: tuple[str, ...],
     prior_outputs: tuple[str, ...],
     move_rationale: str | None = None,
@@ -399,6 +421,11 @@ def workflow_manager_prompt(
     ]
     if playbook_request:
         lines.append(f"Current round assignment: {playbook_request}")
+    if playbook_focus:
+        lines.append(
+            f"Current round focus: {playbook_focus} "
+            f"({playbook_focus_instruction(playbook_focus)})"
+        )
     if move_rationale:
         lines.append(f"Why continue this playbook now: {move_rationale}")
     if success_criteria:
@@ -434,6 +461,7 @@ def handoff_selection_prompt(
     goal: str,
     current_brief: str,
     playbook_request: str | None,
+    playbook_focus: str | None,
     prior_outputs: tuple[str, ...],
     allowed: tuple[str, ...],
     move_rationale: str | None = None,
@@ -448,6 +476,11 @@ def handoff_selection_prompt(
     ]
     if playbook_request:
         lines.append(f"Current round assignment: {playbook_request}")
+    if playbook_focus:
+        lines.append(
+            f"Current round focus: {playbook_focus} "
+            f"({playbook_focus_instruction(playbook_focus)})"
+        )
     if move_rationale:
         lines.append(
             f"Why the lead developer is continuing this handoff now: {move_rationale}"

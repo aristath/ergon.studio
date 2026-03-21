@@ -20,6 +20,16 @@ class ProxyResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(request.messages[0].role, "user")
         self.assertEqual(request.messages[0].content, "Build it")
 
+    def test_rejects_non_list_tools_container(self) -> None:
+        with self.assertRaisesRegex(ValueError, "tools must be a list or null"):
+            parse_responses_request(
+                {
+                    "model": "ergon",
+                    "input": "Build it",
+                    "tools": {"type": "function"},
+                }
+            )
+
     def test_parses_top_level_instructions_as_leading_system_message(self) -> None:
         request = parse_responses_request(
             {

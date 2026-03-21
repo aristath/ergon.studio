@@ -26,7 +26,12 @@ def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
         raise ValueError("chat completion request must include a messages list")
 
     messages = tuple(_parse_messages(raw_messages))
-    tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
+    raw_tools = payload.get("tools")
+    if raw_tools is None:
+        raw_tools = []
+    if not isinstance(raw_tools, list):
+        raise ValueError("tools must be a list or null")
+    tools = tuple(parse_function_tool(item) for item in raw_tools)
     stream = payload.get("stream", False)
     if type(stream) is not bool:
         raise ValueError("stream must be a bool")

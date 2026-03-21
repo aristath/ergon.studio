@@ -28,7 +28,12 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     if parallel_tool_calls is not None and type(parallel_tool_calls) is not bool:
         raise ValueError("parallel_tool_calls must be a bool or null")
 
-    tools = tuple(parse_function_tool(item) for item in payload.get("tools", []) or [])
+    raw_tools = payload.get("tools")
+    if raw_tools is None:
+        raw_tools = []
+    if not isinstance(raw_tools, list):
+        raise ValueError("tools must be a list or null")
+    tools = tuple(parse_function_tool(item) for item in raw_tools)
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
     messages: list[ProxyInputMessage] = []
     instructions = (

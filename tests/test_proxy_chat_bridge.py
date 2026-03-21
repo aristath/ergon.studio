@@ -77,6 +77,16 @@ class ProxyChatBridgeTests(unittest.TestCase):
                 }
             )
 
+    def test_rejects_non_list_tools_container(self) -> None:
+        with self.assertRaisesRegex(ValueError, "tools must be a list or null"):
+            parse_chat_completion_request(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "tools": {"type": "function"},
+                }
+            )
+
     def test_rejects_invalid_message_content(self) -> None:
         with self.assertRaises(ValueError):
             parse_chat_completion_request(

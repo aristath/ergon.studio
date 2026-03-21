@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,8 +42,12 @@ class ProxyCliTests(unittest.TestCase):
 
     def test_proxy_cli_requires_upstream_base_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaisesRegex(ValueError, "missing upstream base URL"):
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
                 main(["--serve", "--app-dir", temp_dir])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("missing upstream base URL", stderr.getvalue())
 
     def test_proxy_cli_does_not_bootstrap_workspace_in_headless_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

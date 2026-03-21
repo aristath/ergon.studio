@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +18,7 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workflow_step_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -29,6 +32,14 @@ ProxyEvent = (
     | ProxyToolCallEvent
     | ProxyFinishEvent
 )
+
+
+@dataclass(frozen=True)
+class _AgentAttemptResult:
+    agent_id: str
+    agent_label: str
+    text: str
+    response: Any
 
 
 class ProxyGroupedWorkflowExecutor:
@@ -83,6 +94,63 @@ class ProxyGroupedWorkflowExecutor:
         for step_index in range(start_index, len(step_groups)):
             group = step_groups[step_index]
             group_start_index = start_agent_index if step_index == start_index else 0
+            stage_entry_brief = current_brief
+            stage_outputs: list[str] = []
+            if self._should_try_parallel_group(
+                group=group,
+                pending=pending,
+                group_start_index=group_start_index,
+            ):
+                parallel_results = await self._run_parallel_group(
+                    request=request,
+                    definition=definition,
+                    group=group,
+                    goal=goal,
+                    current_brief=stage_entry_brief,
+                    loop_state=loop_state,
+                )
+                if any(
+                    extract_tool_calls(result.response)
+                    for result in parallel_results
+                    if result.response is not None
+                ):
+                    fallback_notice = (
+                        "Orchestrator: parallel stage requested tool use; "
+                        "rerunning this staffed group sequentially for safe "
+                        "continuation.\n"
+                    )
+                    state.append_reasoning(fallback_notice)
+                    yield ProxyReasoningDeltaEvent(fallback_notice)
+                else:
+                    for result in parallel_results:
+                        reasoning_delta = f"{result.agent_label}: {result.text}"
+                        state.append_reasoning(reasoning_delta)
+                        yield ProxyReasoningDeltaEvent(reasoning_delta)
+                        stage_outputs.append(reasoning_delta)
+                    workflow_outputs.extend(stage_outputs)
+                    current_brief = _stage_brief(
+                        stage_outputs=stage_outputs,
+                        fallback=stage_entry_brief,
+                    )
+                    if result_sink is not None:
+                        result_sink(
+                            ProxyMoveResult(
+                                worklog_lines=tuple(stage_outputs),
+                                current_brief=current_brief,
+                                workflow_progress=self._next_workflow_progress(
+                                    definition=definition,
+                                    step_groups=step_groups,
+                                    staffed_specialists=staffed_specialists,
+                                    step_index=step_index,
+                                    goal=goal,
+                                    current_brief=current_brief,
+                                    loop_state=loop_state,
+                                    workflow_outputs=workflow_outputs,
+                                ),
+                            )
+                        )
+                        return
+                    continue
             for agent_index in range(group_start_index, len(group)):
                 agent_id = group[agent_index]
                 agent_label = _agent_instance_label(group, agent_index)
@@ -94,7 +162,11 @@ class ProxyGroupedWorkflowExecutor:
                     ),
                     role_instance_context=_agent_instance_context(group, agent_index),
                     goal=goal,
-                    current_brief=current_brief,
+                    current_brief=(
+                        stage_entry_brief
+                        if _is_parallel_attempt_group(group)
+                        else current_brief
+                    ),
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workflow_outputs),
                     move_rationale=(
@@ -142,7 +214,7 @@ class ProxyGroupedWorkflowExecutor:
                             agent_index=agent_index,
                             agent_id=agent_id,
                             goal=goal,
-                            current_brief=agent_text.strip() or current_brief,
+                            current_brief=agent_text.strip() or stage_entry_brief,
                             decision_history=(
                                 loop_state.worklog if loop_state is not None else ()
                             ),
@@ -154,34 +226,30 @@ class ProxyGroupedWorkflowExecutor:
                         for event in emitted:
                             yield event
                         return
-                workflow_outputs.append(f"{agent_label}: {agent_text.strip()}")
-                current_brief = agent_text.strip() or current_brief
+                stage_outputs.append(f"{agent_label}: {agent_text.strip()}")
+                workflow_outputs.append(stage_outputs[-1])
+                if not _is_parallel_attempt_group(group):
+                    current_brief = agent_text.strip() or current_brief
+            if _is_parallel_attempt_group(group):
+                current_brief = _stage_brief(
+                    stage_outputs=stage_outputs,
+                    fallback=stage_entry_brief,
+                )
             if result_sink is not None:
-                next_step_index = step_index + 1
-                workflow_progress = None
-                if next_step_index < len(step_groups):
-                    next_group = step_groups[next_step_index]
-                    workflow_progress = ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        workflow_specialists=staffed_specialists,
-                        step_index=next_step_index,
-                        agent_index=0,
-                        agent_id=next_group[0],
-                        goal=goal,
-                        current_brief=current_brief,
-                        decision_history=(
-                            loop_state.worklog if loop_state is not None else ()
-                        ),
-                        workflow_outputs=tuple(workflow_outputs),
-                    )
                 result_sink(
                     ProxyMoveResult(
-                        worklog_lines=tuple(
-                            workflow_outputs[-len(group) :] if group else ()
-                        ),
+                        worklog_lines=tuple(stage_outputs),
                         current_brief=current_brief,
-                        workflow_progress=workflow_progress,
+                        workflow_progress=self._next_workflow_progress(
+                            definition=definition,
+                            step_groups=step_groups,
+                            staffed_specialists=staffed_specialists,
+                            step_index=step_index,
+                            goal=goal,
+                            current_brief=current_brief,
+                            loop_state=loop_state,
+                            workflow_outputs=workflow_outputs,
+                        ),
                     )
                 )
                 return
@@ -194,6 +262,127 @@ class ProxyGroupedWorkflowExecutor:
             state=state,
         ):
             yield summary_event
+
+    def _should_try_parallel_group(
+        self,
+        *,
+        group: tuple[str, ...],
+        pending: PendingContinuation | None,
+        group_start_index: int,
+    ) -> bool:
+        return (
+            _is_parallel_attempt_group(group)
+            and pending is None
+            and group_start_index == 0
+        )
+
+    async def _run_parallel_group(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        definition: DefinitionDocument,
+        group: tuple[str, ...],
+        goal: str,
+        current_brief: str,
+        loop_state: ProxyDecisionLoopState | None,
+    ) -> list[_AgentAttemptResult]:
+        tasks = [
+            asyncio.create_task(
+                self._run_group_agent(
+                    request=request,
+                    definition=definition,
+                    group=group,
+                    agent_index=agent_index,
+                    goal=goal,
+                    current_brief=current_brief,
+                    loop_state=loop_state,
+                )
+            )
+            for agent_index in range(len(group))
+        ]
+        return list(await asyncio.gather(*tasks))
+
+    async def _run_group_agent(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        definition: DefinitionDocument,
+        group: tuple[str, ...],
+        agent_index: int,
+        goal: str,
+        current_brief: str,
+        loop_state: ProxyDecisionLoopState | None,
+    ) -> _AgentAttemptResult:
+        agent_id = group[agent_index]
+        agent_label = _agent_instance_label(group, agent_index)
+        prompt = workflow_step_prompt(
+            workflow_id=definition.id,
+            agent_id=agent_id,
+            role_instance_label=(agent_label if agent_label != agent_id else None),
+            role_instance_context=_agent_instance_context(group, agent_index),
+            goal=goal,
+            current_brief=current_brief,
+            transcript_summary=summarize_conversation(request.messages),
+            prior_outputs=(),
+            move_rationale=(
+                loop_state.current_move_rationale if loop_state is not None else None
+            ),
+            success_criteria=(
+                loop_state.current_move_success_criteria
+                if loop_state is not None
+                else None
+            ),
+        )
+        text = ""
+        response_holder: dict[str, Any] = {}
+        async for delta in self._stream_text_agent(
+            agent_id=agent_id,
+            prompt=prompt,
+            session_id=f"proxy-workflow-{definition.id}-{agent_label}-{uuid4().hex}",
+            model_id_override=request.model,
+            host_tools=request.tools,
+            tool_choice=request.tool_choice,
+            parallel_tool_calls=request.parallel_tool_calls,
+            final_response_sink=response_holder_sink(response_holder),
+        ):
+            text += delta
+        return _AgentAttemptResult(
+            agent_id=agent_id,
+            agent_label=agent_label,
+            text=text.strip(),
+            response=response_holder.get("response"),
+        )
+
+    def _next_workflow_progress(
+        self,
+        *,
+        definition: DefinitionDocument,
+        step_groups: tuple[tuple[str, ...], ...],
+        staffed_specialists: tuple[str, ...],
+        step_index: int,
+        goal: str,
+        current_brief: str,
+        loop_state: ProxyDecisionLoopState | None,
+        workflow_outputs: list[str],
+    ) -> ContinuationState | None:
+        next_step_index = step_index + 1
+        if next_step_index >= len(step_groups):
+            return None
+        next_group = step_groups[next_step_index]
+        return ContinuationState(
+            mode="workflow",
+            workflow_id=definition.id,
+            workflow_specialists=staffed_specialists,
+            step_index=next_step_index,
+            agent_index=0,
+            agent_id=next_group[0],
+            goal=goal,
+            current_brief=current_brief,
+            decision_history=(
+                loop_state.worklog if loop_state is not None else ()
+            ),
+            workflow_outputs=tuple(workflow_outputs),
+        )
 
 
 def _filtered_step_groups(
@@ -210,6 +399,18 @@ def _filtered_step_groups(
         if filtered_group:
             filtered.append(filtered_group)
     return tuple(filtered)
+
+
+def _is_parallel_attempt_group(group: tuple[str, ...]) -> bool:
+    return len(group) > 1 and len(set(group)) == 1
+
+
+def _stage_brief(*, stage_outputs: list[str], fallback: str) -> str:
+    if not stage_outputs:
+        return fallback
+    if len(stage_outputs) == 1:
+        return stage_outputs[0].split(": ", 1)[-1]
+    return "\n".join(stage_outputs)
 
 
 def _agent_instance_label(group: tuple[str, ...], agent_index: int) -> str:

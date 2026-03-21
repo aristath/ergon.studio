@@ -85,9 +85,14 @@ class ProxyGroupedWorkflowExecutor:
             group_start_index = start_agent_index if step_index == start_index else 0
             for agent_index in range(group_start_index, len(group)):
                 agent_id = group[agent_index]
+                agent_label = _agent_instance_label(group, agent_index)
                 prompt = workflow_step_prompt(
                     workflow_id=definition.id,
                     agent_id=agent_id,
+                    role_instance_label=(
+                        agent_label if agent_label != agent_id else None
+                    ),
+                    role_instance_context=_agent_instance_context(group, agent_index),
                     goal=goal,
                     current_brief=current_brief,
                     transcript_summary=summarize_conversation(request.messages),
@@ -120,7 +125,7 @@ class ProxyGroupedWorkflowExecutor:
                     final_response_sink=response_holder_sink(response_holder),
                 ):
                     agent_text += delta
-                    reasoning_delta = f"{agent_id}: {delta}" if first else delta
+                    reasoning_delta = f"{agent_label}: {delta}" if first else delta
                     first = False
                     state.append_reasoning(reasoning_delta)
                     yield ProxyReasoningDeltaEvent(reasoning_delta)
@@ -149,7 +154,7 @@ class ProxyGroupedWorkflowExecutor:
                         for event in emitted:
                             yield event
                         return
-                workflow_outputs.append(f"{agent_id}: {agent_text.strip()}")
+                workflow_outputs.append(f"{agent_label}: {agent_text.strip()}")
                 current_brief = agent_text.strip() or current_brief
             if result_sink is not None:
                 next_step_index = step_index + 1
@@ -205,3 +210,29 @@ def _filtered_step_groups(
         if filtered_group:
             filtered.append(filtered_group)
     return tuple(filtered)
+
+
+def _agent_instance_label(group: tuple[str, ...], agent_index: int) -> str:
+    agent_id = group[agent_index]
+    total_instances = sum(1 for candidate in group if candidate == agent_id)
+    if total_instances <= 1:
+        return agent_id
+    current_instance = sum(
+        1 for candidate in group[: agent_index + 1] if candidate == agent_id
+    )
+    return f"{agent_id}[{current_instance}]"
+
+
+def _agent_instance_context(group: tuple[str, ...], agent_index: int) -> str | None:
+    agent_id = group[agent_index]
+    total_instances = sum(1 for candidate in group if candidate == agent_id)
+    if total_instances <= 1:
+        return None
+    current_instance = sum(
+        1 for candidate in group[: agent_index + 1] if candidate == agent_id
+    )
+    return (
+        f"You are instance {current_instance} of {total_instances} for the "
+        f"{agent_id} role in this staffed playbook stage. Add an independently "
+        "useful attempt instead of repeating the other instances."
+    )

@@ -182,6 +182,8 @@ def workflow_step_prompt(
     *,
     workflow_id: str,
     agent_id: str,
+    role_instance_label: str | None = None,
+    role_instance_context: str | None = None,
     goal: str,
     current_brief: str,
     transcript_summary: str,
@@ -192,6 +194,23 @@ def workflow_step_prompt(
     lines = [
         f"You are {agent_id} working inside playbook {workflow_id}.",
         "The lead developer is using this playbook as a tactic, not as a rigid script.",
+    ]
+    if role_instance_label:
+        lines.extend(
+            [
+                "",
+                f"Current staffed instance: {role_instance_label}",
+            ]
+        )
+    if role_instance_context:
+        lines.extend(
+            [
+                "",
+                role_instance_context,
+            ]
+        )
+    lines.extend(
+        [
         "",
         "Conversation summary:",
         transcript_summary or "(none)",
@@ -201,7 +220,8 @@ def workflow_step_prompt(
         "",
         "Current brief:",
         current_brief or "(none)",
-    ]
+        ]
+    )
     if prior_outputs:
         lines.extend(
             [

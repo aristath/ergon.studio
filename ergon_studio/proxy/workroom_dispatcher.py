@@ -155,7 +155,7 @@ class ProxyWorkroomDispatcher:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         shape = workroom_shape_for_definition(definition)
-        if shape in {"sequential", "grouped"}:
+        if shape == "staged":
             async for event in self._execute_grouped_workroom(
                 request=request,
                 definition=definition,
@@ -171,7 +171,7 @@ class ProxyWorkroomDispatcher:
             ):
                 yield event
             return
-        if shape == "group_chat":
+        if shape == "discussion":
             async for event in self._execute_group_chat_workroom(
                 request=request,
                 definition=definition,
@@ -236,11 +236,11 @@ def _ad_hoc_workroom_definition(
         expanded_staffing = specialists
     unique_roles = {agent_id for agent_id in expanded_staffing}
     if len(expanded_staffing) > 1 and len(unique_roles) == 1:
-        shape = "grouped"
+        shape = "staged"
         steps = list(expanded_staffing)
         max_rounds = len(expanded_staffing)
     else:
-        shape = "group_chat"
+        shape = "discussion"
         steps = list(specialists)
         max_rounds = max(len(expanded_staffing), 2)
     return DefinitionDocument(

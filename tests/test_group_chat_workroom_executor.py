@@ -142,7 +142,7 @@ def _definition() -> DefinitionDocument:
         path=Path("debate.md"),
         metadata={
             "id": "debate",
-            "shape": "group_chat",
+            "shape": "discussion",
             "steps": ["architect", "reviewer"],
         },
         body="## Purpose\nDebate.",

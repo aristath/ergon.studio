@@ -75,7 +75,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: standard-build\n"
-                    "shape: sequential\n"
+                    "shape: staged\n"
                     "steps:\n"
                     "  - architect\n"
                     "  - coder\n"
@@ -89,7 +89,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: research-then-decide\n"
-                    "shape: sequential\n"
+                    "shape: staged\n"
                     "steps:\n"
                     "  - researcher\n"
                     "---\n"
@@ -102,7 +102,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: debate\n"
-                    "shape: group_chat\n"
+                    "shape: discussion\n"
                     "step_groups:\n"
                     "  - [architect, reviewer]\n"
                     "---\n"
@@ -168,7 +168,7 @@ class RegistryTests(unittest.TestCase):
                 (
                     "---\n"
                     "id: standard-build\n"
-                    "shape: sequential\n"
+                    "shape: staged\n"
                     "steps:\n"
                     "  - coder\n"
                     "---\n"

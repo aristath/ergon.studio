@@ -19,7 +19,7 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             path=Path("discussion-room.md"),
             metadata={
                 "id": "discussion-room",
-                "shape": "group_chat",
+                "shape": "discussion",
                 "step_groups": [
                     [" architect ", "reviewer"],
                     ["reviewer", "brainstormer"],
@@ -30,7 +30,7 @@ class ProxyWorkroomMetadataTests(unittest.TestCase):
             sections={"Purpose": "Discussion."},
         )
 
-        self.assertEqual(workroom_shape_for_definition(definition), "group_chat")
+        self.assertEqual(workroom_shape_for_definition(definition), "discussion")
         self.assertEqual(
             workroom_participants_for_definition(definition),
             ("architect", "reviewer", "brainstormer"),

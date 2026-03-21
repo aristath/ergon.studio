@@ -956,7 +956,7 @@ class _FakeRegistry:
                     path=Path("standard-build.md"),
                     metadata={
                         "id": "standard-build",
-                        "shape": "sequential",
+                        "shape": "staged",
                         "steps": ["architect", "coder"],
                     },
                     body="## Purpose\nBuild.",
@@ -1022,7 +1022,7 @@ def _grouped_workroom_registry():
         path=Path("grouped-build.md"),
         metadata={
             "id": "grouped-build",
-            "shape": "grouped",
+            "shape": "staged",
             "step_groups": [["architect", "coder", "reviewer"]],
         },
         body="## Purpose\nGrouped build.",
@@ -1095,7 +1095,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("debate.md"),
                 metadata={
                     "id": "debate",
-                    "shape": "group_chat",
+                    "shape": "discussion",
                     "steps": [
                         "architect",
                         "brainstormer",
@@ -1112,7 +1112,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("dynamic-open-ended.md"),
                 metadata={
                     "id": "dynamic-open-ended",
-                    "shape": "group_chat",
+                    "shape": "discussion",
                     "steps": ["architect", "reviewer"],
                     "max_rounds": 3,
                 },
@@ -1124,7 +1124,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 path=Path("handoff-chain.md"),
                 metadata={
                     "id": "handoff-chain",
-                    "shape": "sequential",
+                    "shape": "staged",
                     "step_groups": [["researcher"], ["reviewer"]],
                     "max_rounds": 3,
                 },

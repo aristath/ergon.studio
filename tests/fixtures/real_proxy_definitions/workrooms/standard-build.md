@@ -1,7 +1,7 @@
 ---
 id: standard-build
 name: Standard Build
-shape: sequential
+shape: staged
 steps:
   - architect
   - coder

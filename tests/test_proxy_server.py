@@ -1257,7 +1257,7 @@ def _proxy_registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "shape": "sequential",
+                    "shape": "staged",
                     "steps": ["architect", "coder"],
                 },
                 body="## Purpose\nBuild.",

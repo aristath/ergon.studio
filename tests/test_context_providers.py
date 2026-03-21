@@ -46,7 +46,7 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
                 "standard-build": DefinitionDocument(
                     id="standard-build",
                     path=None,
-                    metadata={"id": "standard-build", "shape": "sequential"},
+                    metadata={"id": "standard-build", "shape": "staged"},
                     body="",
                     sections={},
                 )
@@ -64,4 +64,4 @@ class AgentProfileContextProviderTests(unittest.IsolatedAsyncioTestCase):
         payload = context.instructions[0][1]
         self.assertIn("Agent profile: orchestrator", payload)
         self.assertIn("Available specialists: coder(coder)", payload)
-        self.assertIn("Available workrooms: standard-build(sequential)", payload)
+        self.assertIn("Available workrooms: standard-build(staged)", payload)

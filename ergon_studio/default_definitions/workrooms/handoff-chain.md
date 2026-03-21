@@ -1,7 +1,7 @@
 ---
 id: handoff-chain
 name: Handoff Chain
-shape: sequential
+shape: staged
 steps:
   - researcher
   - architect

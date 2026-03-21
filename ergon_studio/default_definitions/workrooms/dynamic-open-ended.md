@@ -1,7 +1,7 @@
 ---
 id: dynamic-open-ended
 name: Dynamic Open Ended
-shape: group_chat
+shape: discussion
 steps:
   - researcher
   - architect

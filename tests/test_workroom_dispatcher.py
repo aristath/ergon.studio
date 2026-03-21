@@ -176,7 +176,7 @@ class WorkroomDispatcherTests(unittest.IsolatedAsyncioTestCase):
                     "ad-hoc-workroom",
                     "Try three implementations",
                     ("coder", "coder", "coder"),
-                    "grouped",
+                    "staged",
                 )
             ],
         )
@@ -215,7 +215,7 @@ def _registry() -> RuntimeRegistry:
                 path=Path("standard-build.md"),
                 metadata={
                     "id": "standard-build",
-                    "shape": "sequential",
+                    "shape": "staged",
                     "steps": ["architect"],
                 },
                 body="## Purpose\nBuild.",

@@ -119,6 +119,9 @@ class ProxyOrchestrationCore:
             execute_finish=turn_executor.execute_finish,
             execute_delegation=turn_executor.execute_delegation,
             execute_workflow=workflow_request_executor.execute_workflow,
+            execute_playbook_continuation=(
+                workflow_request_executor.execute_active_workflow
+            ),
             execute_workflow_continuation=(
                 workflow_request_executor.execute_workflow_continuation
             ),

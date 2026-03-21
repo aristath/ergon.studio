@@ -35,12 +35,14 @@ class ProxyTurnRouter:
         execute_finish: TurnHandler,
         execute_delegation: TurnHandler,
         execute_workflow: TurnHandler,
+        execute_playbook_continuation: TurnHandler,
         execute_workflow_continuation: TurnHandler,
     ) -> None:
         self._execute_direct = execute_direct
         self._execute_finish = execute_finish
         self._execute_delegation = execute_delegation
         self._execute_workflow = execute_workflow
+        self._execute_playbook_continuation = execute_playbook_continuation
         self._execute_workflow_continuation = execute_workflow_continuation
 
     async def execute_plan(
@@ -74,6 +76,15 @@ class ProxyTurnRouter:
             async for event in self._execute_workflow(
                 request=request,
                 plan=plan,
+                state=state,
+                loop_state=loop_state,
+                result_sink=result_sink,
+            ):
+                yield event
+            return
+        if plan.mode == "continue_playbook":
+            async for event in self._execute_playbook_continuation(
+                request=request,
                 state=state,
                 loop_state=loop_state,
                 result_sink=result_sink,

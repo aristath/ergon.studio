@@ -63,7 +63,8 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             "Allowed modes:",
             '- "act": the lead developer handles the next move directly.',
             '- "delegate": assign one specialist a focused task.',
-            '- "workflow": invoke a named playbook involving one or more specialists.',
+            '- "workflow": start a named playbook involving one or more specialists.',
+            '- "continue_playbook": continue the playbook already in progress.',
             '- "finish": deliver the current result back to the product manager.',
             "",
             "Rules:",
@@ -86,6 +87,10 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "comparison, review, repair, debate, or adaptive staffing."
             ),
             (
+                "- Prefer continue_playbook when the current playbook is still the "
+                "right tactic and should advance another round."
+            ),
+            (
                 "- Workflows are playbooks, not rigid laws. Choose one when it is a "
                 "good tactic, not because keywords happen to match."
             ),
@@ -105,7 +110,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","deliverable_expected":false}',
         ]
     )
 
@@ -169,7 +174,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         raise ValueError("planner output must be a JSON object")
 
     mode = str(payload.get("mode", "act")).strip().lower()
-    if mode not in {"act", "delegate", "workflow", "finish"}:
+    if mode not in {"act", "delegate", "workflow", "continue_playbook", "finish"}:
         mode = "act"
     workflow_id = resolve_workflow_reference(
         registry, _optional_text(payload.get("workflow_id"))

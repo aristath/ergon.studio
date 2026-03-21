@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -54,6 +55,35 @@ class ProxyTurnPlanner:
         if not planner_text:
             return ProxyTurnPlan(mode="act")
         try:
-            return parse_turn_plan(planner_text, registry=self._registry)
+            plan = parse_turn_plan(planner_text, registry=self._registry)
         except ValueError:
             return ProxyTurnPlan(mode="act")
+        return self._normalize_plan(plan, loop_state=loop_state)
+
+    def _normalize_plan(
+        self,
+        plan: ProxyTurnPlan,
+        *,
+        loop_state: ProxyDecisionLoopState | None,
+    ) -> ProxyTurnPlan:
+        active_workflow_id = (
+            loop_state.workflow_progress.workflow_id
+            if loop_state is not None
+            and loop_state.workflow_progress is not None
+            else None
+        )
+        if active_workflow_id is None:
+            if plan.mode == "continue_playbook":
+                return replace(plan, mode="act", workflow_id=None)
+            return plan
+
+        if plan.mode == "continue_playbook":
+            if plan.workflow_id is None:
+                return replace(plan, workflow_id=active_workflow_id)
+            if plan.workflow_id != active_workflow_id:
+                return replace(plan, mode="workflow")
+            return plan
+
+        if plan.mode == "workflow" and plan.workflow_id == active_workflow_id:
+            return replace(plan, mode="continue_playbook")
+        return plan

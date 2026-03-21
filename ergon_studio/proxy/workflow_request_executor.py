@@ -30,6 +30,35 @@ class ProxyWorkflowRequestExecutor:
     def __init__(self, workflow_dispatcher: ProxyWorkflowDispatcher) -> None:
         self._workflow_dispatcher = workflow_dispatcher
 
+    async def execute_active_workflow(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        state: ProxyTurnState,
+        result_sink: Callable[[ProxyMoveResult], None] | None = None,
+        loop_state: ProxyDecisionLoopState | None = None,
+    ) -> AsyncIterator[ProxyEvent]:
+        workflow_progress = (
+            loop_state.workflow_progress
+            if loop_state is not None
+            else None
+        )
+        if workflow_progress is None:
+            state.finish_reason = "error"
+            error_text = "No active playbook is available to continue."
+            state.content = error_text
+            yield ProxyContentDeltaEvent(error_text)
+            return
+        async for event in self._workflow_dispatcher.execute_workflow_continuation(
+            request=request,
+            continuation=workflow_progress,
+            pending=None,
+            state=state,
+            result_sink=result_sink,
+            loop_state=loop_state,
+        ):
+            yield event
+
     async def execute_workflow(
         self,
         *,
@@ -39,24 +68,6 @@ class ProxyWorkflowRequestExecutor:
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        workflow_progress = (
-            loop_state.workflow_progress
-            if loop_state is not None
-            and loop_state.workflow_progress is not None
-            and loop_state.workflow_progress.workflow_id == plan.workflow_id
-            else None
-        )
-        if workflow_progress is not None:
-            async for event in self._workflow_dispatcher.execute_workflow_continuation(
-                request=request,
-                continuation=workflow_progress,
-                pending=None,
-                state=state,
-                result_sink=result_sink,
-                loop_state=loop_state,
-            ):
-                yield event
-            return
         async for event in self._workflow_dispatcher.execute_workflow(
             request=request,
             workflow_id=plan.workflow_id,

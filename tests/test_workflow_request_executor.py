@@ -11,7 +11,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_request_executor import (
     ProxyWorkflowRequestExecutor,
@@ -114,6 +114,88 @@ class WorkflowRequestExecutorTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("expected ProxyContentDeltaEvent")
         self.assertEqual(first_event.delta, "continued")
 
+    async def test_execute_active_workflow_uses_loop_state_progress(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def _execute_workflow(**kwargs):
+            raise AssertionError("not expected")
+
+        async def _execute_workflow_continuation(**kwargs):
+            calls.append(kwargs)
+            yield ProxyContentDeltaEvent("continued")
+
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_execute_workflow,
+                    execute_workflow_continuation=_execute_workflow_continuation,
+                ),
+            )
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+        loop_state = ProxyDecisionLoopState(
+            goal="Build calculator",
+            current_brief="Architecture ready",
+            workflow_progress=ContinuationState(
+                mode="workflow",
+                agent_id="architect",
+                workflow_id="standard-build",
+            ),
+        )
+
+        events = [
+            event
+            async for event in executor.execute_active_workflow(
+                request=request,
+                state=ProxyTurnState(),
+                loop_state=loop_state,
+            )
+        ]
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["continuation"], loop_state.workflow_progress)
+        self.assertIsNone(calls[0]["pending"])
+        first_event = events[0]
+        self.assertIsInstance(first_event, ProxyContentDeltaEvent)
+        if not isinstance(first_event, ProxyContentDeltaEvent):
+            raise AssertionError("expected ProxyContentDeltaEvent")
+        self.assertEqual(first_event.delta, "continued")
+
+    async def test_execute_active_workflow_errors_without_progress(self) -> None:
+        executor = ProxyWorkflowRequestExecutor(
+            cast(
+                ProxyWorkflowDispatcher,
+                _FakeWorkflowDispatcher(
+                    execute_workflow=_unexpected_workflow,
+                    execute_workflow_continuation=_unexpected_workflow,
+                ),
+            )
+        )
+        state = ProxyTurnState()
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+
+        events = [
+            event
+            async for event in executor.execute_active_workflow(
+                request=request,
+                state=state,
+            )
+        ]
+
+        self.assertEqual(state.finish_reason, "error")
+        first_event = events[0]
+        self.assertIsInstance(first_event, ProxyContentDeltaEvent)
+        if not isinstance(first_event, ProxyContentDeltaEvent):
+            raise AssertionError("expected ProxyContentDeltaEvent")
+        self.assertIn("No active playbook", first_event.delta)
+
 
 class _FakeWorkflowDispatcher:
     def __init__(
@@ -134,3 +216,7 @@ class _FakeWorkflowDispatcher:
     async def execute_workflow_continuation(self, **kwargs):
         async for event in self._execute_workflow_continuation(**kwargs):
             yield event
+
+
+async def _unexpected_workflow(**_kwargs):
+    raise AssertionError("not expected")

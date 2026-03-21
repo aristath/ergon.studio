@@ -4,8 +4,10 @@ import unittest
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
+from ergon_studio.proxy.continuation import ContinuationState
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyTurnRequest
 from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
@@ -60,6 +62,60 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan.mode, "workflow")
         self.assertEqual(plan.workflow_id, "standard-build")
         self.assertEqual(plan.goal, "Build calculator")
+
+    async def test_plan_turn_parses_continue_playbook_decision(self) -> None:
+        async def _run_text_agent(**_kwargs):
+            return '{"mode":"continue_playbook"}'
+
+        planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+
+        plan = await planner.plan_turn(
+            request,
+            loop_state=ProxyDecisionLoopState(
+                goal="Build calculator",
+                current_brief="Architecture ready",
+                workflow_progress=ContinuationState(
+                    mode="workflow",
+                    agent_id="architect",
+                    workflow_id="standard-build",
+                ),
+            ),
+        )
+
+        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertEqual(plan.workflow_id, "standard-build")
+
+    async def test_plan_turn_normalizes_same_workflow_id_to_continue_playbook(
+        self,
+    ) -> None:
+        async def _run_text_agent(**_kwargs):
+            return '{"mode":"workflow","workflow_id":"standard-build"}'
+
+        planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Keep going"),),
+        )
+
+        plan = await planner.plan_turn(
+            request,
+            loop_state=ProxyDecisionLoopState(
+                goal="Build calculator",
+                current_brief="Architecture ready",
+                workflow_progress=ContinuationState(
+                    mode="workflow",
+                    agent_id="architect",
+                    workflow_id="standard-build",
+                ),
+            ),
+        )
+
+        self.assertEqual(plan.mode, "continue_playbook")
+        self.assertEqual(plan.workflow_id, "standard-build")
 
 
 def _registry() -> RuntimeRegistry:

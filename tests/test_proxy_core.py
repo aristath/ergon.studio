@@ -151,7 +151,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"standard-build",'
                             '"goal":"Build calculator"}'
                         ),
-                        '{"mode":"workflow","workflow_id":"standard-build"}',
+                        '{"mode":"continue_playbook"}',
                         '{"mode":"finish"}',
                         "Workflow final summary",
                     ],
@@ -269,7 +269,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "orchestrator": [
-                        '{"mode":"workflow","workflow_id":"standard-build"}',
+                        '{"mode":"continue_playbook"}',
                         '{"mode":"finish"}',
                         "Workflow final summary",
                     ],
@@ -443,9 +443,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '{"mode":"workflow","workflow_id":"debate",'
                             '"goal":"Choose an approach"}'
                         ),
-                        '{"mode":"workflow","workflow_id":"debate"}',
-                        '{"mode":"workflow","workflow_id":"debate"}',
-                        '{"mode":"workflow","workflow_id":"debate"}',
+                        '{"mode":"continue_playbook"}',
+                        '{"mode":"continue_playbook"}',
+                        '{"mode":"continue_playbook"}',
                         '{"mode":"finish"}',
                         "Debate final summary",
                     ],
@@ -486,9 +486,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"workflow_id":"dynamic-open-ended","goal":"Build it"}'
                         ),
                         '{"agent_id":"architect"}',
-                        '{"mode":"workflow","workflow_id":"dynamic-open-ended"}',
+                        '{"mode":"continue_playbook"}',
                         '{"agent_id":"reviewer"}',
-                        '{"mode":"workflow","workflow_id":"dynamic-open-ended"}',
+                        '{"mode":"continue_playbook"}',
                         '{"agent_id":null}',
                         '{"mode":"finish"}',
                         "Dynamic final summary",
@@ -528,7 +528,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             '"workflow_id":"specialist-handoff",'
                             '"goal":"Research and decide"}'
                         ),
-                        '{"mode":"workflow","workflow_id":"specialist-handoff"}',
+                        '{"mode":"continue_playbook"}',
                         '{"mode":"finish"}',
                         "Handoff final summary",
                     ],

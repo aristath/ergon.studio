@@ -280,7 +280,7 @@ class ProxyOrchestrationCore:
             active_workroom = loop_state.active_workroom
             if (
                 active_workroom is None
-                and action.workroom_id is None
+                and action.preset is None
                 and not action.participants
             ):
                 state.finish_reason = "error"
@@ -315,7 +315,7 @@ class ProxyOrchestrationCore:
                 return
             async for event in self._message_workroom(
                 request=request,
-                workroom_id=action.workroom_id,
+                workroom_id=action.preset,
                 participants=action.participants,
                 workroom_message=action.message,
                 goal=loop_state.goal,
@@ -522,9 +522,9 @@ def _should_continue_active_workroom(
 ) -> bool:
     if active_workroom is None:
         return False
-    if action.workroom_id is None:
+    if action.preset is None:
         return True
-    return action.workroom_id == active_workroom.workroom_id
+    return action.preset == active_workroom.workroom_id
 
 
 def _store_response(holder: dict[str, Any], value: object) -> None:

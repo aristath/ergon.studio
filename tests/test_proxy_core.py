@@ -154,7 +154,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="standard-build",
+                            preset="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(
@@ -197,7 +197,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="standard-build",
+                            preset="standard-build",
                             participants=["coder"],
                             message="Build calculator",
                         ),
@@ -274,7 +274,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="standard-build",
+                            preset="standard-build",
                             message="Build calculator",
                         ),
                     ],
@@ -413,7 +413,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="build-room",
+                            preset="build-room",
                             message="Build calculator",
                         ),
                     ],
@@ -495,7 +495,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="debate",
+                            preset="debate",
                             message="Choose an approach",
                         ),
                         "Debate final summary",
@@ -535,7 +535,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="debate",
+                            preset="debate",
                             message="Build it",
                         ),
                         _internal_action(

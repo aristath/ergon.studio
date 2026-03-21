@@ -11,7 +11,7 @@ INTERNAL_TOOL_NAMES = frozenset({"message_workroom"})
 
 @dataclass(frozen=True)
 class MessageWorkroomAction:
-    workroom_id: str | None
+    preset: str | None
     participants: tuple[str, ...]
     message: str
 
@@ -32,7 +32,7 @@ def build_orchestrator_internal_tools(
         ProxyFunctionTool(
             name="message_workroom",
             description=(
-                "Message a workroom. Provide a preset workroom_id or participants "
+                "Message a workroom. Provide a preset or participants "
                 "to open a room. If a room is already active, omitting both means "
                 "continue it. Repeating a participant means multiple staffed "
                 "instances of that role."
@@ -40,7 +40,7 @@ def build_orchestrator_internal_tools(
             parameters={
                 "type": "object",
                 "properties": {
-                    "workroom_id": {
+                    "preset": {
                         "type": "string",
                         "enum": list(workroom_ids),
                     },
@@ -75,7 +75,7 @@ def parse_internal_action(
         raise ValueError(f"unsupported internal tool: {tool_call.name}")
 
     return MessageWorkroomAction(
-        workroom_id=_optional_workroom_id(payload.get("workroom_id"), registry),
+        preset=_optional_preset(payload.get("preset"), registry),
         participants=_normalize_staffing_list(
             payload.get("participants"),
             registry=registry,
@@ -97,14 +97,14 @@ def _required_text(value: object, *, field: str) -> str:
     return stripped
 
 
-def _optional_workroom_id(
+def _optional_preset(
     value: object,
     registry: RuntimeRegistry,
 ) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ValueError("workroom_id must be a string when provided")
+        raise ValueError("preset must be a string when provided")
     stripped = value.strip()
     if not stripped:
         return None

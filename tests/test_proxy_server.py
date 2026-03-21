@@ -585,7 +585,7 @@ class ProxyServerTests(unittest.TestCase):
                     "orchestrator": [
                         _internal_action(
                             "message_workroom",
-                            workroom_id="standard-build",
+                            preset="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(

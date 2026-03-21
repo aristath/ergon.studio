@@ -22,6 +22,9 @@ from ergon_studio.proxy.group_chat_workflow_executor import (
     ProxyGroupChatWorkflowExecutor,
 )
 from ergon_studio.proxy.grouped_workflow_executor import ProxyGroupedWorkflowExecutor
+from ergon_studio.proxy.handoff_workflow_executor import (
+    ProxyHandoffWorkflowExecutor,
+)
 from ergon_studio.proxy.magentic_workflow_executor import (
     ProxyMagenticWorkflowExecutor,
 )
@@ -51,18 +54,10 @@ from ergon_studio.proxy.prompts import (
     summary_instructions,
     workflow_manager_instructions,
     workflow_manager_prompt,
-    workflow_step_prompt,
     workflow_summary_prompt,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
-from ergon_studio.proxy.workflow_metadata import (
-    workflow_finalizers_for_definition,
-    workflow_handoffs_for_definition,
-    workflow_max_rounds_for_definition,
-    workflow_participants_for_definition,
-    workflow_start_agent_for_definition,
-)
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -107,6 +102,12 @@ class ProxyOrchestrationCore:
             emit_tool_calls=self._emit_tool_calls,
             emit_workflow_summary=self._emit_workflow_summary,
             select_manager_agent=self._select_manager_agent,
+        )
+        self._handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
+            stream_text_agent=self._stream_text_agent,
+            emit_tool_calls=self._emit_tool_calls,
+            emit_workflow_summary=self._emit_workflow_summary,
+            select_handoff_target=self._select_handoff_target,
         )
 
     def stream_turn(
@@ -458,107 +459,13 @@ class ProxyOrchestrationCore:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        participants = workflow_participants_for_definition(definition)
-        finalizers = workflow_finalizers_for_definition(definition)
-        handoffs = workflow_handoffs_for_definition(definition)
-        max_rounds = workflow_max_rounds_for_definition(
-            definition, default=max(len(participants), 1)
-        )
-        current_brief = (
-            continuation.current_brief
-            if continuation and continuation.current_brief is not None
-            else goal
-        )
-        workflow_outputs: list[str] = (
-            list(continuation.workflow_outputs) if continuation is not None else []
-        )
-        round_index = (
-            continuation.step_index
-            if continuation and continuation.step_index is not None
-            else 0
-        )
-        current_agent: str | None = (
-            continuation.agent_id
-            if continuation is not None and continuation.agent_id is not None
-            else workflow_start_agent_for_definition(definition)
-            or (participants[0] if participants else "reviewer")
-        )
-
-        while round_index < max_rounds and current_agent:
-            prompt = workflow_step_prompt(
-                workflow_id=definition.id,
-                agent_id=current_agent,
-                goal=goal,
-                current_brief=current_brief,
-                transcript_summary=summarize_conversation(request.messages),
-                prior_outputs=tuple(workflow_outputs),
-            )
-            agent_text = ""
-            first = True
-            response_holder: dict[str, Any] = {}
-            async for delta in self._stream_text_agent(
-                agent_id=current_agent,
-                prompt=prompt,
-                session_id=f"proxy-handoff-{definition.id}-{current_agent}-{uuid4().hex}",
-                model_id_override=request.model,
-                host_tools=request.tools,
-                tool_choice=request.tool_choice,
-                parallel_tool_calls=request.parallel_tool_calls,
-                pending_continuation=pending
-                if continuation is not None
-                and round_index == (continuation.step_index or 0)
-                else None,
-                final_response_sink=_response_holder_sink(response_holder),
-            ):
-                agent_text += delta
-                reasoning_delta = f"{current_agent}: {delta}" if first else delta
-                first = False
-                state.append_reasoning(reasoning_delta)
-                yield ProxyReasoningDeltaEvent(reasoning_delta)
-            response = response_holder.get("response")
-            if response is not None:
-                emitted = self._emit_tool_calls(
-                    response=response,
-                    request=request,
-                    continuation=ContinuationState(
-                        mode="workflow",
-                        workflow_id=definition.id,
-                        step_index=round_index,
-                        agent_id=current_agent,
-                        goal=goal,
-                        current_brief=agent_text.strip() or current_brief,
-                        workflow_outputs=tuple(workflow_outputs),
-                    ),
-                    state=state,
-                )
-                if emitted:
-                    for tool_event in emitted:
-                        yield tool_event
-                    return
-            workflow_outputs.append(f"{current_agent}: {agent_text.strip()}")
-            current_brief = agent_text.strip() or current_brief
-            if current_agent in finalizers:
-                break
-            current_agent = await self._select_handoff_target(
-                workflow_id=definition.id,
-                current_agent=current_agent,
-                goal=goal,
-                current_brief=current_brief,
-                prior_outputs=tuple(workflow_outputs),
-                allowed=handoffs.get(
-                    current_agent,
-                    tuple(agent for agent in participants if agent != current_agent),
-                ),
-                model_id_override=request.model,
-            )
-            round_index += 1
-        async for summary_event in self._emit_workflow_summary(
+        async for summary_event in self._handoff_workflow_executor.execute(
             request=request,
             definition=definition,
             goal=goal,
-            current_brief=current_brief,
-            workflow_outputs=tuple(workflow_outputs),
             state=state,
+            continuation=continuation,
+            pending=pending,
         ):
             yield summary_event
 

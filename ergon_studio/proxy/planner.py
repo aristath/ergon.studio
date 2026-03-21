@@ -20,6 +20,8 @@ class ProxyTurnPlan:
     agent_id: str | None = None
     request: str | None = None
     goal: str | None = None
+    rationale: str | None = None
+    success_criteria: str | None = None
     deliverable_expected: bool = False
 
 
@@ -72,6 +74,10 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
                 "- Think like a pragmatic lead developer, not a classifier."
             ),
             (
+                "- When useful, explain why this move is the right next step and "
+                "what a good outcome would look like."
+            ),
+            (
                 "- Prefer act for discussion, clarification, planning with the product "
                 "manager, and small direct actions."
             ),
@@ -110,7 +116,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","deliverable_expected":false}',
+            '{"mode":"workflow|continue_playbook|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","rationale":"","success_criteria":"","deliverable_expected":false}',
         ]
     )
 
@@ -188,6 +194,8 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         agent_id=agent_id,
         request=_optional_text(payload.get("request")),
         goal=_optional_text(payload.get("goal")),
+        rationale=_optional_text(payload.get("rationale")),
+        success_criteria=_optional_text(payload.get("success_criteria")),
         deliverable_expected=bool(payload.get("deliverable_expected", False)),
     )
 

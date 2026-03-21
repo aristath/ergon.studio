@@ -97,6 +97,16 @@ class ProxyGroupChatWorkflowExecutor:
                 transcript_summary=summarize_conversation(request.messages),
                 current_brief=current_brief,
                 prior_outputs=tuple(workflow_outputs),
+                move_rationale=(
+                    loop_state.current_move_rationale
+                    if loop_state is not None
+                    else None
+                ),
+                success_criteria=(
+                    loop_state.current_move_success_criteria
+                    if loop_state is not None
+                    else None
+                ),
             )
             agent_text = ""
             first = True

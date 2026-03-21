@@ -56,7 +56,10 @@ class ProxyTurnExecutor:
         pending: PendingContinuation | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        notice = "Orchestrator: handling this turn directly.\n"
+        notice = _decision_notice(
+            base="Orchestrator: handling this turn directly.",
+            loop_state=loop_state,
+        )
         state.append_reasoning(notice)
         yield ProxyReasoningDeltaEvent(notice)
         prompt = direct_reply_prompt(
@@ -64,6 +67,14 @@ class ProxyTurnExecutor:
             goal=loop_state.goal if loop_state is not None else None,
             current_brief=loop_state.current_brief if loop_state is not None else None,
             worklog=loop_state.worklog if loop_state is not None else (),
+            move_rationale=(
+                loop_state.current_move_rationale if loop_state is not None else None
+            ),
+            success_criteria=(
+                loop_state.current_move_success_criteria
+                if loop_state is not None
+                else None
+            ),
         )
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
@@ -107,7 +118,10 @@ class ProxyTurnExecutor:
         state: ProxyTurnState,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        notice = "Orchestrator: delivering the current result.\n"
+        notice = _decision_notice(
+            base="Orchestrator: delivering the current result.",
+            loop_state=loop_state,
+        )
         state.append_reasoning(notice)
         yield ProxyReasoningDeltaEvent(notice)
         prompt = finish_reply_prompt(
@@ -115,6 +129,14 @@ class ProxyTurnExecutor:
             goal=loop_state.goal if loop_state is not None else None,
             current_brief=loop_state.current_brief if loop_state is not None else None,
             worklog=loop_state.worklog if loop_state is not None else (),
+            move_rationale=(
+                loop_state.current_move_rationale if loop_state is not None else None
+            ),
+            success_criteria=(
+                loop_state.current_move_success_criteria
+                if loop_state is not None
+                else None
+            ),
         )
         response_holder: dict[str, Any] = {}
         async for delta in self._stream_text_agent(
@@ -162,7 +184,10 @@ class ProxyTurnExecutor:
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         agent_id = plan.agent_id or "coder"
-        intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
+        intro = _decision_notice(
+            base=f"Orchestrator: delegating this turn to {agent_id}.",
+            loop_state=loop_state,
+        )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         prompt_text = specialist_prompt(
@@ -170,6 +195,8 @@ class ProxyTurnExecutor:
             request_text=plan.request or request.latest_user_text() or "",
             transcript_summary=summarize_conversation(request.messages),
             current_brief=current_brief,
+            move_rationale=plan.rationale,
+            success_criteria=plan.success_criteria,
         )
         specialist_text = ""
         first = True
@@ -239,3 +266,16 @@ class ProxyTurnExecutor:
         state.set_content(summary_text)
         if summary_text:
             yield ProxyContentDeltaEvent(summary_text)
+
+
+def _decision_notice(
+    *,
+    base: str,
+    loop_state: ProxyDecisionLoopState | None,
+) -> str:
+    lines = [base]
+    if loop_state is not None and loop_state.current_move_rationale:
+        lines.append(f"Why: {loop_state.current_move_rationale}")
+    if loop_state is not None and loop_state.current_move_success_criteria:
+        lines.append(f"Success target: {loop_state.current_move_success_criteria}")
+    return "\n".join(lines) + "\n"

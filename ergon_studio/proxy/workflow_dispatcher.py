@@ -65,7 +65,10 @@ class ProxyWorkflowDispatcher:
             state.content = error_text
             yield ProxyContentDeltaEvent(error_text)
             return
-        intro = f"Orchestrator: running workflow {definition.id}.\n"
+        intro = _workflow_notice(
+            base=f"Orchestrator: running workflow {definition.id}.",
+            loop_state=loop_state,
+        )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
         async for event in self._dispatch_workflow(
@@ -98,8 +101,12 @@ class ProxyWorkflowDispatcher:
             yield ProxyContentDeltaEvent(error_text)
             return
         agent_name = continuation.agent_id or "(unknown)"
-        intro = (
-            f"Orchestrator: continuing workflow {definition.id} with {agent_name}.\n"
+        intro = _workflow_notice(
+            base=(
+                f"Orchestrator: continuing workflow {definition.id} with "
+                f"{agent_name}."
+            ),
+            loop_state=loop_state,
         )
         state.append_reasoning(intro)
         yield ProxyReasoningDeltaEvent(intro)
@@ -181,3 +188,16 @@ class ProxyWorkflowDispatcher:
                 yield event
             return
         raise ValueError(f"unsupported workflow orchestration: {orchestration}")
+
+
+def _workflow_notice(
+    *,
+    base: str,
+    loop_state: ProxyDecisionLoopState | None,
+) -> str:
+    lines = [base]
+    if loop_state is not None and loop_state.current_move_rationale:
+        lines.append(f"Why: {loop_state.current_move_rationale}")
+    if loop_state is not None and loop_state.current_move_success_criteria:
+        lines.append(f"Success target: {loop_state.current_move_success_criteria}")
+    return "\n".join(lines) + "\n"

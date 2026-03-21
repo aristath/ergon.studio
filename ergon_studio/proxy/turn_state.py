@@ -19,6 +19,8 @@ class ProxyDecisionLoopState:
     current_brief: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
     workflow_progress: ContinuationState | None = None
+    current_move_rationale: str | None = None
+    current_move_success_criteria: str | None = None
 
     def absorb_result(
         self,
@@ -30,6 +32,8 @@ class ProxyDecisionLoopState:
         if result.current_brief:
             self.current_brief = result.current_brief
         self.workflow_progress = result.workflow_progress
+        self.current_move_rationale = None
+        self.current_move_success_criteria = None
 
 
 @dataclass

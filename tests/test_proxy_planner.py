@@ -66,13 +66,17 @@ class ProxyPlannerTests(unittest.TestCase):
         plan = parse_turn_plan(
             (
                 '{"mode":"workflow","workflow_id":"standard-build",'
-                '"goal":"Build it","deliverable_expected":true}'
+                '"goal":"Build it","rationale":"This needs staged work",'
+                '"success_criteria":"Have a reviewed implementation",'
+                '"deliverable_expected":true}'
             ),
             registry=registry,
         )
 
         self.assertEqual(plan.mode, "workflow")
         self.assertEqual(plan.workflow_id, "standard-build")
+        self.assertEqual(plan.rationale, "This needs staged work")
+        self.assertEqual(plan.success_criteria, "Have a reviewed implementation")
         self.assertTrue(plan.deliverable_expected)
 
     def test_parse_turn_plan_drops_unknown_agent(self) -> None:

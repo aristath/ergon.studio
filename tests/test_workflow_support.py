@@ -60,6 +60,8 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
             current_brief="Need implementation",
             participants=("architect", "coder"),
             prior_outputs=("architect: plan",),
+            move_rationale="Architecture is done; implementation should start.",
+            success_criteria="Pick the next specialist who can advance delivery.",
             model_id_override="qwen",
         )
 
@@ -80,6 +82,8 @@ class WorkflowSupportTests(unittest.IsolatedAsyncioTestCase):
             current_brief="Done",
             prior_outputs=("coder: done",),
             allowed=(),
+            move_rationale="The handoff is likely complete.",
+            success_criteria="Only continue if another specialist is truly needed.",
             model_id_override="qwen",
         )
 

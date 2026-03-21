@@ -74,6 +74,8 @@ class ProxyWorkflowSupport:
         current_brief: str,
         participants: tuple[str, ...],
         prior_outputs: tuple[str, ...],
+        move_rationale: str | None,
+        success_criteria: str | None,
         model_id_override: str,
     ) -> str | None:
         raw = await self._run_text_agent(
@@ -84,6 +86,8 @@ class ProxyWorkflowSupport:
                 current_brief=current_brief,
                 participants=participants,
                 prior_outputs=prior_outputs,
+                move_rationale=move_rationale,
+                success_criteria=success_criteria,
             ),
             preamble=workflow_manager_instructions(participants),
             session_id=f"proxy-workflow-manager-{uuid4().hex}",
@@ -100,6 +104,8 @@ class ProxyWorkflowSupport:
         current_brief: str,
         prior_outputs: tuple[str, ...],
         allowed: tuple[str, ...],
+        move_rationale: str | None,
+        success_criteria: str | None,
         model_id_override: str,
     ) -> str | None:
         if not allowed:
@@ -113,6 +119,8 @@ class ProxyWorkflowSupport:
                 current_brief=current_brief,
                 prior_outputs=prior_outputs,
                 allowed=allowed,
+                move_rationale=move_rationale,
+                success_criteria=success_criteria,
             ),
             preamble=handoff_selection_instructions(allowed),
             session_id=f"proxy-handoff-select-{uuid4().hex}",

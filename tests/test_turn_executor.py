@@ -10,7 +10,7 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
-from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.proxy.turn_state import ProxyDecisionLoopState, ProxyTurnState
 
 
 class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -95,6 +95,65 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("delegating", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(state.content, "Final summary")
+
+    async def test_execute_delegation_passes_decision_context_to_specialist(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        async def _stream_text_agent(**kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            yield "Patch applied"
+
+        async def _run_text_agent(**_kwargs):
+            return "Final summary"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        executor = ProxyTurnExecutor(
+            stream_text_agent=_stream_text_agent,
+            run_text_agent=_run_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Implement it"),),
+        )
+        state = ProxyTurnState()
+        loop_state = ProxyDecisionLoopState(
+            goal="Ship calculator",
+            current_brief="Plan is approved",
+            current_move_rationale="The coder can implement the agreed plan quickly.",
+            current_move_success_criteria=(
+                "Return a concrete patch-ready implementation."
+            ),
+        )
+
+        [
+            event
+            async for event in executor.execute_delegation(
+                request=request,
+                plan=ProxyTurnPlan(
+                    mode="delegate",
+                    agent_id="coder",
+                    request="Implement it",
+                    rationale="The coder can implement the agreed plan quickly.",
+                    success_criteria=(
+                        "Return a concrete patch-ready implementation."
+                    ),
+                ),
+                state=state,
+                loop_state=loop_state,
+            )
+        ]
+
+        prompt = captured["prompt"]
+        self.assertIsInstance(prompt, str)
+        if not isinstance(prompt, str):
+            raise AssertionError("expected prompt string")
+        self.assertIn("Why the lead developer assigned you this slice", prompt)
+        self.assertIn("What a good result looks like", prompt)
 
     async def test_execute_finish_streams_final_delivery(self) -> None:
         async def _stream_text_agent(**_kwargs):

@@ -92,6 +92,16 @@ class ProxyMagenticWorkflowExecutor:
                     current_brief=current_brief,
                     participants=participants,
                     prior_outputs=tuple(workflow_outputs),
+                    move_rationale=(
+                        loop_state.current_move_rationale
+                        if loop_state is not None
+                        else None
+                    ),
+                    success_criteria=(
+                        loop_state.current_move_success_criteria
+                        if loop_state is not None
+                        else None
+                    ),
                     model_id_override=request.model,
                 )
             if agent_id is None:
@@ -103,6 +113,16 @@ class ProxyMagenticWorkflowExecutor:
                 current_brief=current_brief,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workflow_outputs),
+                move_rationale=(
+                    loop_state.current_move_rationale
+                    if loop_state is not None
+                    else None
+                ),
+                success_criteria=(
+                    loop_state.current_move_success_criteria
+                    if loop_state is not None
+                    else None
+                ),
             )
             agent_text = ""
             first = True

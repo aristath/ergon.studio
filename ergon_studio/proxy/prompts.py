@@ -12,6 +12,8 @@ def direct_reply_prompt(
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
     lines = [
         "You are the lead developer replying to the product manager.",
@@ -39,6 +41,22 @@ def direct_reply_prompt(
                 current_brief,
             ]
         )
+    if move_rationale:
+        lines.extend(
+            [
+                "",
+                "Why the lead developer chose to handle this directly:",
+                move_rationale,
+            ]
+        )
+    if success_criteria:
+        lines.extend(
+            [
+                "",
+                "Good outcome for this move:",
+                success_criteria,
+            ]
+        )
     if worklog:
         lines.extend(
             [
@@ -56,6 +74,8 @@ def finish_reply_prompt(
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
     lines = [
         (
@@ -84,6 +104,22 @@ def finish_reply_prompt(
                 current_brief,
             ]
         )
+    if move_rationale:
+        lines.extend(
+            [
+                "",
+                "Why the lead developer is delivering now:",
+                move_rationale,
+            ]
+        )
+    if success_criteria:
+        lines.extend(
+            [
+                "",
+                "What this delivery should achieve:",
+                success_criteria,
+            ]
+        )
     if worklog:
         lines.extend(
             [
@@ -101,6 +137,8 @@ def specialist_prompt(
     request_text: str,
     transcript_summary: str,
     current_brief: str | None = None,
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
     lines = [
         f"You are the {specialist_id} working for the lead developer.",
@@ -121,6 +159,22 @@ def specialist_prompt(
                 current_brief,
             ]
         )
+    if move_rationale:
+        lines.extend(
+            [
+                "",
+                "Why the lead developer assigned you this slice:",
+                move_rationale,
+            ]
+        )
+    if success_criteria:
+        lines.extend(
+            [
+                "",
+                "What a good result looks like:",
+                success_criteria,
+            ]
+        )
     return "\n".join(lines).strip()
 
 
@@ -132,6 +186,8 @@ def workflow_step_prompt(
     current_brief: str,
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
     lines = [
         f"You are {agent_id} working inside playbook {workflow_id}.",
@@ -154,6 +210,22 @@ def workflow_step_prompt(
                 *prior_outputs[-6:],
             ]
         )
+    if move_rationale:
+        lines.extend(
+            [
+                "",
+                "Why the lead developer is using this playbook move now:",
+                move_rationale,
+            ]
+        )
+    if success_criteria:
+        lines.extend(
+            [
+                "",
+                "What a good result for this move looks like:",
+                success_criteria,
+            ]
+        )
     return "\n".join(lines).strip()
 
 
@@ -165,6 +237,8 @@ def group_chat_turn_prompt(
     transcript_summary: str,
     current_brief: str,
     prior_outputs: tuple[str, ...],
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
     lines = [
         f"You are {agent_id} speaking in playbook {workflow_id}.",
@@ -186,6 +260,22 @@ def group_chat_turn_prompt(
                 "",
                 "Discussion so far:",
                 *prior_outputs[-8:],
+            ]
+        )
+    if move_rationale:
+        lines.extend(
+            [
+                "",
+                "Why the lead developer wants another discussion turn now:",
+                move_rationale,
+            ]
+        )
+    if success_criteria:
+        lines.extend(
+            [
+                "",
+                "What a useful discussion turn should accomplish:",
+                success_criteria,
             ]
         )
     return "\n".join(lines).strip()
@@ -215,18 +305,27 @@ def workflow_manager_prompt(
     current_brief: str,
     participants: tuple[str, ...],
     prior_outputs: tuple[str, ...],
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
-    return "\n".join(
+    lines = [
+        f"Workflow: {workflow_id}",
+        f"Goal: {goal or '(none)'}",
+        f"Current brief: {current_brief or '(none)'}",
+        f"Available specialists: {', '.join(participants) or '(none)'}",
+    ]
+    if move_rationale:
+        lines.append(f"Why continue this playbook now: {move_rationale}")
+    if success_criteria:
+        lines.append(f"What the next round should achieve: {success_criteria}")
+    lines.extend(
         [
-            f"Workflow: {workflow_id}",
-            f"Goal: {goal or '(none)'}",
-            f"Current brief: {current_brief or '(none)'}",
-            f"Available specialists: {', '.join(participants) or '(none)'}",
             "",
             "Progress so far:",
             *(prior_outputs[-8:] or ["(none)"]),
         ]
-    ).strip()
+    )
+    return "\n".join(lines).strip()
 
 
 def handoff_selection_instructions(allowed: tuple[str, ...]) -> str:
@@ -251,19 +350,32 @@ def handoff_selection_prompt(
     current_brief: str,
     prior_outputs: tuple[str, ...],
     allowed: tuple[str, ...],
+    move_rationale: str | None = None,
+    success_criteria: str | None = None,
 ) -> str:
-    return "\n".join(
+    lines = [
+        f"Workflow: {workflow_id}",
+        f"You are {current_agent}.",
+        f"Goal: {goal or '(none)'}",
+        f"Current brief: {current_brief or '(none)'}",
+        f"You may hand off to: {', '.join(allowed) or '(none)'}",
+    ]
+    if move_rationale:
+        lines.append(
+            f"Why the lead developer is continuing this handoff now: {move_rationale}"
+        )
+    if success_criteria:
+        lines.append(
+            f"What the next handoff should accomplish: {success_criteria}"
+        )
+    lines.extend(
         [
-            f"Workflow: {workflow_id}",
-            f"You are {current_agent}.",
-            f"Goal: {goal or '(none)'}",
-            f"Current brief: {current_brief or '(none)'}",
-            f"You may hand off to: {', '.join(allowed) or '(none)'}",
             "",
             "Work so far:",
             *(prior_outputs[-8:] or ["(none)"]),
         ]
-    ).strip()
+    )
+    return "\n".join(lines).strip()
 
 
 def parse_agent_selection(

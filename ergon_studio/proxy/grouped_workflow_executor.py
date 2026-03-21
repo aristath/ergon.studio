@@ -18,7 +18,11 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workflow_step_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
-from ergon_studio.proxy.selection_outcome import ProxySelectionOutcome
+from ergon_studio.proxy.selection_outcome import (
+    ProxySelectionOutcome,
+    selection_outcome_brief,
+    selection_outcome_worklog_line,
+)
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
@@ -316,21 +320,33 @@ class ProxyGroupedWorkflowExecutor:
                 )
             else:
                 next_selection_outcome = selection_outcome
+            selection_outcome_changed = next_selection_outcome != selection_outcome
             if _is_parallel_attempt_group(group):
                 current_brief = _stage_brief(
                     stage_outputs=stage_outputs,
                     fallback=stage_entry_brief,
                 )
+            elif next_selection_outcome is not None:
+                current_brief = selection_outcome_brief(
+                    next_selection_outcome,
+                    fallback=current_brief,
+                )
             last_stage_outputs = list(stage_outputs)
             last_stage_parallel_attempts = _is_parallel_attempt_group(group)
+            outcome_line = selection_outcome_worklog_line(next_selection_outcome)
+            worklog_lines = (
+                tuple(stage_outputs)
+                if outcome_line is None
+                else (*stage_outputs, outcome_line)
+            )
             selection_outcome = next_selection_outcome
             if result_sink is not None:
                 result_sink(
                     ProxyMoveResult(
-                        worklog_lines=tuple(stage_outputs),
+                        worklog_lines=worklog_lines,
                         current_brief=current_brief,
                         selection_outcome=selection_outcome,
-                        selection_outcome_changed=True,
+                        selection_outcome_changed=selection_outcome_changed,
                         workflow_progress=self._next_workflow_progress(
                             definition=definition,
                             step_groups=step_groups,

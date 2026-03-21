@@ -492,10 +492,23 @@ class GroupedWorkflowExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(move_result.selection_outcome)
         assert move_result.selection_outcome is not None
         self.assertEqual(
+            move_result.current_brief,
+            "Candidate 2 is clearer and safer.",
+        )
+        self.assertEqual(
             move_result.selection_outcome.selected_candidate_text,
             "coder[2]: Idea B",
         )
         self.assertTrue(move_result.selection_outcome_changed)
+        self.assertIn(
+            "Orchestrator comparison result (select_best)",
+            move_result.worklog_lines[-1],
+        )
+        self.assertIn("selected coder[2]: Idea B", move_result.worklog_lines[-1])
+        self.assertIn(
+            "Polish candidate 2 into the final implementation.",
+            move_result.worklog_lines[-1],
+        )
         self.assertIsNotNone(move_result.workflow_progress)
         assert move_result.workflow_progress is not None
         self.assertEqual(

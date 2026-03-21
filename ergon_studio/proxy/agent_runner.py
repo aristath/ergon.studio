@@ -26,6 +26,7 @@ from ergon_studio.proxy.tool_passthrough import (
     extract_tool_calls,
 )
 from ergon_studio.proxy.tool_policy import resolve_agent_tool_policy
+from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyToolChoice = str | dict[str, Any] | None
@@ -114,6 +115,46 @@ class ProxyAgentRunner:
             ProxyToolCallEvent(call=call, index=index)
             for index, call in enumerate(encoded_calls)
         ]
+
+    def emit_tool_call_events(
+        self,
+        *,
+        response: Any | None = None,
+        tool_calls: tuple[ProxyToolCall, ...] | None = None,
+        request: ProxyTurnRequest,
+        continuation: ContinuationState,
+        state: ProxyTurnState,
+    ) -> list[ProxyToolCallEvent]:
+        if tool_calls is None:
+            if response is None:
+                raise ValueError(
+                    "response is required when tool_calls are not provided"
+                )
+            encoded_calls, events = self.emit_tool_calls(
+                response=response,
+                request=request,
+                continuation=continuation,
+            )
+        else:
+            validated_tool_calls = self.validate_host_tool_calls(
+                tuple(tool_calls),
+                request=request,
+            )
+            encoded_calls = tuple(
+                encode_continuation_tool_call(tool_call, state=continuation)
+                for tool_call in validated_tool_calls
+            )
+            events = [
+                ProxyToolCallEvent(call=call, index=index)
+                for index, call in enumerate(encoded_calls)
+            ]
+        if not events:
+            return []
+        state.tool_calls = encoded_calls
+        state.finish_reason = "tool_calls"
+        for call in encoded_calls:
+            state.record_output_item("tool_call", call_id=call.id)
+        return events
 
     def _run_agent(
         self,

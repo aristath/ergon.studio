@@ -32,7 +32,6 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_internal_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
-from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
@@ -66,10 +65,9 @@ class ProxyOrchestrationCore:
             registry,
             agent_builder=agent_builder,
         )
-        self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
         workroom_executor = ProxyWorkroomExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
-            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
+            emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
         self._workroom_executor = workroom_executor
 
@@ -219,7 +217,7 @@ class ProxyOrchestrationCore:
                 )
             if host_tool_calls:
                 state.mode = "orchestrator"
-                for tool_event in self._tool_call_emitter.emit_tool_calls(
+                for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
                     request=request,
                     continuation=_orchestrator_continuation_state(loop_state),

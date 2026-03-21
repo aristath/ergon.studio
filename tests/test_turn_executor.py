@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import unittest
+
+from ergon_studio.proxy.models import (
+    ProxyContentDeltaEvent,
+    ProxyInputMessage,
+    ProxyReasoningDeltaEvent,
+    ProxyTurnRequest,
+)
+from ergon_studio.proxy.planner import ProxyTurnPlan
+from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
+from ergon_studio.proxy.turn_state import ProxyTurnState
+
+
+class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execute_direct_streams_content(self) -> None:
+        async def _stream_text_agent(**_kwargs):
+            yield "Hello"
+            yield " world"
+
+        async def _run_text_agent(**_kwargs):
+            return None
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        executor = ProxyTurnExecutor(
+            stream_text_agent=_stream_text_agent,
+            run_text_agent=_run_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Hi"),),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in executor.execute_direct(request=request, state=state)
+        ]
+
+        self.assertIsInstance(events[0], ProxyReasoningDeltaEvent)
+        self.assertEqual(
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
+            ),
+            "Hello world",
+        )
+        self.assertEqual(state.content, "Hello world")
+
+    async def test_execute_delegation_summarizes_specialist_result(self) -> None:
+        async def _stream_text_agent(**_kwargs):
+            yield "Patch"
+            yield " applied"
+
+        async def _run_text_agent(**_kwargs):
+            return "Final summary"
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        executor = ProxyTurnExecutor(
+            stream_text_agent=_stream_text_agent,
+            run_text_agent=_run_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Implement it"),),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in executor.execute_delegation(
+                request=request,
+                plan=ProxyTurnPlan(
+                    mode="delegate",
+                    agent_id="coder",
+                    request="Implement it",
+                ),
+                state=state,
+            )
+        ]
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("delegating", reasoning.lower())
+        self.assertIn("coder: Patch", reasoning)
+        self.assertEqual(state.content, "Final summary")

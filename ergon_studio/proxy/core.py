@@ -42,15 +42,8 @@ from ergon_studio.proxy.planner import (
     build_turn_planner_instructions,
     build_turn_planner_prompt,
     parse_turn_plan,
-    summarize_conversation,
 )
-from ergon_studio.proxy.prompts import (
-    delegation_summary_prompt,
-    direct_reply_prompt,
-    specialist_prompt,
-    summary_instructions,
-)
-from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
 from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
@@ -85,6 +78,11 @@ class ProxyOrchestrationCore:
         )
         self._workflow_support = ProxyWorkflowSupport(
             run_text_agent=self._run_text_agent,
+        )
+        self._turn_executor = ProxyTurnExecutor(
+            stream_text_agent=self._stream_text_agent,
+            run_text_agent=self._run_text_agent,
+            emit_tool_calls=self._emit_tool_calls,
         )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
@@ -251,34 +249,13 @@ class ProxyOrchestrationCore:
         state: ProxyTurnState,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        notice = "Orchestrator: handling this turn directly.\n"
-        state.append_reasoning(notice)
-        yield ProxyReasoningDeltaEvent(notice)
-        prompt = direct_reply_prompt(request)
-        response_holder: dict[str, Any] = {}
-        async for delta in self._stream_text_agent(
-            agent_id="orchestrator",
-            prompt=prompt,
-            session_id=f"proxy-direct-{uuid4().hex}",
-            model_id_override=request.model,
-            host_tools=request.tools,
-            tool_choice=request.tool_choice,
-            parallel_tool_calls=request.parallel_tool_calls,
-            pending_continuation=pending,
-            final_response_sink=response_holder_sink(response_holder),
+        del created_at
+        async for event in self._turn_executor.execute_direct(
+            request=request,
+            state=state,
+            pending=pending,
         ):
-            state.append_content(delta)
-            yield ProxyContentDeltaEvent(delta)
-        response = response_holder.get("response")
-        if response is not None:
-            emitted = self._emit_tool_calls(
-                response=response,
-                request=request,
-                continuation=ContinuationState(mode="act", agent_id="orchestrator"),
-                state=state,
-            )
-            for event in emitted:
-                yield event
+            yield event
 
     async def _execute_delegation(
         self,
@@ -290,68 +267,15 @@ class ProxyOrchestrationCore:
         current_brief: str | None = None,
         pending: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
-        agent_id = plan.agent_id or "coder"
-        intro = f"Orchestrator: delegating this turn to {agent_id}.\n"
-        state.append_reasoning(intro)
-        yield ProxyReasoningDeltaEvent(intro)
-        prompt_text = specialist_prompt(
-            specialist_id=agent_id,
-            request_text=plan.request or request.latest_user_text() or "",
-            transcript_summary=summarize_conversation(request.messages),
+        del created_at
+        async for event in self._turn_executor.execute_delegation(
+            request=request,
+            plan=plan,
+            state=state,
             current_brief=current_brief,
-        )
-        specialist_text = ""
-        first = True
-        response_holder: dict[str, Any] = {}
-        async for delta in self._stream_text_agent(
-            agent_id=agent_id,
-            prompt=prompt_text,
-            session_id=f"proxy-delegate-{agent_id}-{uuid4().hex}",
-            model_id_override=request.model,
-            host_tools=request.tools,
-            tool_choice=request.tool_choice,
-            parallel_tool_calls=request.parallel_tool_calls,
-            pending_continuation=pending,
-            final_response_sink=response_holder_sink(response_holder),
+            pending=pending,
         ):
-            specialist_text += delta
-            reasoning_delta = f"{agent_id}: {delta}" if first else delta
-            first = False
-            state.append_reasoning(reasoning_delta)
-            yield ProxyReasoningDeltaEvent(reasoning_delta)
-        response = response_holder.get("response")
-        if response is not None:
-            emitted = self._emit_tool_calls(
-                response=response,
-                request=request,
-                continuation=ContinuationState(
-                    mode="delegate",
-                    agent_id=agent_id,
-                    request_text=plan.request or request.latest_user_text(),
-                    current_brief=specialist_text.strip() or current_brief,
-                ),
-                state=state,
-            )
-            if emitted:
-                for tool_event in emitted:
-                    yield tool_event
-                return
-        final_text = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=delegation_summary_prompt(
-                request_text=request.latest_user_text() or "",
-                specialist_id=agent_id,
-                specialist_text=specialist_text,
-            ),
-            preamble=summary_instructions(),
-            session_id=f"proxy-delegation-summary-{uuid4().hex}",
-            model_id_override=request.model,
-        )
-        if not final_text:
-            final_text = specialist_text.strip()
-        state.set_content(final_text)
-        if final_text:
-            yield ProxyContentDeltaEvent(final_text)
+            yield event
 
     async def _execute_workflow(
         self,

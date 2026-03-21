@@ -22,8 +22,6 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
         raise ValueError("stream must be a bool")
 
     tool_choice = payload.get("tool_choice")
-    if tool_choice is not None and not isinstance(tool_choice, (str, dict)):
-        raise ValueError("tool_choice must be a string, object, or null")
     parallel_tool_calls = payload.get("parallel_tool_calls")
     if parallel_tool_calls is not None and type(parallel_tool_calls) is not bool:
         raise ValueError("parallel_tool_calls must be a bool or null")

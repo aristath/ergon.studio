@@ -36,10 +36,7 @@ def parse_chat_completion_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     if type(stream) is not bool:
         raise ValueError("stream must be a bool")
 
-    tool_choice = payload.get("tool_choice")
-    if tool_choice is not None and not isinstance(tool_choice, (str, dict)):
-        raise ValueError("tool_choice must be a string, object, or null")
-    tool_choice = validate_tool_choice(tool_choice, tools=tools)
+    tool_choice = validate_tool_choice(payload.get("tool_choice"), tools=tools)
 
     parallel_tool_calls = payload.get("parallel_tool_calls")
     if parallel_tool_calls is not None and type(parallel_tool_calls) is not bool:

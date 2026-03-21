@@ -272,7 +272,7 @@ class _FakeCore:
                 finish_reason=finish_reason,
                 content=content,
                 reasoning="",
-                mode="act",
+                mode="orchestrator",
                 tool_calls=self._tool_calls,
                 output_items=self._output_items,
             ),

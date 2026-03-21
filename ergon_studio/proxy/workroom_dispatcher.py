@@ -247,10 +247,8 @@ def _workroom_notice(
     base: str,
     loop_state: ProxyDecisionLoopState | None,
 ) -> str:
-    lines = [base]
-    if loop_state is not None and loop_state.current_move_rationale:
-        lines.append(f"Why: {loop_state.current_move_rationale}")
-    return "\n".join(lines) + "\n"
+    del loop_state
+    return base + "\n"
 
 
 def _workroom_intro(definition: DefinitionDocument) -> str:

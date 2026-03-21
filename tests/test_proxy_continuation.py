@@ -56,8 +56,6 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                delivery_requirements=("review", "verify"),
-                delivery_evidence=("review",),
                 workroom_id="standard-build",
                 workroom_specialists=("coder", "reviewer"),
                 workroom_specialist_counts=(("coder", 3),),
@@ -76,8 +74,6 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = decode_continuation_from_tool_call_id(encoded.id)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.delivery_requirements, ("review", "verify"))
-        self.assertEqual(decoded.delivery_evidence, ("review",))
         self.assertEqual(decoded.request_text, "Implement A")
         self.assertEqual(decoded.goal, "Build calculator")
         self.assertEqual(decoded.current_brief, "Updating main.py")
@@ -99,7 +95,7 @@ class ProxyContinuationTests(unittest.TestCase):
         )
         second_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_2", name="run_command", arguments_json="{}"),
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
         )
         messages = (
             ProxyInputMessage(role="user", content="Build it"),
@@ -120,7 +116,7 @@ class ProxyContinuationTests(unittest.TestCase):
         decoded = latest_continuation(messages)
 
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.mode, "act")
+        self.assertEqual(decoded.mode, "orchestrator")
         self.assertEqual(decoded.agent_id, "orchestrator")
 
     def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
@@ -167,7 +163,7 @@ class ProxyContinuationTests(unittest.TestCase):
     def test_original_tool_call_id_extracts_wrapped_id(self) -> None:
         tool_call = encode_continuation_tool_call(
             ProxyToolCall(id="call_123", name="read_file", arguments_json="{}"),
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
         )
 
         self.assertEqual(original_tool_call_id(tool_call.id), "call_123")
@@ -179,7 +175,7 @@ class ProxyContinuationTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
         )
 
         original = decode_original_tool_call(tool_call.id)

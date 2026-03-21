@@ -6,10 +6,6 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
-from ergon_studio.proxy.delivery_requirements import (
-    delivery_evidence_for_agent,
-    merge_delivery_evidence,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -17,7 +13,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.playbook_staffing import (
     expand_staffed_participants,
     participant_by_label,
@@ -26,6 +21,7 @@ from ergon_studio.proxy.playbook_staffing import (
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -136,11 +132,6 @@ class ProxyMagenticWorkroomExecutor:
                         participant.label for participant in participants
                     ),
                     prior_outputs=tuple(workroom_outputs),
-                    move_rationale=(
-                        loop_state.current_move_rationale
-                        if loop_state is not None
-                        else None
-                    ),
                     model_id_override=request.model,
                 )
                 participant = participant_by_label(participants, participant_label)
@@ -160,11 +151,6 @@ class ProxyMagenticWorkroomExecutor:
                 workroom_request=workroom_request,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workroom_outputs),
-                move_rationale=(
-                    loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
             )
             agent_text = ""
             first = True
@@ -201,16 +187,6 @@ class ProxyMagenticWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        delivery_requirements=(
-                            loop_state.delivery_requirements
-                            if loop_state is not None
-                            else ()
-                        ),
-                        delivery_evidence=(
-                            loop_state.delivery_evidence
-                            if loop_state is not None
-                            else ()
-                        ),
                         step_index=round_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
@@ -231,7 +207,6 @@ class ProxyMagenticWorkroomExecutor:
             current_brief = agent_text.strip() or current_brief
             round_index += 1
             if result_sink is not None:
-                round_evidence = delivery_evidence_for_agent(participant.agent_id)
                 workroom_progress = None
                 if round_index < max_rounds:
                     workroom_progress = ContinuationState(
@@ -240,19 +215,6 @@ class ProxyMagenticWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        delivery_requirements=(
-                            loop_state.delivery_requirements
-                            if loop_state is not None
-                            else ()
-                        ),
-                        delivery_evidence=merge_delivery_evidence(
-                            (
-                                loop_state.delivery_evidence
-                                if loop_state is not None
-                                else ()
-                            ),
-                            round_evidence,
-                        ),
                         step_index=round_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
@@ -267,7 +229,6 @@ class ProxyMagenticWorkroomExecutor:
                     ProxyMoveResult(
                         worklog_lines=(workroom_outputs[-1],),
                         current_brief=current_brief,
-                        delivery_evidence=round_evidence,
                         workroom_progress=workroom_progress,
                     )
                 )

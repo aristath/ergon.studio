@@ -6,10 +6,6 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
-from ergon_studio.proxy.delivery_requirements import (
-    delivery_evidence_for_agent,
-    merge_delivery_evidence,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -17,7 +13,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.playbook_staffing import (
     expand_staffed_participants,
     expand_staffed_sequence,
@@ -26,6 +21,7 @@ from ergon_studio.proxy.playbook_staffing import (
 )
 from ergon_studio.proxy.prompts import group_chat_turn_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -147,11 +143,6 @@ class ProxyGroupChatWorkroomExecutor:
                 current_brief=current_brief,
                 workroom_request=workroom_request,
                 prior_outputs=tuple(workroom_outputs),
-                move_rationale=(
-                    loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
             )
             agent_text = ""
             first = True
@@ -187,16 +178,6 @@ class ProxyGroupChatWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        delivery_requirements=(
-                            loop_state.delivery_requirements
-                            if loop_state is not None
-                            else ()
-                        ),
-                        delivery_evidence=(
-                            loop_state.delivery_evidence
-                            if loop_state is not None
-                            else ()
-                        ),
                         step_index=turn_index,
                         agent_id=participant.agent_id,
                         participant_label=participant.label,
@@ -216,7 +197,6 @@ class ProxyGroupChatWorkroomExecutor:
             workroom_outputs.append(f"{participant.label}: {agent_text.strip()}")
             current_brief = agent_text.strip() or current_brief
             if result_sink is not None:
-                round_evidence = delivery_evidence_for_agent(participant.agent_id)
                 next_turn = turn_index + 1
                 workroom_progress = None
                 if next_turn < len(sequence):
@@ -230,19 +210,6 @@ class ProxyGroupChatWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        delivery_requirements=(
-                            loop_state.delivery_requirements
-                            if loop_state is not None
-                            else ()
-                        ),
-                        delivery_evidence=merge_delivery_evidence(
-                            (
-                                loop_state.delivery_evidence
-                                if loop_state is not None
-                                else ()
-                            ),
-                            round_evidence,
-                        ),
                         step_index=next_turn,
                         agent_id=(
                             next_participant.agent_id
@@ -265,7 +232,6 @@ class ProxyGroupChatWorkroomExecutor:
                     ProxyMoveResult(
                         worklog_lines=(workroom_outputs[-1],),
                         current_brief=current_brief,
-                        delivery_evidence=round_evidence,
                         workroom_progress=workroom_progress,
                     )
                 )

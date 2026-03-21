@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any
+from uuid import uuid4
 
 from agent_framework import ResponseStream
 
 from ergon_studio.agent_factory import build_agent
 from ergon_studio.proxy.agent_runner import ProxyAgentRunner
 from ergon_studio.proxy.continuation import (
+    ContinuationState,
     PendingContinuation,
     latest_pending_continuation,
 )
-from ergon_studio.proxy.delivery_requirements import unmet_delivery_requirements
 from ergon_studio.proxy.group_chat_workroom_executor import (
     ProxyGroupChatWorkroomExecutor,
 )
@@ -31,11 +32,19 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
     ProxyTurnResult,
 )
-from ergon_studio.proxy.planner import ProxyTurnPlan
+from ergon_studio.proxy.orchestrator_tools import (
+    ContinueWorkroomAction,
+    MessageSpecialistAction,
+    OpenWorkroomAction,
+    build_orchestrator_internal_tools,
+    is_internal_tool_name,
+    parse_internal_action,
+)
+from ergon_studio.proxy.prompts import orchestrator_turn_prompt
+from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.tool_call_emitter import ProxyToolCallEmitter
+from ergon_studio.proxy.tool_passthrough import extract_tool_calls
 from ergon_studio.proxy.turn_executor import ProxyTurnExecutor
-from ergon_studio.proxy.turn_planner import ProxyTurnPlanner
-from ergon_studio.proxy.turn_router import ProxyTurnRouter
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -55,51 +64,46 @@ ProxyEvent = (
 
 
 class ProxyOrchestrationCore:
-    _MAX_INTERNAL_MOVES = 6
+    _MAX_INTERNAL_MOVES = 8
 
     def __init__(
         self,
         registry: RuntimeRegistry,
         *,
-        agent_builder: Callable[..., Any] = build_agent,
+        agent_builder: Any = build_agent,
     ) -> None:
         self.registry = registry
-        agent_runner = ProxyAgentRunner(
+        self._agent_runner = ProxyAgentRunner(
             registry,
             agent_builder=agent_builder,
         )
-        tool_call_emitter = ProxyToolCallEmitter(agent_runner)
+        self._tool_call_emitter = ProxyToolCallEmitter(self._agent_runner)
         workroom_support = ProxyWorkroomSupport(
-            run_text_agent=agent_runner.run_text_agent,
+            run_text_agent=self._agent_runner.run_text_agent,
         )
-        turn_executor = ProxyTurnExecutor(
-            stream_text_agent=agent_runner.stream_text_agent,
-            run_text_agent=agent_runner.run_text_agent,
-            emit_tool_calls=tool_call_emitter.emit_tool_calls,
-        )
-        self._turn_planner = ProxyTurnPlanner(
-            registry,
-            run_text_agent=agent_runner.run_text_agent,
+        self._turn_executor = ProxyTurnExecutor(
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
         )
         grouped_workroom_executor = ProxyGroupedWorkroomExecutor(
-            stream_text_agent=agent_runner.stream_text_agent,
-            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
         )
         group_chat_workroom_executor = ProxyGroupChatWorkroomExecutor(
-            stream_text_agent=agent_runner.stream_text_agent,
-            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
         )
         magentic_workroom_executor = ProxyMagenticWorkroomExecutor(
-            stream_text_agent=agent_runner.stream_text_agent,
-            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
             select_manager_agent=workroom_support.select_manager_agent,
         )
         handoff_workroom_executor = ProxyHandoffWorkroomExecutor(
-            stream_text_agent=agent_runner.stream_text_agent,
-            emit_tool_calls=tool_call_emitter.emit_tool_calls,
+            stream_text_agent=self._agent_runner.stream_text_agent,
+            emit_tool_calls=self._tool_call_emitter.emit_tool_calls,
             emit_workroom_summary=workroom_support.emit_summary,
             select_handoff_target=workroom_support.select_handoff_target,
         )
@@ -110,20 +114,8 @@ class ProxyOrchestrationCore:
             execute_magentic_workroom=magentic_workroom_executor.execute,
             execute_handoff_workroom=handoff_workroom_executor.execute,
         )
-        workroom_request_executor = ProxyWorkroomRequestExecutor(
+        self._workroom_request_executor = ProxyWorkroomRequestExecutor(
             workroom_dispatcher
-        )
-        self._turn_router = ProxyTurnRouter(
-            execute_direct=turn_executor.execute_direct,
-            execute_finish=turn_executor.execute_finish,
-            execute_delegation=turn_executor.execute_delegation,
-            execute_workroom=workroom_request_executor.execute_workroom,
-            execute_active_workroom=(
-                workroom_request_executor.execute_active_workroom
-            ),
-            execute_workroom_continuation=(
-                workroom_request_executor.execute_workroom_continuation
-            ),
         )
 
     def stream_turn(
@@ -134,42 +126,51 @@ class ProxyOrchestrationCore:
     ) -> ResponseStream[ProxyEvent, ProxyTurnResult]:
         if created_at is None:
             created_at = int(time.time())
-        state = ProxyTurnState()
+        state = ProxyTurnState(mode="orchestrator")
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             try:
                 pending = latest_pending_continuation(request.messages)
                 loop_state = self._initial_loop_state(request, pending=pending)
                 if pending is not None:
-                    state.mode = pending.state.mode
-                    result_holder: dict[str, object] = {}
-                    async for event in self._turn_router.execute_continuation(
-                        request=request,
-                        pending=pending,
-                        state=state,
-                        loop_state=loop_state,
-                        result_sink=_result_sink(result_holder),
-                    ):
-                        yield event
-                    if state.finish_reason == "tool_calls":
-                        pass
-                    elif result_holder:
-                        loop_state.absorb_result(
-                            result=_result(result_holder, loop_state)
-                        )
-                        async for event in self._run_decision_loop(
+                    if pending.state.mode in {"delegate", "workroom"}:
+                        result_holder: dict[str, object] = {}
+                        async for event in self._resume_subtask(
+                            request=request,
+                            pending=pending,
+                            state=state,
+                            loop_state=loop_state,
+                            result_holder=result_holder,
+                        ):
+                            yield event
+                        if state.finish_reason == "tool_calls":
+                            return
+                        if result_holder:
+                            loop_state.absorb_result(
+                                result=_result(result_holder, loop_state)
+                            )
+                        async for event in self._run_orchestrator_loop(
                             request=request,
                             state=state,
                             loop_state=loop_state,
                         ):
                             yield event
-                else:
-                    async for event in self._run_decision_loop(
+                        return
+                    async for event in self._run_orchestrator_loop(
                         request=request,
                         state=state,
                         loop_state=loop_state,
+                        pending_orchestrator=pending,
                     ):
                         yield event
+                    return
+
+                async for event in self._run_orchestrator_loop(
+                    request=request,
+                    state=state,
+                    loop_state=loop_state,
+                ):
+                    yield event
             except ValueError as exc:
                 state.finish_reason = "error"
                 state.content = str(exc)
@@ -192,67 +193,222 @@ class ProxyOrchestrationCore:
             ),
         )
 
-    async def _run_decision_loop(
+    async def _run_orchestrator_loop(
         self,
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         loop_state: ProxyDecisionLoopState,
+        pending_orchestrator: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
+        pending = pending_orchestrator
         for _ in range(self._MAX_INTERNAL_MOVES):
-            plan = await self._turn_planner.plan_turn(
-                request,
-                loop_state=loop_state,
+            response_holder: dict[str, Any] = {}
+            buffered_deltas: list[str] = []
+            internal_tools = build_orchestrator_internal_tools(
+                self.registry,
+                has_active_workroom=loop_state.workroom_progress is not None,
             )
-            state.mode = plan.mode
-            if plan.delivery_requirements is not None:
-                loop_state.delivery_requirements = plan.delivery_requirements
-            loop_state.current_move_rationale = plan.rationale
-            loop_state.current_workroom_request = plan.workroom_request
-            if plan.mode == "finish":
-                unmet = unmet_delivery_requirements(
-                    loop_state.delivery_requirements,
-                    loop_state.delivery_evidence,
+            async for delta in self._agent_runner.stream_text_agent(
+                agent_id="orchestrator",
+                prompt=orchestrator_turn_prompt(
+                    request,
+                    goal=loop_state.goal,
+                    current_brief=loop_state.current_brief,
+                    worklog=loop_state.worklog,
+                    active_workroom_id=(
+                        loop_state.workroom_progress.workroom_id
+                        if loop_state.workroom_progress is not None
+                        else None
+                    ),
+                    active_workroom_request=(
+                        loop_state.workroom_progress.workroom_request
+                        if loop_state.workroom_progress is not None
+                        else None
+                    ),
+                ),
+                session_id=f"proxy-orchestrator-{uuid4().hex}",
+                model_id_override=request.model,
+                host_tools=request.tools,
+                extra_tools=internal_tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                pending_continuation=pending,
+                final_response_sink=response_holder_sink(response_holder),
+            ):
+                buffered_deltas.append(delta)
+            pending = None
+            response = response_holder.get("response")
+            tool_calls = (
+                extract_tool_calls(response)
+                if response is not None
+                else ()
+            )
+            internal_tool_calls = tuple(
+                tool_call
+                for tool_call in tool_calls
+                if is_internal_tool_name(tool_call.name)
+            )
+            host_tool_calls = tuple(
+                tool_call
+                for tool_call in tool_calls
+                if not is_internal_tool_name(tool_call.name)
+            )
+            if internal_tool_calls and host_tool_calls:
+                raise ValueError(
+                    "orchestrator cannot mix internal actions with host tool calls"
                 )
-                if unmet:
-                    note = (
-                        "Orchestrator: delivery is blocked until these requirements "
-                        f"are satisfied: {', '.join(unmet)}."
-                    )
-                    state.append_reasoning(note)
-                    loop_state.worklog = (*loop_state.worklog, note)
-                    yield ProxyReasoningDeltaEvent(note)
-                    loop_state.current_move_rationale = None
-                    loop_state.current_workroom_request = None
-                    continue
-            result_holder: dict[str, object] = {}
-            async for event in self._turn_router.execute_plan(
+            if len(internal_tool_calls) > 1:
+                raise ValueError(
+                    "orchestrator must use at most one internal action at a time"
+                )
+            if host_tool_calls:
+                state.mode = "orchestrator"
+                for tool_event in self._tool_call_emitter.emit_tool_calls(
+                    tool_calls=host_tool_calls,
+                    request=request,
+                    continuation=_orchestrator_continuation_state(loop_state),
+                    state=state,
+                ):
+                    yield tool_event
+                return
+            if internal_tool_calls:
+                action = parse_internal_action(
+                    internal_tool_calls[0],
+                    registry=self.registry,
+                )
+                result_holder: dict[str, object] = {}
+                async for internal_event in self._execute_internal_action(
+                    request=request,
+                    action=action,
+                    state=state,
+                    loop_state=loop_state,
+                    result_holder=result_holder,
+                ):
+                    yield internal_event
+                if state.finish_reason == "tool_calls":
+                    return
+                if result_holder:
+                    result = _result(result_holder, loop_state)
+                    if (
+                        isinstance(action, MessageSpecialistAction)
+                        and result.workroom_progress is None
+                        and loop_state.workroom_progress is not None
+                    ):
+                        result = ProxyMoveResult(
+                            worklog_lines=result.worklog_lines,
+                            current_brief=result.current_brief,
+                            workroom_progress=loop_state.workroom_progress,
+                        )
+                    loop_state.absorb_result(result=result)
+                else:
+                    return
+                continue
+
+            if _requires_host_tool_result(request):
+                raise ValueError("model ignored required host tool choice")
+            state.mode = "orchestrator"
+            if not buffered_deltas and response is not None:
+                final_text = getattr(response, "text", "")
+                if final_text:
+                    buffered_deltas.append(final_text)
+            for delta in buffered_deltas:
+                state.append_content(delta)
+                yield ProxyContentDeltaEvent(delta)
+            return
+
+        raise ValueError("orchestrator exceeded internal move limit")
+
+    async def _execute_internal_action(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        action: Any,
+        state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState,
+        result_holder: dict[str, object],
+    ) -> AsyncIterator[ProxyEvent]:
+        if isinstance(action, MessageSpecialistAction):
+            state.mode = "delegate"
+            async for event in self._turn_executor.execute_delegation(
                 request=request,
-                plan=plan,
+                agent_id=action.agent_id,
+                message=action.message,
                 state=state,
-                loop_state=loop_state,
+                current_brief=loop_state.current_brief,
                 result_sink=_result_sink(result_holder),
+                loop_state=loop_state,
             ):
                 yield event
-            if state.finish_reason == "tool_calls":
-                return
-            if plan.mode in {"act", "finish"}:
-                loop_state.current_move_rationale = None
-                loop_state.current_workroom_request = None
-                return
-            if not result_holder:
-                loop_state.current_move_rationale = None
-                loop_state.current_workroom_request = None
-                return
-            loop_state.absorb_result(result=_result(result_holder, loop_state))
+            return
+        if isinstance(action, OpenWorkroomAction):
+            state.mode = "workroom"
+            async for event in self._workroom_request_executor.execute_workroom(
+                request=request,
+                workroom_id=action.workroom_id,
+                specialists=action.specialists,
+                specialist_counts=action.specialist_counts,
+                workroom_request=action.message,
+                state=state,
+                result_sink=_result_sink(result_holder),
+                loop_state=loop_state,
+            ):
+                yield event
+            return
+        if isinstance(action, ContinueWorkroomAction):
+            state.mode = "workroom"
+            async for event in self._workroom_request_executor.execute_active_workroom(
+                request=request,
+                message=action.message,
+                specialists=(),
+                specialist_counts=(),
+                state=state,
+                result_sink=_result_sink(result_holder),
+                loop_state=loop_state,
+            ):
+                yield event
+            return
+        raise ValueError(f"unsupported internal action: {action}")
 
-        async for event in self._turn_router.execute_plan(
-            request=request,
-            plan=ProxyTurnPlan(mode="act"),
-            state=state,
-            loop_state=loop_state,
-        ):
-            yield event
+    async def _resume_subtask(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        pending: PendingContinuation,
+        state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState,
+        result_holder: dict[str, object],
+    ) -> AsyncIterator[ProxyEvent]:
+        continuation = pending.state
+        if continuation.mode == "delegate":
+            state.mode = "delegate"
+            async for event in self._turn_executor.execute_delegation(
+                request=request,
+                agent_id=continuation.agent_id,
+                message=continuation.request_text or request.latest_user_text() or "",
+                state=state,
+                current_brief=continuation.current_brief,
+                pending=pending,
+                result_sink=_result_sink(result_holder),
+                loop_state=loop_state,
+            ):
+                yield event
+            return
+        if continuation.mode == "workroom":
+            state.mode = "workroom"
+            async for event in (
+                self._workroom_request_executor.execute_workroom_continuation(
+                    request=request,
+                    continuation=continuation,
+                    pending=pending,
+                    state=state,
+                    result_sink=_result_sink(result_holder),
+                    loop_state=loop_state,
+                )
+            ):
+                yield event
+            return
+        raise ValueError(f"unsupported continuation mode: {continuation.mode}")
 
     def _initial_loop_state(
         self,
@@ -269,19 +425,57 @@ class ProxyOrchestrationCore:
         continuation = pending.state
         goal = continuation.goal or request.latest_user_text() or ""
         current_brief = continuation.current_brief or goal
+        workroom_progress = (
+            continuation if continuation.workroom_id is not None else None
+        )
         return ProxyDecisionLoopState(
             goal=goal,
             current_brief=current_brief,
             worklog=continuation.decision_history,
-            delivery_requirements=continuation.delivery_requirements,
-            delivery_evidence=continuation.delivery_evidence,
+            workroom_progress=workroom_progress,
             current_workroom_request=continuation.workroom_request,
         )
 
 
-def _result_sink(
-    holder: dict[str, object],
-) -> Callable[[ProxyMoveResult], None]:
+def _orchestrator_continuation_state(
+    loop_state: ProxyDecisionLoopState,
+) -> ContinuationState:
+    workroom_progress = loop_state.workroom_progress
+    return ContinuationState(
+        mode="orchestrator",
+        agent_id="orchestrator",
+        workroom_id=(
+            workroom_progress.workroom_id if workroom_progress is not None else None
+        ),
+        workroom_specialists=(
+            workroom_progress.workroom_specialists
+            if workroom_progress is not None
+            else ()
+        ),
+        workroom_specialist_counts=(
+            workroom_progress.workroom_specialist_counts
+            if workroom_progress is not None
+            else ()
+        ),
+        workroom_request=(
+            workroom_progress.workroom_request
+            if workroom_progress is not None
+            else loop_state.current_workroom_request
+        ),
+        goal=loop_state.goal,
+        current_brief=loop_state.current_brief,
+        decision_history=loop_state.worklog,
+    )
+
+
+def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
+    tool_choice = request.tool_choice
+    if tool_choice == "required":
+        return True
+    return isinstance(tool_choice, dict)
+
+
+def _result_sink(holder: dict[str, object]) -> Any:
     def _capture(result: ProxyMoveResult) -> None:
         holder["result"] = result
 
@@ -298,4 +492,5 @@ def _result(
     return ProxyMoveResult(
         worklog_lines=(),
         current_brief=loop_state.current_brief,
+        workroom_progress=loop_state.workroom_progress,
     )

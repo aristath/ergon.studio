@@ -3,130 +3,50 @@ from __future__ import annotations
 import json
 
 from ergon_studio.proxy.models import ProxyTurnRequest
-from ergon_studio.proxy.planner import summarize_conversation
+from ergon_studio.proxy.transcript import summarize_conversation
 
 
-def direct_reply_prompt(
+def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
     goal: str | None = None,
     current_brief: str | None = None,
     worklog: tuple[str, ...] = (),
-    move_rationale: str | None = None,
+    active_workroom_id: str | None = None,
+    active_workroom_request: str | None = None,
 ) -> str:
     lines = [
-        "You are the lead developer replying to the product manager.",
-        "Be practical, collaborative, and decisive.",
-        "Use the full conversation transcript below as context.",
+        "You are the lead developer in an AI software firm.",
+        "The user is the product manager.",
+        (
+            "Reply directly to the product manager when you can move the work "
+            "forward yourself."
+        ),
+        (
+            "When you need help from the team, use one internal communication "
+            "tool at a time instead of describing a plan in JSON."
+        ),
+        (
+            "Do not send a product-manager-facing answer while you are still "
+            "gathering internal help."
+        ),
         "",
-        summarize_conversation(request.messages, limit=12),
+        "Conversation summary:",
+        summarize_conversation(request.messages, limit=12) or "(none)",
         "",
         "Latest user request:",
         request.latest_user_text() or "(none)",
     ]
     if goal:
-        lines.extend(
-            [
-                "",
-                "Current goal:",
-                goal,
-            ]
-        )
+        lines.extend(["", "Current goal:", goal])
     if current_brief:
-        lines.extend(
-            [
-                "",
-                "Current brief:",
-                current_brief,
-            ]
-        )
-    if move_rationale:
-        lines.extend(
-            [
-                "",
-                "Why the lead developer chose to handle this directly:",
-                move_rationale,
-            ]
-        )
+        lines.extend(["", "Current best brief:", current_brief])
+    if active_workroom_id:
+        lines.extend(["", "Workroom currently in progress:", active_workroom_id])
+    if active_workroom_request:
+        lines.extend(["", "Current workroom assignment:", active_workroom_request])
     if worklog:
-        lines.extend(
-            [
-                "",
-                "Team work so far:",
-                *worklog[-12:],
-            ]
-        )
-    return "\n".join(lines).strip()
-
-
-def finish_reply_prompt(
-    request: ProxyTurnRequest,
-    *,
-    goal: str | None = None,
-    current_brief: str | None = None,
-    worklog: tuple[str, ...] = (),
-    delivery_requirements: tuple[str, ...] = (),
-    delivery_evidence: tuple[str, ...] = (),
-    move_rationale: str | None = None,
-) -> str:
-    lines = [
-        (
-            "You are the lead developer delivering the current result to the "
-            "product manager."
-        ),
-        "Assume the internal work is done unless you explicitly say otherwise.",
-        "Write the host-facing response now.",
-        "",
-        "Conversation summary:",
-        summarize_conversation(request.messages, limit=12) or "(none)",
-    ]
-    if goal:
-        lines.extend(
-            [
-                "",
-                "Goal:",
-                goal,
-            ]
-        )
-    if current_brief:
-        lines.extend(
-            [
-                "",
-                "Best current result:",
-                current_brief,
-            ]
-        )
-    if delivery_requirements:
-        lines.extend(
-            [
-                "",
-                "Delivery requirements already satisfied:",
-                ", ".join(delivery_requirements),
-            ]
-        )
-        if delivery_evidence:
-            lines.extend(
-                [
-                    "Supporting evidence gathered:",
-                    ", ".join(delivery_evidence),
-                ]
-            )
-    if move_rationale:
-        lines.extend(
-            [
-                "",
-                "Why the lead developer is delivering now:",
-                move_rationale,
-            ]
-        )
-    if worklog:
-        lines.extend(
-            [
-                "",
-                "Internal worklog:",
-                *worklog[-12:],
-            ]
-        )
+        lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
 
 
@@ -136,7 +56,6 @@ def specialist_prompt(
     request_text: str,
     transcript_summary: str,
     current_brief: str | None = None,
-    move_rationale: str | None = None,
 ) -> str:
     lines = [
         f"You are the {specialist_id} working for the lead developer.",
@@ -157,14 +76,6 @@ def specialist_prompt(
                 current_brief,
             ]
         )
-    if move_rationale:
-        lines.extend(
-            [
-                "",
-                "Why the lead developer assigned you this slice:",
-                move_rationale,
-            ]
-        )
     return "\n".join(lines).strip()
 
 
@@ -180,7 +91,6 @@ def workroom_round_prompt(
     transcript_summary: str,
     prior_outputs: tuple[str, ...],
     comparison_candidates: tuple[str, ...] = (),
-    move_rationale: str | None = None,
 ) -> str:
     lines = [
         f"You are {agent_id} working inside workroom {workroom_id}.",
@@ -245,14 +155,6 @@ def workroom_round_prompt(
                 ),
             ]
         )
-    if move_rationale:
-        lines.extend(
-            [
-                "",
-                "Why the lead developer is using this workroom move now:",
-                move_rationale,
-            ]
-        )
     return "\n".join(lines).strip()
 
 
@@ -267,7 +169,6 @@ def group_chat_turn_prompt(
     current_brief: str,
     workroom_request: str | None = None,
     prior_outputs: tuple[str, ...],
-    move_rationale: str | None = None,
 ) -> str:
     lines = [
         f"You are {agent_id} speaking in workroom {workroom_id}.",
@@ -317,14 +218,6 @@ def group_chat_turn_prompt(
                 *prior_outputs[-8:],
             ]
         )
-    if move_rationale:
-        lines.extend(
-            [
-                "",
-                "Why the lead developer wants another discussion turn now:",
-                move_rationale,
-            ]
-        )
     return "\n".join(lines).strip()
 
 
@@ -353,7 +246,6 @@ def workroom_manager_prompt(
     workroom_request: str | None,
     participants: tuple[str, ...],
     prior_outputs: tuple[str, ...],
-    move_rationale: str | None = None,
 ) -> str:
     lines = [
         f"Workroom: {workroom_id}",
@@ -363,8 +255,6 @@ def workroom_manager_prompt(
     ]
     if workroom_request:
         lines.append(f"Current round assignment: {workroom_request}")
-    if move_rationale:
-        lines.append(f"Why continue this workroom now: {move_rationale}")
     lines.extend(
         [
             "",
@@ -398,7 +288,6 @@ def handoff_selection_prompt(
     workroom_request: str | None,
     prior_outputs: tuple[str, ...],
     allowed: tuple[str, ...],
-    move_rationale: str | None = None,
 ) -> str:
     lines = [
         f"Workroom: {workroom_id}",
@@ -409,10 +298,6 @@ def handoff_selection_prompt(
     ]
     if workroom_request:
         lines.append(f"Current round assignment: {workroom_request}")
-    if move_rationale:
-        lines.append(
-            f"Why the lead developer is continuing this handoff now: {move_rationale}"
-        )
     lines.extend(
         [
             "",

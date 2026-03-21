@@ -76,6 +76,7 @@ class ProxyAgentRunner:
         model_id_override: str,
         preamble: str = "",
         host_tools: tuple[ProxyFunctionTool, ...] = (),
+        extra_tools: tuple[ProxyFunctionTool, ...] = (),
         tool_choice: ProxyToolChoice = None,
         parallel_tool_calls: bool | None = None,
         pending_continuation: PendingContinuation | None = None,
@@ -89,6 +90,7 @@ class ProxyAgentRunner:
             model_id_override=model_id_override,
             stream=True,
             host_tools=host_tools,
+            extra_tools=extra_tools,
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
             pending_continuation=pending_continuation,
@@ -124,7 +126,7 @@ class ProxyAgentRunner:
         request: ProxyTurnRequest,
         continuation: ContinuationState,
     ) -> tuple[tuple[ProxyToolCall, ...], list[ProxyToolCallEvent]]:
-        tool_calls = self._validated_tool_calls(
+        tool_calls = self.validate_host_tool_calls(
             extract_tool_calls(response),
             request=request,
         )
@@ -148,6 +150,7 @@ class ProxyAgentRunner:
         model_id_override: str,
         stream: bool,
         host_tools: tuple[ProxyFunctionTool, ...] = (),
+        extra_tools: tuple[ProxyFunctionTool, ...] = (),
         tool_choice: ProxyToolChoice = None,
         parallel_tool_calls: bool | None = None,
         pending_continuation: PendingContinuation | None = None,
@@ -162,19 +165,21 @@ class ProxyAgentRunner:
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
         )
-        if allowed_tools and not provider_supports_tool_calling(self.registry):
+        declared_tools = tuple(allowed_tools) + tuple(extra_tools)
+        if declared_tools and not provider_supports_tool_calling(self.registry):
             if tool_options.get("tool_choice") not in (None, "auto", "none"):
                 raise ValueError(
                     f"provider for agent '{agent_id}' does not support tool calling"
                 )
             allowed_tools = ()
+            declared_tools = ()
             tool_options.pop("tool_choice", None)
             tool_options.pop("allow_multiple_tool_calls", None)
         run_kwargs = {
             "session": agent.create_session(session_id=session_id),
             "stream": stream,
         }
-        declaration_tools = build_declaration_tools(allowed_tools)
+        declaration_tools = build_declaration_tools(declared_tools)
         if declaration_tools:
             run_kwargs["tools"] = declaration_tools
         run_kwargs.update(tool_options)
@@ -185,6 +190,14 @@ class ProxyAgentRunner:
             ),
             **run_kwargs,
         )
+
+    def validate_host_tool_calls(
+        self,
+        tool_calls: tuple[ProxyToolCall, ...],
+        *,
+        request: ProxyTurnRequest,
+    ) -> tuple[ProxyToolCall, ...]:
+        return self._validated_tool_calls(tool_calls, request=request)
 
     def _validated_tool_calls(
         self,

@@ -75,7 +75,6 @@ class ProxyWorkroomSupport:
         workroom_request: str | None = None,
         participants: tuple[str, ...],
         prior_outputs: tuple[str, ...],
-        move_rationale: str | None = None,
         model_id_override: str,
     ) -> str | None:
         raw = await self._run_text_agent(
@@ -87,7 +86,6 @@ class ProxyWorkroomSupport:
                 workroom_request=workroom_request,
                 participants=participants,
                 prior_outputs=prior_outputs,
-                move_rationale=move_rationale,
             ),
             preamble=workroom_manager_instructions(participants),
             session_id=f"proxy-workroom-manager-{uuid4().hex}",
@@ -105,7 +103,6 @@ class ProxyWorkroomSupport:
         workroom_request: str | None = None,
         prior_outputs: tuple[str, ...],
         allowed: tuple[str, ...],
-        move_rationale: str | None = None,
         model_id_override: str,
     ) -> str | None:
         if not allowed:
@@ -120,7 +117,6 @@ class ProxyWorkroomSupport:
                 workroom_request=workroom_request,
                 prior_outputs=prior_outputs,
                 allowed=allowed,
-                move_rationale=move_rationale,
             ),
             preamble=handoff_selection_instructions(allowed),
             session_id=f"proxy-handoff-select-{uuid4().hex}",

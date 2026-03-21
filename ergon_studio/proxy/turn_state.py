@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ergon_studio.proxy.continuation import ContinuationState
-from ergon_studio.proxy.delivery_requirements import merge_delivery_evidence
 from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 
 
@@ -12,7 +11,6 @@ class ProxyMoveResult:
     worklog_lines: tuple[str, ...]
     current_brief: str
     workroom_progress: ContinuationState | None = None
-    delivery_evidence: tuple[str, ...] = ()
 
 
 @dataclass
@@ -21,10 +19,7 @@ class ProxyDecisionLoopState:
     current_brief: str
     worklog: tuple[str, ...] = field(default_factory=tuple)
     workroom_progress: ContinuationState | None = None
-    delivery_requirements: tuple[str, ...] = field(default_factory=tuple)
-    delivery_evidence: tuple[str, ...] = field(default_factory=tuple)
     current_workroom_request: str | None = None
-    current_move_rationale: str | None = None
 
     def absorb_result(
         self,
@@ -36,19 +31,14 @@ class ProxyDecisionLoopState:
         if result.current_brief:
             self.current_brief = result.current_brief
         self.workroom_progress = result.workroom_progress
-        self.delivery_evidence = merge_delivery_evidence(
-            self.delivery_evidence,
-            result.delivery_evidence,
-        )
         self.current_workroom_request = None
-        self.current_move_rationale = None
 
 
 @dataclass
 class ProxyTurnState:
     content: str = ""
     reasoning: str = ""
-    mode: str = "act"
+    mode: str = "orchestrator"
     finish_reason: str = "stop"
     tool_calls: tuple[ProxyToolCall, ...] = ()
     output_items: tuple[ProxyOutputItemRef, ...] = field(default_factory=tuple)

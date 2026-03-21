@@ -60,7 +60,6 @@ class WorkroomSupportTests(unittest.IsolatedAsyncioTestCase):
             current_brief="Need implementation",
             participants=("architect", "coder"),
             prior_outputs=("architect: plan",),
-            move_rationale="Architecture is done; implementation should start.",
             model_id_override="qwen",
         )
 
@@ -81,7 +80,6 @@ class WorkroomSupportTests(unittest.IsolatedAsyncioTestCase):
             current_brief="Done",
             prior_outputs=("coder: done",),
             allowed=(),
-            move_rationale="The handoff is likely complete.",
             model_id_override="qwen",
         )
 

@@ -6,10 +6,6 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
-from ergon_studio.proxy.delivery_requirements import (
-    delivery_evidence_for_agent,
-    merge_delivery_evidence,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -17,7 +13,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.playbook_staffing import (
     StaffedParticipant,
     expand_staffed_participants,
@@ -28,6 +23,7 @@ from ergon_studio.proxy.playbook_staffing import (
 )
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
+from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -151,11 +147,6 @@ class ProxyHandoffWorkroomExecutor:
                             if participant.label != current_participant.label
                         ),
                     ),
-                    move_rationale=(
-                        loop_state.current_move_rationale
-                        if loop_state is not None
-                        else None
-                    ),
                     model_id_override=request.model,
                 )
                 current_participant = participant_by_label(participants, next_label)
@@ -183,11 +174,6 @@ class ProxyHandoffWorkroomExecutor:
                 workroom_request=workroom_request,
                 transcript_summary=summarize_conversation(request.messages),
                 prior_outputs=tuple(workroom_outputs),
-                move_rationale=(
-                    loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
-                ),
             )
             agent_text = ""
             first = True
@@ -227,16 +213,6 @@ class ProxyHandoffWorkroomExecutor:
                         workroom_specialists=staffed_specialists,
                         workroom_specialist_counts=staffed_specialist_counts,
                         workroom_request=workroom_request,
-                        delivery_requirements=(
-                            loop_state.delivery_requirements
-                            if loop_state is not None
-                            else ()
-                        ),
-                        delivery_evidence=(
-                            loop_state.delivery_evidence
-                            if loop_state is not None
-                            else ()
-                        ),
                         step_index=round_index,
                         agent_id=current_participant.agent_id,
                         participant_label=current_participant.label,
@@ -257,14 +233,12 @@ class ProxyHandoffWorkroomExecutor:
                 f"{current_participant.label}: {agent_text.strip()}"
             )
             current_brief = agent_text.strip() or current_brief
-            round_evidence = delivery_evidence_for_agent(current_participant.agent_id)
             if current_participant.label in finalizers:
                 if result_sink is not None:
                     result_sink(
                         ProxyMoveResult(
                             worklog_lines=(workroom_outputs[-1],),
                             current_brief=current_brief,
-                            delivery_evidence=round_evidence,
                         )
                     )
                     return
@@ -275,26 +249,12 @@ class ProxyHandoffWorkroomExecutor:
                     ProxyMoveResult(
                         worklog_lines=(workroom_outputs[-1],),
                         current_brief=current_brief,
-                        delivery_evidence=round_evidence,
                         workroom_progress=ContinuationState(
                             mode="workroom",
                             workroom_id=definition.id,
                             workroom_specialists=staffed_specialists,
                             workroom_specialist_counts=staffed_specialist_counts,
                             workroom_request=workroom_request,
-                            delivery_requirements=(
-                                loop_state.delivery_requirements
-                                if loop_state is not None
-                                else ()
-                            ),
-                            delivery_evidence=merge_delivery_evidence(
-                                (
-                                    loop_state.delivery_evidence
-                                    if loop_state is not None
-                                    else ()
-                                ),
-                                round_evidence,
-                            ),
                             step_index=next_round,
                             agent_id=current_participant.agent_id,
                             participant_label=current_participant.label,
@@ -324,11 +284,6 @@ class ProxyHandoffWorkroomExecutor:
                         for participant in participants
                         if participant.label != current_participant.label
                     ),
-                ),
-                move_rationale=(
-                    loop_state.current_move_rationale
-                    if loop_state is not None
-                    else None
                 ),
                 model_id_override=request.model,
             )

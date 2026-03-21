@@ -34,7 +34,10 @@ class ToolCallEmitterTests(unittest.TestCase):
         events = emitter.emit_tool_calls(
             response={"tool_calls": []},
             request=request,
-            continuation=ContinuationState(mode="act", agent_id="orchestrator"),
+            continuation=ContinuationState(
+                mode="orchestrator",
+                agent_id="orchestrator",
+            ),
             state=state,
         )
 

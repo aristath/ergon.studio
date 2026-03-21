@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -25,12 +26,14 @@ from ergon_studio.upstream import UpstreamSettings
 
 
 class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
-    async def test_stream_turn_handles_direct_mode(self) -> None:
+    async def test_stream_turn_replies_directly_when_orchestrator_just_answers(
+        self,
+    ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"action":"reply"}', "Hello world"],
+                    "orchestrator": ["Hello world"],
                 }
             ),
         )
@@ -43,9 +46,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
-        self.assertTrue(
-            any(isinstance(event, ProxyReasoningDeltaEvent) for event in events)
-        )
         self.assertEqual(
             "".join(
                 event.delta
@@ -55,7 +55,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             "Hello world",
         )
         self.assertEqual(result.content, "Hello world")
-        self.assertEqual(result.mode, "act")
+        self.assertEqual(result.mode, "orchestrator")
+        self.assertFalse(
+            any(isinstance(event, ProxyReasoningDeltaEvent) for event in events)
+        )
 
     async def test_stream_turn_converts_unexpected_exceptions_to_error_results(
         self,
@@ -90,7 +93,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         def _builder(_registry, agent_id: str, **kwargs):
             captured["agent_id"] = agent_id
             captured["model_id_override"] = kwargs.get("model_id_override")
-            return _FakeAgent(['{"action":"reply"}', "Hello world"])
+            return _FakeAgent(["Hello world"])
 
         core = ProxyOrchestrationCore(_fake_registry(), agent_builder=_builder)
         request = ProxyTurnRequest(
@@ -105,17 +108,17 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
 
-    async def test_stream_turn_handles_delegate_mode(self) -> None:
+    async def test_stream_turn_messages_specialist_and_then_replies(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"delegate","target":"coder",'
-                            '"assignment":"Implement it"}'
+                        _internal_action(
+                            "message_specialist",
+                            agent_id="coder",
+                            message="Implement it",
                         ),
-                        '{"action":"deliver"}',
                         "Final summary",
                     ],
                     "coder": ["Patch", " applied"],
@@ -136,23 +139,26 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("delegating", reasoning.lower())
+        self.assertIn("messaging specialist coder", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(result.content, "Final summary")
-        self.assertEqual(result.mode, "finish")
+        self.assertEqual(result.mode, "orchestrator")
 
-    async def test_stream_turn_handles_workroom_mode(self) -> None:
+    async def test_stream_turn_handles_workroom_rounds(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"standard-build",'
-                            '"assignment":"Build calculator"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="standard-build",
+                            message="Build calculator",
                         ),
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"deliver"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message="Implement the approved plan",
+                        ),
                         "Workroom final summary",
                     ],
                     "architect": ["Plan"],
@@ -178,124 +184,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(result.content, "Workroom final summary")
-        self.assertEqual(result.mode, "finish")
-
-    async def test_stream_turn_blocks_finish_until_required_review_exists(self) -> None:
-        registry = _advanced_workflow_registry()
-        registry.agent_definitions["coder"] = DefinitionDocument(
-            id="coder",
-            path=Path("coder.md"),
-            metadata={"id": "coder", "role": "coder"},
-            body="## Identity\nCoder.",
-            sections={"Identity": "Coder."},
-        )
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_builder=_fake_agent_builder(
-                {
-                    "orchestrator": [
-                        (
-                            '{"action":"delegate","target":"coder",'
-                            '"assignment":"Implement it",'
-                            '"delivery_requirements":["review"]}'
-                        ),
-                        '{"action":"deliver"}',
-                        (
-                            '{"action":"delegate","target":"reviewer",'
-                            '"assignment":"Review the implementation"}'
-                        ),
-                        '{"action":"deliver"}',
-                        "Reviewed delivery",
-                    ],
-                    "coder": ["Implemented the change"],
-                    "reviewer": ["Looks good after review"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn(
-            "delivery is blocked until these requirements are satisfied",
-            reasoning,
-        )
-        self.assertIn("reviewer: Looks", reasoning)
-        self.assertEqual(result.content, "Reviewed delivery")
-        self.assertEqual(result.mode, "finish")
-
-    async def test_stream_turn_allows_finish_after_workroom_satisfies_review_gate(
-        self,
-    ) -> None:
-        registry = _advanced_workflow_registry()
-        registry.workroom_definitions["reviewed-build"] = DefinitionDocument(
-            id="reviewed-build",
-            path=Path("reviewed-build.md"),
-            metadata={
-                "id": "reviewed-build",
-                "shape": "concurrent",
-                "step_groups": [["architect", "coder", "reviewer"]],
-            },
-            body="## Purpose\nReviewed build.",
-            sections={"Purpose": "Reviewed build."},
-        )
-        registry.agent_definitions["coder"] = DefinitionDocument(
-            id="coder",
-            path=Path("coder.md"),
-            metadata={"id": "coder", "role": "coder"},
-            body="## Identity\nCoder.",
-            sections={"Identity": "Coder."},
-        )
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_builder=_fake_agent_builder(
-                {
-                    "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"reviewed-build",'
-                            '"assignment":"Build calculator",'
-                            '"delivery_requirements":["review"]}'
-                        ),
-                        '{"action":"deliver"}',
-                        "Reviewed workroom delivery",
-                    ],
-                    "architect": ["Plan the build"],
-                    "coder": ["Implement the build"],
-                    "reviewer": ["Review the build"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertNotIn(
-            "delivery is blocked until these requirements are satisfied",
-            reasoning,
-        )
-        self.assertIn("reviewer: Review", reasoning)
-        self.assertEqual(result.content, "Reviewed workroom delivery")
-        self.assertEqual(result.mode, "finish")
+        self.assertEqual(result.mode, "orchestrator")
 
     async def test_stream_turn_workroom_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(
@@ -303,11 +192,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"standard-build",'
-                            '"assignment":"Build calculator","staffing":["coder"]}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="standard-build",
+                            participants=["coder"],
+                            message="Build calculator",
                         ),
-                        '{"action":"deliver"}',
                         "Workroom final summary",
                     ],
                     "coder": ["Built"],
@@ -338,7 +228,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -372,7 +261,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.tool_calls[0].name, "read_file")
         continuation = decode_continuation_from_tool_call_id(result.tool_calls[0].id)
         self.assertIsNotNone(continuation)
-        self.assertEqual(continuation.mode, "act")
+        self.assertEqual(continuation.mode, "orchestrator")
 
     async def test_stream_turn_resumes_workroom_from_tool_result(self) -> None:
         first_core = ProxyOrchestrationCore(
@@ -380,9 +269,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"standard-build",'
-                            '"assignment":"Build calculator"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="standard-build",
+                            message="Build calculator",
                         ),
                     ],
                     "architect": [
@@ -421,8 +311,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "orchestrator": [
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"deliver"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message="Continue from the architecture plan",
+                        ),
                         "Workroom final summary",
                     ],
                 }
@@ -470,7 +362,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             _fake_registry(),
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"action":"reply"}', "Fresh reply"],
+                    "orchestrator": ["Fresh reply"],
                 }
             ),
         )
@@ -498,7 +390,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("handling this turn directly", reasoning.lower())
+        self.assertEqual(reasoning, "")
         self.assertEqual(result.content, "Fresh reply")
 
     async def test_workroom_continuation_keeps_remaining_agents_in_same_group(
@@ -510,9 +402,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"grouped-build",'
-                            '"assignment":"Build calculator"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="grouped-build",
+                            message="Build calculator",
                         ),
                     ],
                     "architect": [
@@ -550,7 +443,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                     "architect": ["Architecture plan"],
                     "coder": ["Built feature"],
                     "reviewer": ["Reviewed result"],
-                    "orchestrator": ['{"action":"reply"}', "Workroom final summary"],
+                    "orchestrator": ["Workroom final summary"],
                 }
             ),
         )
@@ -591,14 +484,26 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"debate",'
-                            '"assignment":"Choose an approach"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="debate",
+                            message="Choose an approach",
                         ),
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"deliver"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message=(
+                                "Continue the discussion and pressure-test "
+                                "the options"
+                            ),
+                        ),
+                        _internal_action(
+                            "continue_workroom",
+                            message="Keep going and move toward a recommendation",
+                        ),
+                        _internal_action(
+                            "continue_workroom",
+                            message="Wrap up with a decision-ready recommendation",
+                        ),
                         "Debate final summary",
                     ],
                     "architect": ["Option A", "Refined option A"],
@@ -633,16 +538,22 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom",'
-                            '"target":"dynamic-open-ended","assignment":"Build it"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="dynamic-open-ended",
+                            message="Build it",
                         ),
                         '{"agent_id":"architect"}',
-                        '{"action":"continue_workroom","target":"current"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message="Take the next adaptive round",
+                        ),
                         '{"agent_id":"reviewer"}',
-                        '{"action":"continue_workroom","target":"current"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message="Take one more adaptive round",
+                        ),
                         '{"agent_id":null}',
-                        '{"action":"deliver"}',
                         "Dynamic final summary",
                     ],
                     "architect": ["Architecture pass"],
@@ -675,13 +586,18 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom",'
-                            '"target":"specialist-handoff",'
-                            '"assignment":"Research and decide"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="specialist-handoff",
+                            message="Research and decide",
                         ),
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"deliver"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message=(
+                                "Continue the handoff and finish the "
+                                "recommendation"
+                            ),
+                        ),
                         "Handoff final summary",
                     ],
                     "architect": ["Initial direction", '{"agent_id":"reviewer"}'],
@@ -710,7 +626,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
         remaining = {
-            "orchestrator": ['{"action":"reply"}', {"text": "", "tool_calls": []}],
+            "orchestrator": [{"text": "", "tool_calls": []}],
         }
 
         class _CaptureAgent(_FakeAgent):
@@ -741,7 +657,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         tools = captured["tools"]
         kwargs = captured["kwargs"]
-        self.assertEqual([tool.name for tool in tools], ["write_file"])
+        self.assertEqual(
+            [tool.name for tool in tools],
+            ["write_file", "message_specialist", "open_workroom"],
+        )
         self.assertEqual(
             kwargs["tool_choice"],
             {"mode": "required", "required_function_name": "write_file"},
@@ -753,7 +672,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         remaining = {
-            "orchestrator": ['{"action":"reply"}', {"text": "Done", "tool_calls": []}],
+            "orchestrator": ["Done"],
         }
 
         class _CaptureAgent(_FakeAgent):
@@ -793,7 +712,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             registry,
             agent_builder=_fake_agent_builder(
                 {
-                    "orchestrator": ['{"action":"reply"}', "unused"],
+                    "orchestrator": ["unused"],
                 }
             ),
         )
@@ -822,7 +741,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -862,7 +780,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             agent_builder=_fake_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -906,7 +823,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         tool_call = _host_continuation_tool_call(
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
             call_id="call_1",
             name="read_file",
         )
@@ -960,7 +877,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         captured: dict[str, object] = {}
         tool_call = _host_continuation_tool_call(
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
             call_id="call_1",
             name="read_file",
         )
@@ -1086,7 +1003,7 @@ class _FakeAgent:
         )
 
 
-def _fake_agent_builder(mapping: dict[str, list[str]]):
+def _fake_agent_builder(mapping: dict[str, list[object]]):
     remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
 
     def _build(_registry, agent_id: str, **_kwargs):
@@ -1250,6 +1167,19 @@ def _host_tool(name: str):
         description=f"{name} tool",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}},
     )
+
+
+def _internal_action(name: str, **payload: object) -> dict[str, object]:
+    return {
+        "text": "",
+        "tool_calls": [
+            {
+                "id": f"internal_{name}",
+                "name": name,
+                "arguments": json.dumps(payload),
+            }
+        ],
+    }
 
 
 def _host_continuation_tool_call(

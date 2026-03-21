@@ -11,7 +11,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.planner import ProxyTurnPlan
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -35,15 +34,15 @@ class ProxyWorkroomRequestExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        plan: ProxyTurnPlan | None = None,
+        message: str | None,
+        specialists: tuple[str, ...],
+        specialist_counts: tuple[tuple[str, int], ...],
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         workroom_progress = (
-            loop_state.workroom_progress
-            if loop_state is not None
-            else None
+            loop_state.workroom_progress if loop_state is not None else None
         )
         if workroom_progress is None:
             state.finish_reason = "error"
@@ -53,7 +52,9 @@ class ProxyWorkroomRequestExecutor:
             return
         active_continuation = _override_active_staffing(
             workroom_progress,
-            plan=plan,
+            message=message,
+            specialists=specialists,
+            specialist_counts=specialist_counts,
         )
         async for event in self._workroom_dispatcher.execute_workroom_continuation(
             request=request,
@@ -69,17 +70,20 @@ class ProxyWorkroomRequestExecutor:
         self,
         *,
         request: ProxyTurnRequest,
-        plan: ProxyTurnPlan,
+        workroom_id: str | None,
+        specialists: tuple[str, ...],
+        specialist_counts: tuple[tuple[str, int], ...],
+        workroom_request: str | None,
         state: ProxyTurnState,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
         loop_state: ProxyDecisionLoopState | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         async for event in self._workroom_dispatcher.execute_workroom(
             request=request,
-            workroom_id=plan.workroom_id,
-            specialists=plan.specialists,
-            specialist_counts=plan.specialist_counts,
-            workroom_request=plan.workroom_request,
+            workroom_id=workroom_id,
+            specialists=specialists,
+            specialist_counts=specialist_counts,
+            workroom_request=workroom_request,
             goal=(
                 loop_state.goal
                 if loop_state is not None
@@ -115,21 +119,15 @@ class ProxyWorkroomRequestExecutor:
 def _override_active_staffing(
     continuation: ContinuationState,
     *,
-    plan: ProxyTurnPlan | None,
+    message: str | None,
+    specialists: tuple[str, ...],
+    specialist_counts: tuple[tuple[str, int], ...],
 ) -> ContinuationState:
-    if plan is None:
-        return continuation
-    if plan.specialists or plan.specialist_counts:
-        workroom_specialists = tuple(plan.specialists)
-        workroom_specialist_counts = tuple(plan.specialist_counts)
-    else:
-        workroom_specialists = continuation.workroom_specialists
-        workroom_specialist_counts = continuation.workroom_specialist_counts
-    workroom_request = (
-        plan.workroom_request
-        if plan is not None and plan.workroom_request
-        else continuation.workroom_request
+    workroom_specialists = specialists or continuation.workroom_specialists
+    workroom_specialist_counts = (
+        specialist_counts or continuation.workroom_specialist_counts
     )
+    workroom_request = message or continuation.workroom_request
     if (
         workroom_specialists == continuation.workroom_specialists
         and workroom_specialist_counts == continuation.workroom_specialist_counts

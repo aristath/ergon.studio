@@ -8,10 +8,6 @@ from uuid import uuid4
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import ContinuationState, PendingContinuation
-from ergon_studio.proxy.delivery_requirements import (
-    delivery_evidence_for_agents,
-    merge_delivery_evidence,
-)
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
@@ -19,10 +15,10 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.planner import summarize_conversation
 from ergon_studio.proxy.prompts import workroom_round_prompt
 from ergon_studio.proxy.response_sink import response_holder_sink
 from ergon_studio.proxy.tool_passthrough import extract_tool_calls
+from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import (
     ProxyDecisionLoopState,
     ProxyMoveResult,
@@ -175,12 +171,10 @@ class ProxyGroupedWorkroomExecutor:
                     last_stage_outputs = list(stage_outputs)
                     last_stage_parallel_attempts = True
                     if result_sink is not None:
-                        stage_evidence = delivery_evidence_for_agents(group)
                         result_sink(
                             ProxyMoveResult(
                                 worklog_lines=tuple(stage_outputs),
                                 current_brief=current_brief,
-                                delivery_evidence=stage_evidence,
                                 workroom_progress=self._next_workroom_progress(
                                     definition=definition,
                                     step_groups=step_groups,
@@ -189,19 +183,6 @@ class ProxyGroupedWorkroomExecutor:
                                         staffed_specialist_counts
                                     ),
                                     workroom_request=workroom_request,
-                                    delivery_requirements=(
-                                        loop_state.delivery_requirements
-                                        if loop_state is not None
-                                        else ()
-                                    ),
-                                    delivery_evidence=merge_delivery_evidence(
-                                        (
-                                            loop_state.delivery_evidence
-                                            if loop_state is not None
-                                            else ()
-                                        ),
-                                        stage_evidence,
-                                    ),
                                     step_index=step_index,
                                     goal=goal,
                                     current_brief=current_brief,
@@ -236,11 +217,6 @@ class ProxyGroupedWorkroomExecutor:
                     transcript_summary=summarize_conversation(request.messages),
                     prior_outputs=tuple(workroom_outputs),
                     comparison_candidates=comparison_candidates,
-                    move_rationale=(
-                        loop_state.current_move_rationale
-                        if loop_state is not None
-                        else None
-                    ),
                 )
                 agent_text = ""
                 first = True
@@ -274,16 +250,6 @@ class ProxyGroupedWorkroomExecutor:
                             workroom_specialists=staffed_specialists,
                             workroom_specialist_counts=staffed_specialist_counts,
                             workroom_request=workroom_request,
-                            delivery_requirements=(
-                                loop_state.delivery_requirements
-                                if loop_state is not None
-                                else ()
-                            ),
-                            delivery_evidence=(
-                                loop_state.delivery_evidence
-                                if loop_state is not None
-                                else ()
-                            ),
                             last_stage_outputs=tuple(last_stage_outputs),
                             last_stage_parallel_attempts=(
                                 last_stage_parallel_attempts
@@ -316,31 +282,16 @@ class ProxyGroupedWorkroomExecutor:
             last_stage_outputs = list(stage_outputs)
             last_stage_parallel_attempts = _is_parallel_attempt_group(group)
             if result_sink is not None:
-                stage_evidence = delivery_evidence_for_agents(group)
                 result_sink(
                     ProxyMoveResult(
                         worklog_lines=tuple(stage_outputs),
                         current_brief=current_brief,
-                        delivery_evidence=stage_evidence,
                         workroom_progress=self._next_workroom_progress(
                             definition=definition,
                             step_groups=step_groups,
                             staffed_specialists=staffed_specialists,
                             staffed_specialist_counts=staffed_specialist_counts,
                             workroom_request=workroom_request,
-                            delivery_requirements=(
-                                loop_state.delivery_requirements
-                                if loop_state is not None
-                                else ()
-                            ),
-                            delivery_evidence=merge_delivery_evidence(
-                                (
-                                    loop_state.delivery_evidence
-                                    if loop_state is not None
-                                    else ()
-                                ),
-                                stage_evidence,
-                            ),
                             step_index=step_index,
                             goal=goal,
                             current_brief=current_brief,
@@ -430,9 +381,6 @@ class ProxyGroupedWorkroomExecutor:
             transcript_summary=summarize_conversation(request.messages),
             prior_outputs=(),
             comparison_candidates=(),
-            move_rationale=(
-                loop_state.current_move_rationale if loop_state is not None else None
-            ),
         )
         text = ""
         response_holder: dict[str, Any] = {}
@@ -461,8 +409,6 @@ class ProxyGroupedWorkroomExecutor:
         step_groups: tuple[tuple[str, ...], ...],
         staffed_specialists: tuple[str, ...],
         staffed_specialist_counts: tuple[tuple[str, int], ...],
-        delivery_requirements: tuple[str, ...],
-        delivery_evidence: tuple[str, ...],
         step_index: int,
         goal: str,
         current_brief: str,
@@ -482,8 +428,6 @@ class ProxyGroupedWorkroomExecutor:
             workroom_specialists=staffed_specialists,
             workroom_specialist_counts=staffed_specialist_counts,
             workroom_request=workroom_request,
-            delivery_requirements=delivery_requirements,
-            delivery_evidence=delivery_evidence,
             last_stage_outputs=tuple(last_stage_outputs),
             last_stage_parallel_attempts=last_stage_parallel_attempts,
             step_index=next_step_index,

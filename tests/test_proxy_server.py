@@ -583,12 +583,15 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        (
-                            '{"action":"open_workroom","target":"standard-build",'
-                            '"assignment":"Build calculator"}'
+                        _internal_action(
+                            "open_workroom",
+                            workroom_id="standard-build",
+                            message="Build calculator",
                         ),
-                        '{"action":"continue_workroom","target":"current"}',
-                        '{"action":"deliver"}',
+                        _internal_action(
+                            "continue_workroom",
+                            message="Continue the build from the plan",
+                        ),
                         "Workroom final summary",
                     ],
                     "architect": [
@@ -687,7 +690,6 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -749,7 +751,6 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -857,7 +858,7 @@ class ProxyServerTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(mode="act", agent_id="orchestrator"),
+            state=ContinuationState(mode="orchestrator", agent_id="orchestrator"),
         ).id
         request = Request(
             f"http://127.0.0.1:{handle.port}/v1/responses",
@@ -908,7 +909,6 @@ class ProxyServerTests(unittest.TestCase):
             agent_builder=_proxy_agent_builder(
                 {
                     "orchestrator": [
-                        '{"action":"reply"}',
                         {
                             "text": "",
                             "tool_calls": [
@@ -1098,7 +1098,7 @@ class _FakeCore:
                 finish_reason=finish_reason,
                 content=content,
                 reasoning="",
-                mode="act",
+                mode="orchestrator",
                 tool_calls=self._tool_calls,
                 output_items=self._output_items,
             ),
@@ -1131,7 +1131,7 @@ class _FailingCore:
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
-                mode="act",
+                mode="orchestrator",
             ),
         )
 
@@ -1165,7 +1165,7 @@ class _LateFailingCore:
                 finish_reason="error",
                 content=str(self._exc),
                 reasoning="",
-                mode="act",
+                mode="orchestrator",
             ),
         )
 
@@ -1210,6 +1210,19 @@ def _proxy_agent_builder(mapping: dict[str, list[object]]):
         return _FakeAgent([queue.pop(0)])
 
     return _build
+
+
+def _internal_action(name: str, **payload: object) -> dict[str, object]:
+    return {
+        "text": "",
+        "tool_calls": [
+            {
+                "id": f"internal_{name}",
+                "name": name,
+                "arguments": json.dumps(payload),
+            }
+        ],
+    }
 
 
 def _proxy_registry() -> RuntimeRegistry:

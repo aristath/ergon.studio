@@ -153,7 +153,6 @@ class ProxyOrchestrationCore:
         pending = pending_orchestrator
         for _ in range(self._MAX_INTERNAL_MOVES):
             response_holder: dict[str, Any] = {}
-            emitted_content = False
             internal_tools = build_orchestrator_internal_tools(self.registry)
             async for delta in self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
@@ -185,7 +184,6 @@ class ProxyOrchestrationCore:
                 pending_continuation=pending,
                 final_response_sink=partial(_store_response, response_holder),
             ):
-                emitted_content = True
                 state.mode = "orchestrator"
                 state.append_content(delta)
                 yield ProxyContentDeltaEvent(delta)
@@ -211,11 +209,6 @@ class ProxyOrchestrationCore:
                     "orchestrator must use at most one internal action at a time"
                 )
             if host_tool_calls:
-                if emitted_content:
-                    raise ValueError(
-                        "orchestrator cannot stream a product-manager reply and "
-                        "request host tools in the same move"
-                    )
                 state.mode = "orchestrator"
                 for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
@@ -226,11 +219,6 @@ class ProxyOrchestrationCore:
                     yield tool_event
                 return
             if internal_tool_calls:
-                if emitted_content:
-                    raise ValueError(
-                        "orchestrator cannot stream a product-manager reply and "
-                        "message a workroom in the same move"
-                    )
                 action = parse_internal_action(
                     internal_tool_calls[0],
                     registry=self.registry,

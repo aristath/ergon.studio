@@ -159,7 +159,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
 
-    async def test_stream_turn_errors_when_orchestrator_mixes_text_and_workroom_action(
+    async def test_stream_turn_allows_text_before_workroom_action(
         self,
     ) -> None:
         core = ProxyOrchestrationCore(
@@ -181,8 +181,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                                     ),
                                 }
                             ],
-                        }
+                        },
+                        "Done",
                     ],
+                    "coder": ["Here is the code"],
                 }
             ),
         )
@@ -201,8 +203,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(event, ProxyContentDeltaEvent)
         )
         self.assertIn("Starting now", content)
-        self.assertEqual(result.finish_reason, "error")
-        self.assertIn("message a workroom in the same move", result.content)
+        self.assertNotEqual(result.finish_reason, "error")
 
     async def test_stream_turn_opens_single_person_workroom_and_then_replies(
         self,

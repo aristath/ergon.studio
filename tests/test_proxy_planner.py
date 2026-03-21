@@ -172,7 +172,6 @@ class ProxyPlannerTests(unittest.TestCase):
         self.assertEqual(plan.mode, "continue_playbook")
         self.assertIsNone(plan.workflow_id)
         self.assertEqual(plan.playbook_request, "Run one more review pass")
-        self.assertEqual(plan.staffing_action, "replace")
         self.assertEqual(plan.specialists, ("reviewer",))
 
     def test_parse_turn_plan_drops_unknown_agent(self) -> None:

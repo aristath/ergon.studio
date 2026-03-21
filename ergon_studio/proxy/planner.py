@@ -23,7 +23,6 @@ class ProxyTurnPlan:
     mode: str
     workflow_id: str | None = None
     agent_id: str | None = None
-    staffing_action: str | None = None
     specialists: tuple[str, ...] = ()
     specialist_counts: tuple[tuple[str, int], ...] = ()
     playbook_request: str | None = None
@@ -309,13 +308,9 @@ def _parse_action_plan(
             registry,
             target,
         )
-        staffing_action = (
-            "replace" if specialists or specialist_counts else None
-        )
         return ProxyTurnPlan(
             mode="continue_playbook",
             workflow_id=workflow_id,
-            staffing_action=staffing_action,
             specialists=specialists,
             specialist_counts=specialist_counts,
             playbook_request=assignment,

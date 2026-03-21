@@ -119,10 +119,12 @@ def _override_active_staffing(
 ) -> ContinuationState:
     if plan is None:
         return continuation
-    workflow_specialists, workflow_specialist_counts = _apply_staffing_action(
-        continuation,
-        plan=plan,
-    )
+    if plan.specialists or plan.specialist_counts:
+        workflow_specialists = tuple(plan.specialists)
+        workflow_specialist_counts = tuple(plan.specialist_counts)
+    else:
+        workflow_specialists = continuation.workflow_specialists
+        workflow_specialist_counts = continuation.workflow_specialist_counts
     workflow_request = (
         plan.playbook_request
         if plan is not None and plan.playbook_request
@@ -139,90 +141,4 @@ def _override_active_staffing(
         workflow_specialists=workflow_specialists,
         workflow_specialist_counts=workflow_specialist_counts,
         workflow_request=workflow_request,
-    )
-
-
-def _apply_staffing_action(
-    continuation: ContinuationState,
-    *,
-    plan: ProxyTurnPlan,
-) -> tuple[tuple[str, ...], tuple[tuple[str, int], ...]]:
-    current_specialists = list(continuation.workflow_specialists)
-    current_count_map = {
-        agent_id: count for agent_id, count in continuation.workflow_specialist_counts
-    }
-    requested_specialists = tuple(plan.specialists)
-    requested_count_map = {
-        agent_id: count for agent_id, count in plan.specialist_counts
-    }
-    action = plan.staffing_action
-    if action is None:
-        if requested_specialists or requested_count_map:
-            action = "replace"
-        else:
-            action = "keep"
-
-    if action == "keep":
-        return (
-            continuation.workflow_specialists,
-            continuation.workflow_specialist_counts,
-        )
-
-    if action == "replace":
-        if not requested_specialists and not requested_count_map:
-            return (
-                continuation.workflow_specialists,
-                continuation.workflow_specialist_counts,
-            )
-        replace_specialists = requested_specialists or tuple(requested_count_map)
-        return replace_specialists, _normalized_counts(
-            replace_specialists,
-            requested_count_map,
-        )
-
-    if action == "augment":
-        specialists = list(current_specialists)
-        for agent_id in requested_specialists:
-            if agent_id not in specialists:
-                specialists.append(agent_id)
-        for agent_id in requested_count_map:
-            if agent_id not in specialists:
-                specialists.append(agent_id)
-        count_map = dict(current_count_map)
-        for agent_id, count in requested_count_map.items():
-            count_map[agent_id] = max(count_map.get(agent_id, 1), count)
-        return tuple(specialists), _normalized_counts(tuple(specialists), count_map)
-
-    if action == "trim":
-        removed = set(requested_specialists)
-        specialists = [
-            agent_id for agent_id in current_specialists if agent_id not in removed
-        ]
-        count_map = {
-            agent_id: count
-            for agent_id, count in current_count_map.items()
-            if agent_id not in removed
-        }
-        for agent_id, count in requested_count_map.items():
-            if agent_id not in specialists:
-                continue
-            current = count_map.get(agent_id, 1)
-            reduced = min(current, count)
-            if reduced <= 1:
-                count_map.pop(agent_id, None)
-            else:
-                count_map[agent_id] = reduced
-        return tuple(specialists), _normalized_counts(tuple(specialists), count_map)
-
-    return continuation.workflow_specialists, continuation.workflow_specialist_counts
-
-
-def _normalized_counts(
-    specialists: tuple[str, ...],
-    count_map: dict[str, int],
-) -> tuple[tuple[str, int], ...]:
-    return tuple(
-        (agent_id, count)
-        for agent_id in specialists
-        if (count := count_map.get(agent_id, 1)) > 1
     )

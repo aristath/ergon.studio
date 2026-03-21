@@ -25,6 +25,10 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append("delegate")
             yield ProxyContentDeltaEvent("delegate")
 
+        async def _finish(**_kwargs):
+            calls.append("finish")
+            yield ProxyContentDeltaEvent("finish")
+
         async def _workflow(**_kwargs):
             calls.append("workflow")
             yield ProxyContentDeltaEvent("workflow")
@@ -35,6 +39,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
 
         router = ProxyTurnRouter(
             execute_direct=_direct,
+            execute_finish=_finish,
             execute_delegation=_delegate,
             execute_workflow=_workflow,
             execute_workflow_continuation=_workflow_continuation,
@@ -71,6 +76,10 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
             calls.append({"kind": "delegate", **kwargs})
             yield ProxyContentDeltaEvent("delegate")
 
+        async def _finish(**kwargs):
+            calls.append({"kind": "finish", **kwargs})
+            yield ProxyContentDeltaEvent("finish")
+
         async def _workflow(**kwargs):
             calls.append({"kind": "workflow", **kwargs})
             yield ProxyContentDeltaEvent("workflow")
@@ -81,6 +90,7 @@ class TurnRouterTests(unittest.IsolatedAsyncioTestCase):
 
         router = ProxyTurnRouter(
             execute_direct=_direct,
+            execute_finish=_finish,
             execute_delegation=_delegate,
             execute_workflow=_workflow,
             execute_workflow_continuation=_workflow_continuation,

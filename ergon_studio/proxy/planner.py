@@ -64,6 +64,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             '- "act": the lead developer handles the next move directly.',
             '- "delegate": assign one specialist a focused task.',
             '- "workflow": invoke a named playbook involving one or more specialists.',
+            '- "finish": deliver the current result back to the product manager.',
             "",
             "Rules:",
             (
@@ -72,6 +73,10 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             (
                 "- Prefer act for discussion, clarification, planning with the product "
                 "manager, and small direct actions."
+            ),
+            (
+                "- Prefer finish when the work is materially done and the lead "
+                "developer should hand back a concrete result."
             ),
             (
                 "- Prefer delegate for narrow, well-bounded specialist work."
@@ -100,7 +105,7 @@ def build_turn_planner_instructions(registry: RuntimeRegistry) -> str:
             *specialist_lines,
             "",
             "Required JSON shape:",
-            '{"mode":"workflow|delegate|act","workflow_id":null,"agent_id":null,"request":"","goal":"","deliverable_expected":false}',
+            '{"mode":"workflow|delegate|act|finish","workflow_id":null,"agent_id":null,"request":"","goal":"","deliverable_expected":false}',
         ]
     )
 
@@ -164,7 +169,7 @@ def parse_turn_plan(raw: str, *, registry: RuntimeRegistry) -> ProxyTurnPlan:
         raise ValueError("planner output must be a JSON object")
 
     mode = str(payload.get("mode", "act")).strip().lower()
-    if mode not in {"act", "delegate", "workflow"}:
+    if mode not in {"act", "delegate", "workflow", "finish"}:
         mode = "act"
     workflow_id = resolve_workflow_reference(
         registry, _optional_text(payload.get("workflow_id"))

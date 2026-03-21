@@ -95,3 +95,46 @@ class TurnExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("delegating", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(state.content, "Final summary")
+
+    async def test_execute_finish_streams_final_delivery(self) -> None:
+        async def _stream_text_agent(**_kwargs):
+            yield "Ready"
+            yield " to ship"
+
+        async def _run_text_agent(**_kwargs):
+            return None
+
+        def _emit_tool_calls(**_kwargs):
+            return []
+
+        executor = ProxyTurnExecutor(
+            stream_text_agent=_stream_text_agent,
+            run_text_agent=_run_text_agent,
+            emit_tool_calls=_emit_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Ship it"),),
+        )
+        state = ProxyTurnState()
+
+        events = [
+            event
+            async for event in executor.execute_finish(request=request, state=state)
+        ]
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("delivering", reasoning.lower())
+        self.assertEqual(
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
+            ),
+            "Ready to ship",
+        )
+        self.assertEqual(state.content, "Ready to ship")

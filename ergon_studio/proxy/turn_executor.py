@@ -16,6 +16,7 @@ from ergon_studio.proxy.planner import ProxyTurnPlan, summarize_conversation
 from ergon_studio.proxy.prompts import (
     delegation_summary_prompt,
     direct_reply_prompt,
+    finish_reply_prompt,
     specialist_prompt,
     summary_instructions,
 )
@@ -85,6 +86,56 @@ class ProxyTurnExecutor:
                 request=request,
                 continuation=ContinuationState(
                     mode="act",
+                    agent_id="orchestrator",
+                    goal=loop_state.goal if loop_state is not None else None,
+                    current_brief=(
+                        loop_state.current_brief if loop_state is not None else None
+                    ),
+                    decision_history=(
+                        loop_state.worklog if loop_state is not None else ()
+                    ),
+                ),
+                state=state,
+            )
+            for event in emitted:
+                yield event
+
+    async def execute_finish(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        state: ProxyTurnState,
+        loop_state: ProxyDecisionLoopState | None = None,
+    ) -> AsyncIterator[ProxyEvent]:
+        notice = "Orchestrator: delivering the current result.\n"
+        state.append_reasoning(notice)
+        yield ProxyReasoningDeltaEvent(notice)
+        prompt = finish_reply_prompt(
+            request,
+            goal=loop_state.goal if loop_state is not None else None,
+            current_brief=loop_state.current_brief if loop_state is not None else None,
+            worklog=loop_state.worklog if loop_state is not None else (),
+        )
+        response_holder: dict[str, Any] = {}
+        async for delta in self._stream_text_agent(
+            agent_id="orchestrator",
+            prompt=prompt,
+            session_id=f"proxy-finish-{uuid4().hex}",
+            model_id_override=request.model,
+            host_tools=request.tools,
+            tool_choice=request.tool_choice,
+            parallel_tool_calls=request.parallel_tool_calls,
+            final_response_sink=response_holder_sink(response_holder),
+        ):
+            state.append_content(delta)
+            yield ProxyContentDeltaEvent(delta)
+        response = response_holder.get("response")
+        if response is not None:
+            emitted = self._emit_tool_calls(
+                response=response,
+                request=request,
+                continuation=ContinuationState(
+                    mode="finish",
                     agent_id="orchestrator",
                     goal=loop_state.goal if loop_state is not None else None,
                     current_brief=(

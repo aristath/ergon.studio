@@ -116,6 +116,7 @@ class ProxyOrchestrationCore:
         )
         self._turn_router = ProxyTurnRouter(
             execute_direct=turn_executor.execute_direct,
+            execute_finish=turn_executor.execute_finish,
             execute_delegation=turn_executor.execute_delegation,
             execute_workflow=workflow_request_executor.execute_workflow,
             execute_workflow_continuation=(
@@ -215,7 +216,7 @@ class ProxyOrchestrationCore:
                 yield event
             if state.finish_reason == "tool_calls":
                 return
-            if plan.mode == "act":
+            if plan.mode in {"act", "finish"}:
                 return
             if not result_holder:
                 return

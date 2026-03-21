@@ -27,6 +27,21 @@ class TurnPlannerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(plan.mode, "act")
 
+    async def test_plan_turn_parses_finish_decision(self) -> None:
+        async def _run_text_agent(**_kwargs):
+            return '{"mode":"finish","goal":"Deliver calculator"}'
+
+        planner = ProxyTurnPlanner(_registry(), run_text_agent=_run_text_agent)
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Ship it"),),
+        )
+
+        plan = await planner.plan_turn(request)
+
+        self.assertEqual(plan.mode, "finish")
+        self.assertEqual(plan.goal, "Deliver calculator")
+
     async def test_plan_turn_parses_valid_workflow_plan(self) -> None:
         async def _run_text_agent(**_kwargs):
             return (

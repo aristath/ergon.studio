@@ -32,11 +32,13 @@ class ProxyTurnRouter:
         self,
         *,
         execute_direct: TurnHandler,
+        execute_finish: TurnHandler,
         execute_delegation: TurnHandler,
         execute_workflow: TurnHandler,
         execute_workflow_continuation: TurnHandler,
     ) -> None:
         self._execute_direct = execute_direct
+        self._execute_finish = execute_finish
         self._execute_delegation = execute_delegation
         self._execute_workflow = execute_workflow
         self._execute_workflow_continuation = execute_workflow_continuation
@@ -50,6 +52,14 @@ class ProxyTurnRouter:
         loop_state: ProxyDecisionLoopState | None = None,
         result_sink: Callable[[ProxyMoveResult], None] | None = None,
     ) -> AsyncIterator[ProxyEvent]:
+        if plan.mode == "finish":
+            async for event in self._execute_finish(
+                request=request,
+                state=state,
+                loop_state=loop_state,
+            ):
+                yield event
+            return
         if plan.mode == "delegate" and plan.agent_id is not None:
             async for event in self._execute_delegation(
                 request=request,
@@ -95,6 +105,14 @@ class ProxyTurnRouter:
                 state=state,
                 loop_state=loop_state,
                 result_sink=result_sink,
+            ):
+                yield event
+            return
+        if continuation.mode == "finish":
+            async for event in self._execute_finish(
+                request=request,
+                state=state,
+                loop_state=loop_state,
             ):
                 yield event
             return

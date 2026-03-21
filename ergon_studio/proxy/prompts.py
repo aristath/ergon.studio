@@ -50,6 +50,51 @@ def direct_reply_prompt(
     return "\n".join(lines).strip()
 
 
+def finish_reply_prompt(
+    request: ProxyTurnRequest,
+    *,
+    goal: str | None = None,
+    current_brief: str | None = None,
+    worklog: tuple[str, ...] = (),
+) -> str:
+    lines = [
+        (
+            "You are the lead developer delivering the current result to the "
+            "product manager."
+        ),
+        "Assume the internal work is done unless you explicitly say otherwise.",
+        "Write the host-facing response now.",
+        "",
+        "Conversation summary:",
+        summarize_conversation(request.messages, limit=12) or "(none)",
+    ]
+    if goal:
+        lines.extend(
+            [
+                "",
+                "Goal:",
+                goal,
+            ]
+        )
+    if current_brief:
+        lines.extend(
+            [
+                "",
+                "Best current result:",
+                current_brief,
+            ]
+        )
+    if worklog:
+        lines.extend(
+            [
+                "",
+                "Internal worklog:",
+                *worklog[-12:],
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
 def specialist_prompt(
     *,
     specialist_id: str,

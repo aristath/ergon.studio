@@ -47,17 +47,12 @@ from ergon_studio.proxy.planner import (
 from ergon_studio.proxy.prompts import (
     delegation_summary_prompt,
     direct_reply_prompt,
-    handoff_selection_instructions,
-    handoff_selection_prompt,
-    parse_agent_selection,
     specialist_prompt,
     summary_instructions,
-    workflow_manager_instructions,
-    workflow_manager_prompt,
-    workflow_summary_prompt,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.proxy.workflow_dispatcher import ProxyWorkflowDispatcher
+from ergon_studio.proxy.workflow_support import ProxyWorkflowSupport
 from ergon_studio.registry import RuntimeRegistry
 
 ProxyEvent = (
@@ -87,27 +82,30 @@ class ProxyOrchestrationCore:
             execute_magentic_workflow=self._execute_magentic_workflow,
             execute_handoff_workflow=self._execute_handoff_workflow,
         )
+        self._workflow_support = ProxyWorkflowSupport(
+            run_text_agent=self._run_text_agent,
+        )
         self._grouped_workflow_executor = ProxyGroupedWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
             emit_tool_calls=self._emit_tool_calls,
-            emit_workflow_summary=self._emit_workflow_summary,
+            emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._group_chat_workflow_executor = ProxyGroupChatWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
             emit_tool_calls=self._emit_tool_calls,
-            emit_workflow_summary=self._emit_workflow_summary,
+            emit_workflow_summary=self._workflow_support.emit_summary,
         )
         self._magentic_workflow_executor = ProxyMagenticWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
             emit_tool_calls=self._emit_tool_calls,
-            emit_workflow_summary=self._emit_workflow_summary,
-            select_manager_agent=self._select_manager_agent,
+            emit_workflow_summary=self._workflow_support.emit_summary,
+            select_manager_agent=self._workflow_support.select_manager_agent,
         )
         self._handoff_workflow_executor = ProxyHandoffWorkflowExecutor(
             stream_text_agent=self._stream_text_agent,
             emit_tool_calls=self._emit_tool_calls,
-            emit_workflow_summary=self._emit_workflow_summary,
-            select_handoff_target=self._select_handoff_target,
+            emit_workflow_summary=self._workflow_support.emit_summary,
+            select_handoff_target=self._workflow_support.select_handoff_target,
         )
 
     def stream_turn(
@@ -468,87 +466,6 @@ class ProxyOrchestrationCore:
             pending=pending,
         ):
             yield summary_event
-
-    async def _emit_workflow_summary(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        definition: DefinitionDocument,
-        goal: str,
-        current_brief: str,
-        workflow_outputs: tuple[str, ...],
-        state: ProxyTurnState,
-    ) -> AsyncIterator[ProxyEvent]:
-        final_text = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=workflow_summary_prompt(
-                workflow_id=definition.id,
-                goal=goal,
-                outputs=workflow_outputs,
-            ),
-            preamble=summary_instructions(),
-            session_id=f"proxy-workflow-summary-{uuid4().hex}",
-            model_id_override=request.model,
-        )
-        if not final_text:
-            final_text = current_brief.strip()
-        state.set_content(final_text)
-        if final_text:
-            yield ProxyContentDeltaEvent(final_text)
-
-    async def _select_manager_agent(
-        self,
-        *,
-        workflow_id: str,
-        goal: str,
-        current_brief: str,
-        participants: tuple[str, ...],
-        prior_outputs: tuple[str, ...],
-        model_id_override: str,
-    ) -> str | None:
-        raw = await self._run_text_agent(
-            agent_id="orchestrator",
-            prompt=workflow_manager_prompt(
-                workflow_id=workflow_id,
-                goal=goal,
-                current_brief=current_brief,
-                participants=participants,
-                prior_outputs=prior_outputs,
-            ),
-            preamble=workflow_manager_instructions(participants),
-            session_id=f"proxy-workflow-manager-{uuid4().hex}",
-            model_id_override=model_id_override,
-        )
-        return parse_agent_selection(raw, participants=participants)
-
-    async def _select_handoff_target(
-        self,
-        *,
-        workflow_id: str,
-        current_agent: str,
-        goal: str,
-        current_brief: str,
-        prior_outputs: tuple[str, ...],
-        allowed: tuple[str, ...],
-        model_id_override: str,
-    ) -> str | None:
-        if not allowed:
-            return None
-        raw = await self._run_text_agent(
-            agent_id=current_agent,
-            prompt=handoff_selection_prompt(
-                workflow_id=workflow_id,
-                current_agent=current_agent,
-                goal=goal,
-                current_brief=current_brief,
-                prior_outputs=prior_outputs,
-                allowed=allowed,
-            ),
-            preamble=handoff_selection_instructions(allowed),
-            session_id=f"proxy-handoff-select-{uuid4().hex}",
-            model_id_override=model_id_override,
-        )
-        return parse_agent_selection(raw, participants=allowed)
 
     async def _run_text_agent(
         self,

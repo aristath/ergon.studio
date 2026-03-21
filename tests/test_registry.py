@@ -27,6 +27,50 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (agents_dir / "architect.md").write_text(
+                (
+                    "---\n"
+                    "id: architect\n"
+                    "role: architect\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Architect.\n"
+                ),
+                encoding="utf-8",
+            )
+            (agents_dir / "reviewer.md").write_text(
+                (
+                    "---\n"
+                    "id: reviewer\n"
+                    "role: reviewer\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Reviewer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (agents_dir / "researcher.md").write_text(
+                (
+                    "---\n"
+                    "id: researcher\n"
+                    "role: researcher\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Researcher.\n"
+                ),
+                encoding="utf-8",
+            )
+            (agents_dir / "coder.md").write_text(
+                (
+                    "---\n"
+                    "id: coder\n"
+                    "role: coder\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Coder.\n"
+                ),
+                encoding="utf-8",
+            )
             (workflows_dir / "standard-build.md").write_text(
                 (
                     "---\n"
@@ -96,6 +140,46 @@ class RegistryTests(unittest.TestCase):
             (root_dir / "workflows").mkdir(parents=True)
             with self.assertRaisesRegex(
                 ValueError, "missing required agent definition"
+            ):
+                load_registry(
+                    root_dir,
+                    upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
+                )
+
+    def test_load_registry_rejects_workflows_with_unknown_agents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir) / "definitions"
+            agents_dir = root_dir / "agents"
+            workflows_dir = root_dir / "workflows"
+            agents_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+            (agents_dir / "orchestrator.md").write_text(
+                (
+                    "---\n"
+                    "id: orchestrator\n"
+                    "role: orchestrator\n"
+                    "---\n"
+                    "## Identity\n"
+                    "Lead engineer.\n"
+                ),
+                encoding="utf-8",
+            )
+            (workflows_dir / "standard-build.md").write_text(
+                (
+                    "---\n"
+                    "id: standard-build\n"
+                    "orchestration: sequential\n"
+                    "steps:\n"
+                    "  - coder\n"
+                    "---\n"
+                    "## Purpose\n"
+                    "Build.\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "workflow 'standard-build' references unknown agents: coder"
             ):
                 load_registry(
                     root_dir,

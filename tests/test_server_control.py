@@ -35,9 +35,54 @@ class ServerControlTests(unittest.TestCase):
                 return_value=fake_handle,
             ):
                 status = controller.start(
-                    config=ProxyAppConfig(upstream_base_url="http://localhost:8080/v1"),
+                    config=ProxyAppConfig(
+                        upstream_base_url="http://localhost:8080/v1",
+                        host="0.0.0.0",
+                    ),
                     definitions_dir=workspace.definitions_dir,
                 )
 
         self.assertTrue(status.running)
-        self.assertEqual(status.url, "http://127.0.0.1:4310/v1")
+        self.assertEqual(status.url, "http://0.0.0.0:4310/v1")
+
+    def test_start_keeps_existing_server_running_when_new_registry_is_invalid(
+        self,
+    ) -> None:
+        controller = ProxyServerController()
+
+        class _Handle:
+            port = 4310
+
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        fake_handle = _Handle()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = ensure_workspace(Path(temp_dir))
+            with patch(
+                "ergon_studio.server_control.start_proxy_server_in_thread",
+                return_value=fake_handle,
+            ):
+                controller.start(
+                    config=ProxyAppConfig(
+                        upstream_base_url="http://localhost:8080/v1"
+                    ),
+                    definitions_dir=workspace.definitions_dir,
+                )
+
+                (workspace.agents_dir / "coder.md").unlink()
+
+                with self.assertRaisesRegex(ValueError, "unknown agents: coder"):
+                    controller.start(
+                        config=ProxyAppConfig(
+                            upstream_base_url="http://localhost:8080/v1"
+                        ),
+                        definitions_dir=workspace.definitions_dir,
+                    )
+
+        self.assertTrue(controller.status.running)
+        self.assertFalse(fake_handle.closed)

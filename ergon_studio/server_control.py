@@ -20,6 +20,7 @@ class ProxyServerStatus:
 class ProxyServerController:
     def __init__(self) -> None:
         self._handle: ProxyServerHandle | None = None
+        self._host: str = "127.0.0.1"
 
     @property
     def status(self) -> ProxyServerStatus:
@@ -28,7 +29,7 @@ class ProxyServerController:
         return ProxyServerStatus(
             running=True,
             message="server running",
-            url=f"http://127.0.0.1:{self._handle.port}/v1",
+            url=f"http://{self._host}:{self._handle.port}/v1",
         )
 
     def start(
@@ -37,7 +38,6 @@ class ProxyServerController:
         config: ProxyAppConfig,
         definitions_dir: Path,
     ) -> ProxyServerStatus:
-        self.stop()
         if not config.upstream_base_url.strip():
             return ProxyServerStatus(
                 running=False,
@@ -52,6 +52,8 @@ class ProxyServerController:
                 tool_calling=not config.disable_tool_calling,
             ),
         )
+        self.stop()
+        self._host = config.host
         self._handle = start_proxy_server_in_thread(
             host=config.host,
             port=config.port,

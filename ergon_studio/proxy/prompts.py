@@ -34,8 +34,14 @@ def orchestrator_turn_prompt(
         "Latest user request:",
         request.latest_user_text() or "(none)",
     ]
-    if active_workroom_id:
-        lines.extend(["", "Workroom currently in progress:", active_workroom_id])
+    if active_workroom_id or active_workroom_participants:
+        lines.extend(
+            [
+                "",
+                "Workroom currently in progress:",
+                active_workroom_id or "ad hoc",
+            ]
+        )
     if active_workroom_participants:
         lines.extend(
             [

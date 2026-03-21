@@ -74,7 +74,6 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                workroom_id="__ad_hoc__",
                 workroom_participants=("coder",),
             ),
         )
@@ -110,7 +109,6 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                workroom_id="__ad_hoc__",
                 workroom_participants=("coder",),
             ),
         )
@@ -135,7 +133,6 @@ class ProxyContinuationTests(unittest.TestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                workroom_id="__ad_hoc__",
                 workroom_participants=("coder",),
             ),
         )

@@ -361,7 +361,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             state=ContinuationState(
                 mode="workroom",
                 agent_id="coder",
-                workroom_id="__ad_hoc__",
                 workroom_participants=("coder",),
             ),
             call_id="call_1",

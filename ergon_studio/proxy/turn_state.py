@@ -7,7 +7,7 @@ from ergon_studio.proxy.models import ProxyOutputItemRef, ProxyToolCall
 
 @dataclass(frozen=True)
 class ActiveWorkroom:
-    workroom_id: str
+    workroom_id: str | None
     workroom_participants: tuple[str, ...]
     workroom_message: str | None = None
 

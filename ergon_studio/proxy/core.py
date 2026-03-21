@@ -49,8 +49,6 @@ ProxyEvent = (
     | ProxyFinishEvent
 )
 
-AD_HOC_WORKROOM_ID = "ad-hoc-workroom"
-
 
 class ProxyOrchestrationCore:
     _MAX_INTERNAL_MOVES = 8
@@ -426,6 +424,7 @@ class ProxyOrchestrationCore:
                 workroom_message=continuation.workroom_message,
             )
             if continuation.workroom_id is not None
+            or continuation.workroom_participants
             else None
         )
         return ProxyDecisionLoopState(
@@ -525,10 +524,6 @@ def _resolve_workroom_definition(
 ) -> DefinitionDocument | None:
     if workroom_id is None and participants:
         return _ad_hoc_workroom_definition(participants=participants)
-    if _is_ad_hoc_workroom(workroom_id):
-        if not participants:
-            return None
-        return _ad_hoc_workroom_definition(participants=participants)
     return registry.workroom_definitions.get(workroom_id or "")
 
 
@@ -537,7 +532,7 @@ def _workroom_notice(base: str) -> str:
 
 
 def _workroom_intro(definition: DefinitionDocument) -> str:
-    if _is_ad_hoc_workroom(definition.id):
+    if _is_ad_hoc_workroom_definition(definition):
         return "Orchestrator: opening an ad hoc workroom."
     return f"Orchestrator: opening workroom {definition.id}."
 
@@ -547,10 +542,10 @@ def _ad_hoc_workroom_definition(
     participants: tuple[str, ...],
 ) -> DefinitionDocument:
     return DefinitionDocument(
-        id=AD_HOC_WORKROOM_ID,
-        path=Path(AD_HOC_WORKROOM_ID),
+        id="__ad_hoc__",
+        path=Path("__ad_hoc__"),
         metadata={
-            "id": AD_HOC_WORKROOM_ID,
+            "id": "__ad_hoc__",
             "name": "Ad Hoc Workroom",
             "participants": list(participants),
         },
@@ -568,5 +563,5 @@ def _ad_hoc_workroom_definition(
     )
 
 
-def _is_ad_hoc_workroom(workroom_id: str | None) -> bool:
-    return workroom_id == AD_HOC_WORKROOM_ID
+def _is_ad_hoc_workroom_definition(definition: DefinitionDocument) -> bool:
+    return definition.metadata.get("id") == "__ad_hoc__"

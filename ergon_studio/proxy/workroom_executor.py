@@ -182,7 +182,7 @@ class ProxyWorkroomExecutor:
                     request=request,
                     continuation=ContinuationState(
                         mode="workroom",
-                        workroom_id=definition.id,
+                        workroom_id=_active_workroom_id(definition),
                         workroom_participants=round_participants,
                         workroom_message=workroom_message,
                         member_index=member_index,
@@ -312,7 +312,7 @@ def _active_workroom_state(
     if not round_participants:
         return None
     return ActiveWorkroom(
-        workroom_id=definition.id,
+        workroom_id=_active_workroom_id(definition),
         workroom_participants=round_participants,
         workroom_message=workroom_message,
     )
@@ -330,6 +330,12 @@ def _prior_work(
     if not prior_work:
         return ()
     return tuple(prior_work[-6:])
+
+
+def _active_workroom_id(definition: DefinitionDocument) -> str | None:
+    if definition.metadata.get("id") == "__ad_hoc__":
+        return None
+    return definition.id
 
 
 def _is_parallel_round(staffed_members: tuple[StaffedParticipant, ...]) -> bool:

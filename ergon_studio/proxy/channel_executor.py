@@ -24,7 +24,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.orchestrator_tools import (
-    build_participant_internal_tools,
+    PARTICIPANT_INTERNAL_TOOLS,
     is_internal_tool_name,
     parse_message_channel_action,
 )
@@ -209,7 +209,7 @@ class ProxyChannelExecutor:
                 participant_label=participant.label,
             ),
             host_tools=request.tools,
-            extra_tools=build_participant_internal_tools(),
+            extra_tools=PARTICIPANT_INTERNAL_TOOLS,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
             pending_continuation=pending,

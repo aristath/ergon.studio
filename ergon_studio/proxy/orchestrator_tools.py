@@ -97,11 +97,6 @@ def build_orchestrator_internal_tools(
         ),
     )
 
-
-def build_participant_internal_tools() -> tuple[ProxyFunctionTool, ...]:
-    return PARTICIPANT_INTERNAL_TOOLS
-
-
 def parse_open_channel_action(
     tool_call: ProxyToolCall,
     *,

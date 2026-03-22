@@ -12,28 +12,12 @@ class ChannelMessage:
         return f"{self.author}: {self.content}"
 
 
-@dataclass(frozen=True)
-class ChannelSnapshot:
-    channel_id: str
-    name: str
-    participants: tuple[str, ...]
-    transcript: tuple[ChannelMessage, ...] = ()
-
-
 @dataclass
 class OpenChannel:
     channel_id: str
     name: str
     participants: tuple[str, ...]
     transcript: list[ChannelMessage] = field(default_factory=list)
-
-    def snapshot(self) -> ChannelSnapshot:
-        return ChannelSnapshot(
-            channel_id=self.channel_id,
-            name=self.name,
-            participants=self.participants,
-            transcript=tuple(self.transcript),
-        )
 
 
 @dataclass

@@ -410,7 +410,6 @@ class ProxyOrchestrationCore:
                 active_session = self._channel_store.ensure(pending.session_id)
             else:
                 active_session = stored_session
-        active_session.channels = active_session.channels
         self._channel_store.put(active_session)
         return active_session
 

@@ -409,11 +409,9 @@ def _pending_tool_messages(
         return []
 
     messages: list[dict[str, Any]] = []
+    result_map = continuation_result_map(pending_continuation)
     for tool_call in continuation_tool_calls(pending_continuation):
-        result_text = continuation_result_map(pending_continuation).get(
-            tool_call.id,
-            "",
-        )
+        result_text = result_map.get(tool_call.id, "")
         messages.append(
             {
                 "role": "tool",

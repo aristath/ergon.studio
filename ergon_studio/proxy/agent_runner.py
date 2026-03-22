@@ -519,7 +519,6 @@ def _agent_profile_context(
 
 @dataclass
 class _ToolAccumulator:
-    index: int
     call_id: str = ""
     name: str = ""
     arguments: str = ""
@@ -538,7 +537,7 @@ class _StreamAccumulator:
             index = getattr(tool_delta, "index", None)
             if not isinstance(index, int):
                 continue
-            accumulator = self._tool_calls.setdefault(index, _ToolAccumulator(index))
+            accumulator = self._tool_calls.setdefault(index, _ToolAccumulator())
             tool_id = getattr(tool_delta, "id", None)
             if isinstance(tool_id, str) and tool_id:
                 accumulator.call_id = tool_id

@@ -105,7 +105,7 @@ class ProxyChannelExecutor:
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
-                            actor_results=(result,),
+                            actor_result=result,
                             request=request,
                             channel=channel,
                             current_transcript=current_transcript,
@@ -148,7 +148,7 @@ class ProxyChannelExecutor:
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
-                            actor_results=(result,),
+                            actor_result=result,
                             request=request,
                             channel=channel,
                             current_transcript=current_transcript,
@@ -222,17 +222,11 @@ class ProxyChannelExecutor:
         )
 
 
+@dataclass(frozen=True)
 class _ParticipantResult:
-    def __init__(
-        self,
-        *,
-        participant: StaffedParticipant,
-        text: str,
-        response: AgentRunResult,
-    ) -> None:
-        self.participant = participant
-        self.text = text
-        self.response = response
+    participant: StaffedParticipant
+    text: str
+    response: AgentRunResult
 
 
 def _continuation_participant(
@@ -274,7 +268,7 @@ def _channel_conversation_messages(
 
 def _process_participant_results(
     *,
-    actor_results: list[_ParticipantResult] | tuple[_ParticipantResult, ...],
+    actor_result: _ParticipantResult,
     request: ProxyTurnRequest,
     channel: Channel,
     current_transcript: list[ChannelMessage],
@@ -292,55 +286,54 @@ def _process_participant_results(
     deliveries: list[_ChannelDelivery] = []
     tool_events: list[ProxyToolCallEvent] = []
 
-    for result in actor_results:
-        internal_actions: list[_ChannelDelivery] = []
-        host_tool_calls: list[ProxyToolCall] = []
-        for tool_call in result.response.tool_calls:
-            if is_internal_tool_name(tool_call.name):
-                if tool_call.name != "message_channel":
-                    raise ValueError(
-                        f"participants cannot use internal tool: {tool_call.name}"
-                    )
-                action = parse_message_channel_action(
-                    tool_call,
-                    registry=registry,
-                    require_channel=False,
+    internal_actions: list[_ChannelDelivery] = []
+    host_tool_calls: list[ProxyToolCall] = []
+    for tool_call in actor_result.response.tool_calls:
+        if is_internal_tool_name(tool_call.name):
+            if tool_call.name != "message_channel":
+                raise ValueError(
+                    f"participants cannot use internal tool: {tool_call.name}"
                 )
-                internal_actions.append(
-                    _ChannelDelivery(
-                        author=result.participant.label,
-                        message=action.message,
-                        recipients=action.recipients,
-                    )
-                )
-                continue
-            host_tool_calls.append(tool_call)
-
-        if internal_actions:
-            deliveries.extend(internal_actions)
-        else:
-            text = result.text.strip()
-            if text:
-                line = ChannelMessage(
-                    author=result.participant.label,
-                    content=text,
-                )
-                channel_messages.append(line)
-                current_transcript.append(line)
-                state.append_reasoning(line.render())
-                reasoning_events.append(ProxyReasoningDeltaEvent(line.render()))
-
-        if host_tool_calls:
-            tool_events.extend(
-                emit_tool_calls(
-                    tool_calls=tuple(host_tool_calls),
-                    request=request,
-                    session_id=session_id,
-                    actor=result.participant.label,
-                    active_channel_id=channel.channel_id,
-                    state=state,
+            action = parse_message_channel_action(
+                tool_call,
+                registry=registry,
+                require_channel=False,
+            )
+            internal_actions.append(
+                _ChannelDelivery(
+                    author=actor_result.participant.label,
+                    message=action.message,
+                    recipients=action.recipients,
                 )
             )
+            continue
+        host_tool_calls.append(tool_call)
+
+    if internal_actions:
+        deliveries.extend(internal_actions)
+    else:
+        text = actor_result.text.strip()
+        if text:
+            line = ChannelMessage(
+                author=actor_result.participant.label,
+                content=text,
+            )
+            channel_messages.append(line)
+            current_transcript.append(line)
+            state.append_reasoning(line.render())
+            reasoning_events.append(ProxyReasoningDeltaEvent(line.render()))
+
+    if host_tool_calls:
+        tool_events.extend(
+            emit_tool_calls(
+                tool_calls=tuple(host_tool_calls),
+                request=request,
+                session_id=session_id,
+                actor=actor_result.participant.label,
+                active_channel_id=channel.channel_id,
+                state=state,
+            )
+        )
 
     return reasoning_events, deliveries, tool_events
 

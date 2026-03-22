@@ -84,19 +84,33 @@ class ProxyChannelExecutor:
 
             if pending is not None:
                 for actor in (item.actor for item in pending):
+                    participant = next(
+                        (
+                            participant
+                            for participant in all_staffed_members
+                            if participant.label == actor
+                        ),
+                        None,
+                    )
+                    if participant is None:
+                        raise ValueError(
+                            f"pending actor is not staffed in this channel: {actor}"
+                        )
+                    actor_pending = next(
+                        (item for item in pending if item.actor == actor),
+                        None,
+                    )
+                    if actor_pending is None:
+                        raise ValueError(
+                            f"missing pending tool results for actor: {actor}"
+                        )
                     result = await self._run_channel_participant(
                         request=request,
                         channel_name=channel.name,
-                        participant=_continuation_participant(
-                            staffed_members=all_staffed_members,
-                            actor=actor,
-                        ),
+                        participant=participant,
                         channel_transcript=tuple(current_transcript),
                         participant_tools=participant_tools,
-                        pending=_pending_for_actor_or_error(
-                            pending=pending,
-                            actor=actor,
-                        ),
+                        pending=actor_pending,
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
@@ -221,18 +235,6 @@ class _ParticipantResult:
     text: str
     response: AgentRunResult
 
-
-def _continuation_participant(
-    *,
-    staffed_members: tuple[StaffedParticipant, ...],
-    actor: str,
-) -> StaffedParticipant:
-    for participant in staffed_members:
-        if participant.label == actor:
-            return participant
-    raise ValueError(f"pending actor is not staffed in this channel: {actor}")
-
-
 def _channel_conversation_messages(
     *,
     channel_transcript: tuple[ChannelMessage, ...],
@@ -327,14 +329,3 @@ def _process_participant_results(
         )
 
     return reasoning_events, deliveries, tool_events
-
-
-def _pending_for_actor_or_error(
-    *,
-    pending: PendingContinuation,
-    actor: str,
-) -> PendingToolContext:
-    for item in pending:
-        if item.actor == actor:
-            return item
-    raise ValueError(f"missing pending tool results for actor: {actor}")

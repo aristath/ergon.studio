@@ -127,21 +127,6 @@ def continuation_result_map(pending: PendingToolContext) -> dict[str, str]:
         mapped[original_id] = message.content
     return mapped
 
-
-def pending_actors(pending: PendingContinuation) -> tuple[str, ...]:
-    return tuple(item.actor for item in pending)
-
-
-def pending_for_actor(
-    pending: PendingContinuation,
-    actor: str,
-) -> PendingToolContext | None:
-    for item in pending:
-        if item.actor == actor:
-            return item
-    return None
-
-
 def _token_parts(tool_call_id: str) -> tuple[str, str, str] | None:
     if not tool_call_id.startswith(_TOKEN_PREFIX):
         return None

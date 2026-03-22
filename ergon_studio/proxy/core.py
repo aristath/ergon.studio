@@ -18,7 +18,6 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     PendingToolContext,
     latest_pending_continuation,
-    pending_actors,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -313,7 +312,7 @@ class ProxyOrchestrationCore:
             intro = (
                 f"Orchestrator: continuing channel {channel.channel_id} "
                 f"({channel.name}) with "
-                f"{', '.join(pending_actors(pending))}."
+                f"{', '.join(item.actor for item in pending)}."
             )
         elif channel.transcript:
             intro = (

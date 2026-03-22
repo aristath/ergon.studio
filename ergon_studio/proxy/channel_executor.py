@@ -15,8 +15,6 @@ from ergon_studio.proxy.channels import Channel, ChannelMessage
 from ergon_studio.proxy.continuation import (
     PendingContinuation,
     PendingToolContext,
-    pending_actors,
-    pending_for_actor,
 )
 from ergon_studio.proxy.models import (
     ProxyFunctionTool,
@@ -88,7 +86,7 @@ class ProxyChannelExecutor:
                 )
 
             if pending is not None:
-                for actor in pending_actors(pending):
+                for actor in (item.actor for item in pending):
                     result = await self._run_channel_participant(
                         request=request,
                         channel_name=channel.name,
@@ -343,7 +341,7 @@ def _pending_for_actor_or_error(
     pending: PendingContinuation,
     actor: str,
 ) -> PendingToolContext:
-    actor_pending = pending_for_actor(pending, actor)
-    if actor_pending is None:
-        raise ValueError(f"missing pending tool results for actor: {actor}")
-    return actor_pending
+    for item in pending:
+        if item.actor == actor:
+            return item
+    raise ValueError(f"missing pending tool results for actor: {actor}")

@@ -9,8 +9,6 @@ from ergon_studio.proxy.continuation import (
     encode_continuation_tool_call,
     latest_pending_continuation,
     original_tool_call_id,
-    pending_actors,
-    pending_for_actor,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 from ergon_studio.proxy.pending_store import PendingStore
@@ -65,9 +63,8 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertIsNotNone(pending)
         assert pending is not None
         self.assertEqual(pending[0].session_id, "session_1")
-        self.assertEqual(pending_actors(pending), ("coder",))
-        coder = pending_for_actor(pending, "coder")
-        assert coder is not None
+        self.assertEqual(tuple(item.actor for item in pending), ("coder",))
+        coder = next(item for item in pending if item.actor == "coder")
         self.assertEqual(coder.active_channel_id, "channel-1")
         self.assertEqual(
             continuation_tool_calls(coder),
@@ -134,7 +131,7 @@ class ProxyContinuationTests(unittest.TestCase):
         self.assertIsNotNone(pending)
         assert pending is not None
         self.assertEqual(pending[0].session_id, "session_2")
-        self.assertEqual(set(pending_actors(pending)), {"architect", "coder"})
+        self.assertEqual({item.actor for item in pending}, {"architect", "coder"})
 
     def test_latest_pending_continuation_rejects_mixed_sessions(self) -> None:
         store = PendingStore()

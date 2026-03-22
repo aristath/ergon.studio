@@ -12,7 +12,6 @@ from ergon_studio.proxy.channel_staffing import (
 from ergon_studio.proxy.channels import (
     Channel,
     ChannelMessage,
-    ChannelStore,
     describe_open_channels,
 )
 from ergon_studio.proxy.continuation import (
@@ -71,7 +70,7 @@ class ProxyOrchestrationCore:
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
         self._channel_executor = channel_executor
-        self._channel_store = ChannelStore()
+        self._channel_sessions: dict[str, dict[str, Channel]] = {}
 
     def stream_turn(
         self,
@@ -93,10 +92,10 @@ class ProxyOrchestrationCore:
                 )
                 if pending is not None:
                     active_session_id = pending.session_id
-                    channels = self._channel_store.get(active_session_id) or {}
+                    channels = self._channel_sessions.get(active_session_id) or {}
                 else:
                     active_session_id = session_id or f"session_{uuid4().hex}"
-                    channels = self._channel_store.get(active_session_id) or {}
+                    channels = self._channel_sessions.get(active_session_id) or {}
                 if pending is not None:
                     async for event in self._resume_pending_groups(
                         request=request,
@@ -362,9 +361,9 @@ class ProxyOrchestrationCore:
         if result.finish_reason == "tool_calls":
             return
         if channels:
-            self._channel_store.put(session_id, channels)
+            self._channel_sessions[session_id] = channels
         else:
-            self._channel_store.discard(session_id)
+            self._channel_sessions.pop(session_id, None)
 
     async def _resume_pending_groups(
         self,

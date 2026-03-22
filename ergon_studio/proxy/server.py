@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 from uuid import uuid4
@@ -36,6 +37,8 @@ from ergon_studio.upstream import probe_upstream_models
 
 MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
 MODEL_CACHE_TTL_SECONDS = 30.0
+SESSION_COOKIE_NAME = "ergon_session"
+SESSION_HEADER_NAME = "X-Ergon-Session"
 
 
 class RequestBodyTooLargeError(ValueError):
@@ -118,14 +121,16 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
         completion_id = f"chatcmpl_{uuid4().hex}"
         created_at = int(time.time())
+        session_id = self._request_session_id()
         if request.stream:
-            self._send_sse_headers()
+            self._send_sse_headers(session_id=session_id)
             try:
                 asyncio.run(
                     self._stream_chat_completion(
                         request=request,
                         completion_id=completion_id,
                         created_at=created_at,
+                        session_id=session_id,
                     )
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
@@ -140,7 +145,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = asyncio.run(self._run_chat_completion(request))
+            result = asyncio.run(
+                self._run_chat_completion(request, session_id=session_id)
+            )
         except Exception as exc:
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
@@ -162,12 +169,19 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 finish_reason=result.finish_reason,
                 tool_calls=result.tool_calls,
             ),
+            session_id=session_id,
         )
 
-    async def _run_chat_completion(self, request: ProxyTurnRequest) -> ProxyTurnResult:
+    async def _run_chat_completion(
+        self,
+        request: ProxyTurnRequest,
+        *,
+        session_id: str,
+    ) -> ProxyTurnResult:
         stream = self.proxy_server.core.stream_turn(
             request,
             created_at=int(time.time()),
+            session_id=session_id,
         )
         async for _event in stream:
             pass
@@ -179,8 +193,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         request: ProxyTurnRequest,
         completion_id: str,
         created_at: int,
+        session_id: str,
     ) -> None:
-        stream = self.proxy_server.core.stream_turn(request, created_at=created_at)
+        stream = self.proxy_server.core.stream_turn(
+            request,
+            created_at=created_at,
+            session_id=session_id,
+        )
         async for event in stream:
             chunk = encode_chat_stream_sse(
                 event,
@@ -206,14 +225,16 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
         response_id = f"resp_{uuid4().hex}"
         created_at = int(time.time())
+        session_id = self._request_session_id()
         if request.stream:
-            self._send_sse_headers()
+            self._send_sse_headers(session_id=session_id)
             try:
                 asyncio.run(
                     self._stream_responses(
                         request=request,
                         response_id=response_id,
                         created_at=created_at,
+                        session_id=session_id,
                     )
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
@@ -228,7 +249,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = asyncio.run(self._run_chat_completion(request))
+            result = asyncio.run(
+                self._run_chat_completion(request, session_id=session_id)
+            )
         except Exception as exc:
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
@@ -250,6 +273,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 tool_calls=result.tool_calls,
                 output_items=result.output_items,
             ),
+            session_id=session_id,
         )
 
     async def _stream_responses(
@@ -258,6 +282,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         request: ProxyTurnRequest,
         response_id: str,
         created_at: int,
+        session_id: str,
     ) -> None:
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
@@ -281,7 +306,11 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(encode_responses_stream_sse(created_payload))
         self.wfile.flush()
         sequence_number = 2
-        stream = self.proxy_server.core.stream_turn(request, created_at=created_at)
+        stream = self.proxy_server.core.stream_turn(
+            request,
+            created_at=created_at,
+            session_id=session_id,
+        )
         try:
             async for event in stream:
                 if isinstance(event, ProxyContentDeltaEvent) and event.delta:
@@ -369,19 +398,27 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("request body must be a JSON object")
         return payload
 
-    def _send_sse_headers(self) -> None:
+    def _send_sse_headers(self, *, session_id: str | None = None) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
+        self._send_session_headers(session_id)
         self.end_headers()
 
-    def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+    def _send_json(
+        self,
+        status: HTTPStatus,
+        payload: dict[str, Any],
+        *,
+        session_id: str | None = None,
+    ) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Connection", "close")
+        self._send_session_headers(session_id)
         self.end_headers()
         self.wfile.write(body)
 
@@ -397,6 +434,28 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 }
             },
         )
+
+    def _send_session_headers(self, session_id: str | None) -> None:
+        if not session_id:
+            return
+        self.send_header(
+            "Set-Cookie",
+            f"{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax",
+        )
+        self.send_header(SESSION_HEADER_NAME, session_id)
+
+    def _request_session_id(self) -> str:
+        header_value = self.headers.get(SESSION_HEADER_NAME)
+        if isinstance(header_value, str) and header_value.strip():
+            return header_value.strip()
+        cookie_header = self.headers.get("Cookie")
+        if isinstance(cookie_header, str) and cookie_header.strip():
+            cookie = SimpleCookie()
+            cookie.load(cookie_header)
+            morsel = cookie.get(SESSION_COOKIE_NAME)
+            if morsel is not None and morsel.value:
+                return morsel.value
+        return f"session_{uuid4().hex}"
 
     def _stream_chat_failure(
         self,

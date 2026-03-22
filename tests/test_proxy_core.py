@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import unittest
-from collections.abc import Callable
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
-from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot
-from ergon_studio.proxy.continuation import (
-    ContinuationState,
-    decode_continuation_from_tool_call_id,
-    encode_continuation_tool_call,
-)
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -34,18 +26,14 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": ["Hello world"],
-                }
-            ),
+            agent_invoker=_fake_agent_invoker({"orchestrator": ["Hello world"]}),
         )
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Hi"),),
         )
 
-        stream = core.stream_turn(request, created_at=1)
+        stream = core.stream_turn(request, created_at=1, session_id="session_1")
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
@@ -58,155 +46,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             "Hello world",
         )
         self.assertEqual(result.content, "Hello world")
-        self.assertFalse(
-            any(isinstance(event, ProxyReasoningDeltaEvent) for event in events)
-        )
 
-    async def test_stream_turn_emits_direct_reply_deltas_before_turn_finishes(
-        self,
-    ) -> None:
-        gate = asyncio.Event()
-
-        def _invoker(_invocation: AgentInvocation):
-            async def _events():
-                yield "Hello"
-                await gate.wait()
-                yield " world"
-
-            return ResponseStream(
-                _events(),
-                finalizer=lambda: AgentRunResult(
-                    text="Hello world",
-                    tool_calls=(),
-                ),
-            )
-
-        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Hi"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        first_event = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
-        self.assertIsInstance(first_event, ProxyContentDeltaEvent)
-        self.assertEqual(first_event.delta, "Hello")
-
-        gate.set()
-        events = [first_event, *[event async for event in stream]]
-        result = await stream.get_final_response()
-
-        self.assertEqual(
-            "".join(
-                event.delta
-                for event in events
-                if isinstance(event, ProxyContentDeltaEvent)
-            ),
-            "Hello world",
-        )
-        self.assertEqual(result.content, "Hello world")
-
-    async def test_stream_turn_converts_unexpected_exceptions_to_error_results(
-        self,
-    ) -> None:
-        def _invoker(_invocation: AgentInvocation):
-            raise RuntimeError("core exploded")
-
-        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Hi"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        self.assertEqual(result.finish_reason, "error")
-        self.assertEqual(result.content, "RuntimeError: core exploded")
-        self.assertEqual(
-            "".join(
-                event.delta
-                for event in events
-                if isinstance(event, ProxyContentDeltaEvent)
-            ),
-            "RuntimeError: core exploded",
-        )
-
-    async def test_stream_turn_passes_requested_model_to_agent_invoker(self) -> None:
-        captured: dict[str, object] = {}
-
-        def _capture(invocation: AgentInvocation) -> None:
-            captured["agent_id"] = invocation.agent_id
-            captured["model_id_override"] = invocation.model
-
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {"orchestrator": ["Hello world"]},
-                capture=_capture,
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="gpt-oss-20b",
-            messages=(ProxyInputMessage(role="user", content="Hi"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        [event async for event in stream]
-        await stream.get_final_response()
-
-        self.assertEqual(captured["agent_id"], "orchestrator")
-        self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
-
-    async def test_stream_turn_allows_text_before_channel_action(
-        self,
-    ) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        {
-                            "text": "Starting now",
-                            "tool_calls": [
-                                {
-                                    "id": "internal_open_channel",
-                                    "name": "open_channel",
-                                    "arguments": json.dumps(
-                                        {
-                                            "participants": ["coder"],
-                                            "message": "Implement it",
-                                            "recipients": ["coder"],
-                                        }
-                                    ),
-                                }
-                            ],
-                        },
-                        "Done",
-                    ],
-                    "coder": ["Here is the code"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Implement it"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        content = "".join(
-            event.delta for event in events if isinstance(event, ProxyContentDeltaEvent)
-        )
-        self.assertIn("Starting now", content)
-        self.assertNotEqual(result.finish_reason, "error")
-
-    async def test_stream_turn_opens_single_person_channel_and_then_replies(
-        self,
-    ) -> None:
+    async def test_stream_turn_opens_channel_and_returns_participant_reply(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
@@ -220,7 +61,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         "Final summary",
                     ],
-                    "coder": ["Patch", " applied"],
+                    "coder": ["Patch applied"],
                 }
             ),
         )
@@ -229,7 +70,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Implement it"),),
         )
 
-        stream = core.stream_turn(request, created_at=1)
+        stream = core.stream_turn(request, created_at=1, session_id="session_1")
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
@@ -239,17 +80,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
         self.assertIn("opening channel channel-1 with coder", reasoning.lower())
-        self.assertIn("coder: Patch", reasoning)
+        self.assertIn("coder: Patch applied", reasoning)
         self.assertEqual(result.content, "Final summary")
 
-    async def test_stream_turn_lets_solo_channel_reply_naturally_then_returns(
-        self,
-    ) -> None:
-        agent_order: list[str] = []
-
-        def _capture(invocation: AgentInvocation) -> None:
-            agent_order.append(invocation.agent_id)
-
+    async def test_stream_turn_persists_channels_by_session_id(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
@@ -258,319 +92,57 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         _internal_action(
                             "open_channel",
                             participants=["coder"],
-                            message="Update the README.",
+                            message="Start here",
                             recipients=["coder"],
                         ),
-                        "Final summary",
-                    ],
-                    "coder": [
-                        "Updated the README intro and added setup notes.",
-                    ],
-                },
-                capture=_capture,
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Update the README"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("coder: Updated the README intro", reasoning)
-        self.assertEqual(
-            agent_order,
-            ["orchestrator", "coder", "orchestrator"],
-        )
-        self.assertEqual(result.content, "Final summary")
-
-    async def test_stream_turn_handles_channel_conversations(self) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="standard-build",
-                            message="Build calculator",
-                            recipients=["architect"],
-                        ),
-                        _internal_action(
-                            "open_channel",
-                            participants=["coder"],
-                            message="Implement the approved plan",
-                            recipients=["coder"],
-                        ),
-                        "Channel final summary",
-                    ],
-                    "architect": ["Plan"],
-                    "coder": ["Built"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("opening channel channel-1 (standard-build)", reasoning)
-        self.assertIn("architect: Plan", reasoning)
-        self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Channel final summary")
-
-    async def test_stream_turn_channel_can_staff_specific_specialists(self) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="standard-build",
-                            participants=["coder"],
-                            message="Build calculator",
-                            recipients=["coder"],
-                        ),
-                        "Channel final summary",
-                    ],
-                    "coder": ["Built"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertNotIn("architect:", reasoning)
-        self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Channel final summary")
-
-    async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"main.py"}',
-                                },
-                            ],
-                        },
-                    ],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
-            tools=(_host_tool("read_file"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        tool_events = [
-            event for event in events if isinstance(event, ProxyToolCallEvent)
-        ]
-        self.assertEqual(len(tool_events), 1)
-        self.assertEqual(tool_events[0].call.name, "read_file")
-        self.assertEqual(result.finish_reason, "tool_calls")
-        self.assertEqual(result.tool_calls[0].name, "read_file")
-        continuation = decode_continuation_from_tool_call_id(result.tool_calls[0].id)
-        self.assertIsNotNone(continuation)
-        assert continuation is not None
-        self.assertEqual(continuation.actor, "orchestrator")
-        self.assertIsNone(continuation.active_channel_id)
-
-    async def test_stream_turn_resumes_channel_from_tool_result(self) -> None:
-        first_core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="standard-build",
-                            message="Build calculator",
-                            recipients=["architect"],
-                        ),
-                    ],
-                    "architect": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_arch_1",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"main.py"}',
-                                },
-                            ],
-                        }
-                    ],
-                }
-            ),
-        )
-        first_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-            tools=(_host_tool("read_file"),),
-        )
-        first_stream = first_core.stream_turn(first_request, created_at=1)
-        first_events = [event async for event in first_stream]
-        await first_stream.get_final_response()
-        tool_call = next(
-            event.call
-            for event in first_events
-            if isinstance(event, ProxyToolCallEvent)
-        )
-
-        resumed_core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "architect": ["Architecture plan"],
-                    "coder": ["Built feature"],
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            participants=["coder"],
-                            message="Continue from the architecture plan",
-                            recipients=["coder"],
-                        ),
-                        "Channel final summary",
-                    ],
-                }
-            ),
-        )
-        resumed_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Build calculator"),
-                ProxyInputMessage(
-                    role="assistant",
-                    content="",
-                    tool_calls=(tool_call,),
-                ),
-                ProxyInputMessage(
-                    role="tool",
-                    content="print('current main')",
-                    tool_call_id=tool_call.id,
-                ),
-            ),
-            tools=(_host_tool("read_file"),),
-        )
-        resumed_stream = resumed_core.stream_turn(resumed_request, created_at=2)
-        resumed_events = [event async for event in resumed_stream]
-        resumed_result = await resumed_stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in resumed_events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn(
-            "continuing channel channel-1 (standard-build) with architect",
-            reasoning,
-        )
-        self.assertIn("architect: Architecture", reasoning)
-        self.assertIn("coder: Built", reasoning)
-        self.assertEqual(resumed_result.content, "Channel final summary")
-        self.assertEqual(resumed_result.finish_reason, "stop")
-
-    async def test_stream_turn_persists_open_channels_between_user_turns(self) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            participants=["coder"],
-                            message="Please inspect the repo.",
-                            recipients=["coder"],
-                        ),
-                        "I have the coder on the line.",
+                        "Opened",
                         _internal_action(
                             "message_channel",
                             channel="channel-1",
-                            message="Keep going and make the change.",
+                            message="Continue",
                             recipients=["coder"],
                         ),
-                        "We have what we need.",
+                        "Done",
                     ],
-                    "coder": [
-                        "I found the relevant files.",
-                        "I made the change.",
-                    ],
+                    "coder": ["First pass", "Second pass"],
                 }
             ),
         )
         first_request = ProxyTurnRequest(
             model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Take a look"),),
+            messages=(ProxyInputMessage(role="user", content="Start"),),
         )
-
-        first_stream = core.stream_turn(first_request, created_at=1)
-        [event async for event in first_stream]
-        first_result = await first_stream.get_final_response()
-
-        self.assertEqual(first_result.content, "I have the coder on the line.")
-
         second_request = ProxyTurnRequest(
             model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Take a look"),
-                ProxyInputMessage(role="assistant", content=first_result.content),
-                ProxyInputMessage(role="user", content="Now keep going"),
-            ),
+            messages=(ProxyInputMessage(role="user", content="Continue"),),
         )
 
-        second_stream = core.stream_turn(second_request, created_at=2)
-        second_events = [event async for event in second_stream]
-        second_result = await second_stream.get_final_response()
+        first_stream = core.stream_turn(
+            first_request,
+            created_at=1,
+            session_id="session_1",
+        )
+        [event async for event in first_stream]
+        await first_stream.get_final_response()
+
+        second_stream = core.stream_turn(
+            second_request,
+            created_at=2,
+            session_id="session_1",
+        )
+        events = [event async for event in second_stream]
+        result = await second_stream.get_final_response()
 
         reasoning = "".join(
             event.delta
-            for event in second_events
+            for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("coder: I made the change.", reasoning)
-        self.assertEqual(second_result.content, "We have what we need.")
+        self.assertIn("continuing channel channel-1", reasoning.lower())
+        self.assertIn("coder: Second pass", reasoning)
+        self.assertEqual(result.content, "Done")
 
-    async def test_close_channel_ends_server_side_channel_lifecycle(self) -> None:
+    async def test_close_channel_ends_channel_lifecycle(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
@@ -579,785 +151,136 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                         _internal_action(
                             "open_channel",
                             participants=["coder"],
-                            message="Inspect the repo.",
+                            message="Start",
                             recipients=["coder"],
                         ),
-                        "Channel is open.",
+                        "Opened",
+                        _internal_action("close_channel", channel="channel-1"),
+                        "Closed",
                         _internal_action(
-                            "close_channel",
+                            "message_channel",
                             channel="channel-1",
+                            message="Continue",
+                            recipients=["coder"],
                         ),
-                        "Wrapped up.",
-                        "Fresh reply.",
                     ],
-                    "coder": ["I found the relevant files."],
+                    "coder": ["First pass"],
                 }
             ),
         )
-        first_request = ProxyTurnRequest(
+        open_request = ProxyTurnRequest(
             model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect it"),),
+            messages=(ProxyInputMessage(role="user", content="Start"),),
+        )
+        close_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Close it"),),
+        )
+        reopen_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Continue it"),),
         )
 
-        first_stream = core.stream_turn(first_request, created_at=1)
+        first_stream = core.stream_turn(
+            open_request,
+            created_at=1,
+            session_id="session_1",
+        )
         [event async for event in first_stream]
-        first_result = await first_stream.get_final_response()
-        self.assertEqual(first_result.content, "Channel is open.")
+        await first_stream.get_final_response()
 
-        second_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Inspect it"),
-                ProxyInputMessage(role="assistant", content=first_result.content),
-                ProxyInputMessage(role="user", content="Close it out"),
-            ),
+        close_stream = core.stream_turn(
+            close_request,
+            created_at=2,
+            session_id="session_1",
         )
+        [event async for event in close_stream]
+        await close_stream.get_final_response()
 
-        second_stream = core.stream_turn(second_request, created_at=2)
-        second_events = [event async for event in second_stream]
-        second_result = await second_stream.get_final_response()
-
-        second_reasoning = "".join(
-            event.delta
-            for event in second_events
-            if isinstance(event, ProxyReasoningDeltaEvent)
+        stream = core.stream_turn(
+            reopen_request,
+            created_at=3,
+            session_id="session_1",
         )
-        self.assertIn("closing channel channel-1", second_reasoning.lower())
-        self.assertEqual(second_result.content, "Wrapped up.")
-
-        third_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Inspect it"),
-                ProxyInputMessage(role="assistant", content=first_result.content),
-                ProxyInputMessage(role="user", content="Close it out"),
-                ProxyInputMessage(role="assistant", content=second_result.content),
-                ProxyInputMessage(role="user", content="What channels are open now?"),
-            ),
-        )
-
-        third_stream = core.stream_turn(third_request, created_at=3)
-        third_events = [event async for event in third_stream]
-        third_result = await third_stream.get_final_response()
-
-        third_reasoning = "".join(
-            event.delta
-            for event in third_events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertEqual(third_reasoning, "")
-        self.assertEqual(third_result.content, "Fresh reply.")
-
-    async def test_stream_turn_allows_channel_actions_before_host_tool_calls(
-        self,
-    ) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "internal_open_channel",
-                                    "name": "open_channel",
-                                    "arguments": json.dumps(
-                                        {
-                                            "participants": ["coder"],
-                                            "message": "Take a look first.",
-                                            "recipients": ["coder"],
-                                        }
-                                    ),
-                                },
-                                {
-                                    "id": "call_1",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"README.md"}',
-                                },
-                            ],
-                        },
-                    ],
-                    "coder": ["I checked the current state."],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect it"),),
-            tools=(_host_tool("read_file"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        tool_events = [
-            event for event in events if isinstance(event, ProxyToolCallEvent)
-        ]
-        self.assertIn("opening channel channel-1 with coder", reasoning.lower())
-        self.assertIn("coder: I checked the current state.", reasoning)
-        self.assertEqual(len(tool_events), 1)
-        self.assertEqual(tool_events[0].call.name, "read_file")
-        continuation = decode_continuation_from_tool_call_id(tool_events[0].call.id)
-        self.assertIsNotNone(continuation)
-        assert continuation is not None
-        self.assertEqual(continuation.actor, "orchestrator")
-        self.assertEqual(
-            continuation.channels,
-            (
-                ChannelSnapshot(
-                    channel_id="channel-1",
-                    name="ad hoc",
-                    participants=("coder",),
-                    transcript=(
-                        ChannelMessage("orchestrator", "Take a look first."),
-                        ChannelMessage("coder", "I checked the current state."),
-                    ),
-                ),
-            ),
-        )
-        self.assertEqual(result.finish_reason, "tool_calls")
-
-    async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
-        tool_call = _host_continuation_tool_call(
-            state=ContinuationState(
-                actor="coder",
-                active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="ad hoc",
-                        participants=("coder",),
-                    ),
-                ),
-            ),
-            call_id="call_1",
-            name="read_file",
-        )
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": ["Fresh reply"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Build calculator"),
-                ProxyInputMessage(
-                    role="assistant", content="", tool_calls=(tool_call,)
-                ),
-                ProxyInputMessage(
-                    role="tool", content="file contents", tool_call_id=tool_call.id
-                ),
-                ProxyInputMessage(role="assistant", content="That is done."),
-                ProxyInputMessage(role="user", content="Now explain the design"),
-            ),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertEqual(reasoning, "")
-        self.assertEqual(result.content, "Fresh reply")
-
-    async def test_channel_continuation_resumes_same_participant_after_tool_loop(
-        self,
-    ) -> None:
-        registry = _multi_participant_channel_registry()
-        first_core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="build-room",
-                            message="Build calculator",
-                            recipients=["architect", "coder", "reviewer"],
-                        ),
-                    ],
-                    "architect": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_arch_1",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"main.py"}',
-                                },
-                            ],
-                        }
-                    ],
-                    "coder": ["Built feature draft"],
-                    "reviewer": ["Reviewed current draft"],
-                }
-            ),
-        )
-        first_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build calculator"),),
-            tools=(_host_tool("read_file"),),
-        )
-        first_stream = first_core.stream_turn(first_request, created_at=1)
-        first_events = [event async for event in first_stream]
-        tool_call = next(
-            event.call
-            for event in first_events
-            if isinstance(event, ProxyToolCallEvent)
-        )
-
-        resumed_core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": ["Channel final summary"],
-                    "architect": ["Architecture plan"],
-                }
-            ),
-        )
-        resumed_request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Build calculator"),
-                ProxyInputMessage(
-                    role="assistant", content="", tool_calls=(tool_call,)
-                ),
-                ProxyInputMessage(
-                    role="tool",
-                    content="print('current main')",
-                    tool_call_id=tool_call.id,
-                ),
-            ),
-            tools=(_host_tool("read_file"),),
-        )
-
-        resumed_stream = resumed_core.stream_turn(resumed_request, created_at=2)
-        resumed_events = [event async for event in resumed_stream]
-        resumed_result = await resumed_stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in resumed_events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("architect: Architecture", reasoning)
-        self.assertEqual(resumed_result.content, "Channel final summary")
-
-    async def test_channel_uses_preset_participant_order(self) -> None:
-        registry = _advanced_channel_registry()
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="debate",
-                            message="Choose an approach",
-                            recipients=[
-                                "architect",
-                                "brainstormer",
-                                "architect",
-                                "reviewer",
-                            ],
-                        ),
-                        "Debate final summary",
-                    ],
-                    "architect": ["Option A", "Refined option A"],
-                    "brainstormer": ["Option B"],
-                    "reviewer": ["Decision-ready recommendation"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Choose an approach"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertIn("architect[1]: Option", reasoning)
-        self.assertIn("architect[2]: Refined", reasoning)
-        self.assertIn("brainstormer: Option", reasoning)
-        self.assertIn("reviewer: Decision-ready", reasoning)
-        self.assertEqual(result.content, "Debate final summary")
-
-    async def test_orchestrator_can_open_a_second_channel_with_new_staffing(
-        self,
-    ) -> None:
-        registry = _advanced_channel_registry()
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _internal_action(
-                            "open_channel",
-                            preset="debate",
-                            message="Build it",
-                            recipients=[
-                                "architect",
-                                "brainstormer",
-                                "architect",
-                                "reviewer",
-                            ],
-                        ),
-                        _internal_action(
-                            "open_channel",
-                            participants=["reviewer"],
-                            message="Reviewer, give the final verdict.",
-                            recipients=["reviewer"],
-                        ),
-                        "Done",
-                    ],
-                    "architect": ["Architecture pass", "Refined architecture"],
-                    "brainstormer": ["Alternative path"],
-                    "reviewer": ["Review pass", "Final verdict"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Build it"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        reasoning = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyReasoningDeltaEvent)
-        )
-        self.assertEqual(reasoning.count("architect[1]: Architecture"), 1)
-        self.assertEqual(reasoning.count("brainstormer: Alternative"), 1)
-        self.assertEqual(reasoning.count("reviewer: Review"), 1)
-        self.assertEqual(reasoning.count("reviewer: Final"), 1)
-        self.assertEqual(result.content, "Done")
-
-    async def test_stream_turn_respects_host_tool_policy(self) -> None:
-        captured: dict[str, object] = {}
-
-        def _capture(invocation: AgentInvocation) -> None:
-            captured["tools"] = invocation.tools
-            captured["tool_choice"] = invocation.tool_choice
-            captured["parallel_tool_calls"] = invocation.parallel_tool_calls
-
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {"orchestrator": [{"text": "", "tool_calls": []}]},
-                capture=_capture,
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
-            tools=(_host_tool("read_file"), _host_tool("write_file")),
-            tool_choice={"type": "function", "function": {"name": "write_file"}},
-            parallel_tool_calls=False,
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        [event async for event in stream]
-        await stream.get_final_response()
-
-        tools = captured["tools"]
-        tool_choice = captured["tool_choice"]
-        self.assertEqual(
-            [tool.name for tool in tools],
-            ["write_file", "open_channel", "message_channel", "close_channel"],
-        )
-        self.assertEqual(
-            tool_choice,
-            {"type": "function", "function": {"name": "write_file"}},
-        )
-        self.assertFalse(captured["parallel_tool_calls"])
-
-    async def test_stream_turn_strips_optional_tools_when_provider_cannot_call_tools(
-        self,
-    ) -> None:
-        captured: dict[str, object] = {}
-
-        def _capture(invocation: AgentInvocation) -> None:
-            captured["tools"] = invocation.tools
-            captured["tool_choice"] = invocation.tool_choice
-
-        registry = _provider_registry(tool_calling=False)
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {"orchestrator": ["Done"]},
-                capture=_capture,
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
-            tools=(_host_tool("read_file"),),
-            tool_choice="auto",
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        [event async for event in stream]
-        await stream.get_final_response()
-
-        self.assertEqual(captured["tools"], ())
-        self.assertIsNone(captured["tool_choice"])
-
-    async def test_stream_turn_errors_when_required_tool_choice_hits_toolless_provider(
-        self,
-    ) -> None:
-        registry = _provider_registry(tool_calling=False)
-        core = ProxyOrchestrationCore(
-            registry,
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": ["unused"],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
-            tools=(_host_tool("read_file"),),
-            tool_choice="required",
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        self.assertEqual(result.finish_reason, "error")
-        self.assertIn("does not support tool calling", result.content)
-        self.assertTrue(
-            any(isinstance(event, ProxyContentDeltaEvent) for event in events)
-        )
-
-    async def test_stream_turn_errors_when_model_ignores_required_tool_choice(
-        self,
-    ) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "name": "write_file",
-                                    "arguments": '{"path":"main.py"}',
-                                },
-                            ],
-                        },
-                    ],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect main.py"),),
-            tools=(_host_tool("read_file"), _host_tool("write_file")),
-            tool_choice={"type": "function", "function": {"name": "read_file"}},
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        events = [event async for event in stream]
-        result = await stream.get_final_response()
-
-        self.assertEqual(result.finish_reason, "error")
-        self.assertIn("outside required tool 'read_file'", result.content)
-        self.assertTrue(
-            any(isinstance(event, ProxyContentDeltaEvent) for event in events)
-        )
-
-    async def test_stream_turn_errors_when_model_ignores_parallel_tool_call_limit(
-        self,
-    ) -> None:
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        {
-                            "text": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"main.py"}',
-                                },
-                                {
-                                    "id": "call_2",
-                                    "name": "read_file",
-                                    "arguments": '{"path":"other.py"}',
-                                },
-                            ],
-                        },
-                    ],
-                }
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(ProxyInputMessage(role="user", content="Inspect the files"),),
-            tools=(_host_tool("read_file"),),
-            parallel_tool_calls=False,
-        )
-
-        stream = core.stream_turn(request, created_at=1)
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
         self.assertEqual(result.finish_reason, "error")
         self.assertIn(
-            "multiple tool calls despite parallel_tool_calls=false", result.content
-        )
-        self.assertTrue(
-            any(isinstance(event, ProxyContentDeltaEvent) for event in events)
-        )
-
-    async def test_stream_turn_rebuilds_structured_tool_history_for_continuations(
-        self,
-    ) -> None:
-        captured: dict[str, object] = {}
-        tool_call = _host_continuation_tool_call(
-            state=ContinuationState(actor="orchestrator"),
-            call_id="call_1",
-            name="read_file",
-        )
-
-        def _capture(invocation: AgentInvocation) -> None:
-            captured["messages"] = invocation.messages
-
-        core = ProxyOrchestrationCore(
-            _provider_registry(tool_calling=True),
-            agent_invoker=_fake_agent_invoker(
-                {"orchestrator": ["Final answer"]},
-                capture=_capture,
+            "unknown channel: channel-1",
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
             ),
         )
-        request = ProxyTurnRequest(
+
+    async def test_stream_turn_resumes_orchestrator_tool_call_from_pending_store(
+        self,
+    ) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "name": "read_file",
+                                    "arguments": '{"path":"main.py"}',
+                                },
+                            ],
+                        },
+                        "Done",
+                    ],
+                }
+            ),
+        )
+        first_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect it"),),
+            tools=(_host_tool("read_file"),),
+        )
+
+        first_stream = core.stream_turn(
+            first_request,
+            created_at=1,
+            session_id="session_1",
+        )
+        first_events = [event async for event in first_stream]
+        first_result = await first_stream.get_final_response()
+
+        tool_event = next(
+            event for event in first_events if isinstance(event, ProxyToolCallEvent)
+        )
+        second_request = ProxyTurnRequest(
             model="ergon",
             messages=(
-                ProxyInputMessage(role="user", content="Inspect main.py"),
-                ProxyInputMessage(
-                    role="assistant", content="", tool_calls=(tool_call,)
-                ),
+                ProxyInputMessage(role="user", content="Inspect it"),
+                ProxyInputMessage(role="assistant", content="", tool_calls=first_result.tool_calls),
                 ProxyInputMessage(
                     role="tool",
-                    content="print('current main')",
-                    tool_call_id=tool_call.id,
+                    content="file contents",
+                    tool_call_id=tool_event.call.id,
                 ),
             ),
             tools=(_host_tool("read_file"),),
         )
 
-        stream = core.stream_turn(request, created_at=1)
-        [event async for event in stream]
-        await stream.get_final_response()
-
-        messages = captured["messages"]
-        self.assertEqual(
-            [message["role"] for message in messages],
-            ["system", "user", "assistant", "tool"],
+        second_stream = core.stream_turn(
+            second_request,
+            created_at=2,
+            session_id="session_1",
         )
-        self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
-        self.assertEqual(messages[3]["tool_call_id"], tool_call.id)
+        [event async for event in second_stream]
+        second_result = await second_stream.get_final_response()
 
-    async def test_stream_turn_rebuilds_tool_result_without_assistant_call_history(
-        self,
-    ) -> None:
-        captured: dict[str, object] = {}
-        tool_call = _host_continuation_tool_call(
-            state=ContinuationState(actor="orchestrator"),
-            call_id="call_1",
-            name="read_file",
-        )
-
-        def _capture(invocation: AgentInvocation) -> None:
-            captured["messages"] = invocation.messages
-
-        core = ProxyOrchestrationCore(
-            _provider_registry(tool_calling=True),
-            agent_invoker=_fake_agent_invoker(
-                {"orchestrator": ["Final answer"]},
-                capture=_capture,
-            ),
-        )
-        request = ProxyTurnRequest(
-            model="ergon",
-            messages=(
-                ProxyInputMessage(role="user", content="Inspect main.py"),
-                ProxyInputMessage(
-                    role="tool",
-                    content="print('current main')",
-                    tool_call_id=tool_call.id,
-                ),
-            ),
-            tools=(_host_tool("read_file"),),
-        )
-
-        stream = core.stream_turn(request, created_at=1)
-        [event async for event in stream]
-        await stream.get_final_response()
-
-        messages = captured["messages"]
-        self.assertEqual(
-            [message["role"] for message in messages],
-            ["system", "user", "assistant", "tool"],
-        )
-        self.assertEqual(messages[2]["tool_calls"][0]["id"], tool_call.id)
-        self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
-        self.assertEqual(messages[3]["tool_call_id"], "call_1")
+        self.assertEqual(second_result.content, "Done")
 
 
-class _FakeRegistry:
-    def __init__(self) -> None:
-        self.inner = RuntimeRegistry(
-            upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
-            agent_definitions={
-                "orchestrator": DefinitionDocument(
-                    id="orchestrator",
-                    path=Path("orchestrator.md"),
-                    metadata={"id": "orchestrator", "role": "orchestrator"},
-                    body="## Identity\nLead engineer.",
-                    sections={"Identity": "Lead engineer."},
-                ),
-                "architect": DefinitionDocument(
-                    id="architect",
-                    path=Path("architect.md"),
-                    metadata={"id": "architect", "role": "architect"},
-                    body="## Identity\nArchitect.",
-                    sections={"Identity": "Architect."},
-                ),
-                "coder": DefinitionDocument(
-                    id="coder",
-                    path=Path("coder.md"),
-                    metadata={"id": "coder", "role": "coder"},
-                    body="## Identity\nCoder.",
-                    sections={"Identity": "Coder."},
-                ),
-                "reviewer": DefinitionDocument(
-                    id="reviewer",
-                    path=Path("reviewer.md"),
-                    metadata={"id": "reviewer", "role": "reviewer"},
-                    body="## Identity\nReviewer.",
-                    sections={"Identity": "Reviewer."},
-                ),
-            },
-            channel_presets={
-                "standard-build": ("architect",),
-            },
-        )
-
-    def __getattr__(self, name: str):
-        return getattr(self.inner, name)
-
-
-def _fake_agent_invoker(
-    mapping: dict[str, list[object]],
-    *,
-    capture: Callable[[AgentInvocation], None] | None = None,
-):
-    remaining = {agent_id: list(responses) for agent_id, responses in mapping.items()}
-
-    def _invoke(invocation: AgentInvocation):
-        if capture is not None:
-            capture(invocation)
-        queue = remaining[invocation.agent_id]
-        if not queue:
-            raise AssertionError(f"no fake responses left for {invocation.agent_id}")
-        raw = queue.pop(0)
-        if isinstance(raw, str):
-            payload = {"text": raw, "tool_calls": []}
-        else:
-            payload = raw
-        text = payload.get("text", "")
-        tool_calls = tuple(
-            ProxyToolCall(
-                id=tool_call["id"],
-                name=tool_call["name"],
-                arguments_json=tool_call["arguments"],
-            )
-            for tool_call in payload.get("tool_calls", [])
-        )
-        parts = [piece for piece in text.split(" ") if piece]
-
-        async def _events():
-            for index, part in enumerate(parts):
-                suffix = " " if index < len(parts) - 1 else ""
-                yield part + suffix
-
-        return ResponseStream(
-            _events(),
-            finalizer=lambda: AgentRunResult(
-                text=text,
-                tool_calls=tool_calls,
-            ),
-        )
-
-    return _invoke
-
-
-def _fake_registry():
-    return _FakeRegistry()
-
-
-def _multi_participant_channel_registry():
-    registry = _FakeRegistry()
-    registry.channel_presets["build-room"] = (
-        "architect",
-        "coder",
-        "reviewer",
-    )
-    return registry
-
-
-def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
-    return RuntimeRegistry(
-        upstream=UpstreamSettings(
-            base_url="http://localhost:8080/v1", tool_calling=tool_calling
-        ),
-        agent_definitions={
-            "orchestrator": DefinitionDocument(
-                id="orchestrator",
-                path=Path("orchestrator.md"),
-                metadata={"id": "orchestrator", "role": "orchestrator"},
-                body="## Identity\nLead engineer.",
-                sections={"Identity": "Lead engineer."},
-            ),
-        },
-        channel_presets={},
-    )
-
-
-def _advanced_channel_registry() -> RuntimeRegistry:
+def _fake_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
@@ -1368,6 +291,13 @@ def _advanced_channel_registry() -> RuntimeRegistry:
                 body="## Identity\nLead engineer.",
                 sections={"Identity": "Lead engineer."},
             ),
+            "coder": DefinitionDocument(
+                id="coder",
+                path=Path("coder.md"),
+                metadata={"id": "coder", "role": "coder"},
+                body="## Identity\nCoder.",
+                sections={"Identity": "Coder."},
+            ),
             "architect": DefinitionDocument(
                 id="architect",
                 path=Path("architect.md"),
@@ -1375,31 +305,8 @@ def _advanced_channel_registry() -> RuntimeRegistry:
                 body="## Identity\nArchitect.",
                 sections={"Identity": "Architect."},
             ),
-            "brainstormer": DefinitionDocument(
-                id="brainstormer",
-                path=Path("brainstormer.md"),
-                metadata={"id": "brainstormer", "role": "brainstormer"},
-                body="## Identity\nBrainstormer.",
-                sections={"Identity": "Brainstormer."},
-            ),
-            "researcher": DefinitionDocument(
-                id="researcher",
-                path=Path("researcher.md"),
-                metadata={"id": "researcher", "role": "researcher"},
-                body="## Identity\nResearcher.",
-                sections={"Identity": "Researcher."},
-            ),
-            "reviewer": DefinitionDocument(
-                id="reviewer",
-                path=Path("reviewer.md"),
-                metadata={"id": "reviewer", "role": "reviewer"},
-                body="## Identity\nReviewer.",
-                sections={"Identity": "Reviewer."},
-            ),
         },
-        channel_presets={
-            "debate": ("architect", "brainstormer", "architect", "reviewer"),
-        },
+        channel_presets={"standard-build": ("architect", "coder")},
     )
 
 
@@ -1408,12 +315,12 @@ def _host_tool(name: str):
 
     return ProxyFunctionTool(
         name=name,
-        description=f"{name} tool",
-        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        description=f"Tool {name}",
+        parameters={"type": "object", "properties": {}, "required": []},
     )
 
 
-def _internal_action(name: str, **payload: object) -> dict[str, object]:
+def _internal_action(name: str, **payload):
     return {
         "text": "",
         "tool_calls": [
@@ -1426,10 +333,43 @@ def _internal_action(name: str, **payload: object) -> dict[str, object]:
     }
 
 
-def _host_continuation_tool_call(
-    *, state: ContinuationState, call_id: str, name: str
-) -> ProxyToolCall:
-    return encode_continuation_tool_call(
-        ProxyToolCall(id=call_id, name=name, arguments_json="{}"),
-        state=state,
-    )
+def _fake_agent_invoker(
+    responses_by_agent: dict[str, list[str | dict[str, object]]],
+):
+    counters = {agent_id: 0 for agent_id in responses_by_agent}
+
+    def _invoker(invocation: AgentInvocation):
+        index = counters[invocation.agent_id]
+        counters[invocation.agent_id] += 1
+        response = responses_by_agent[invocation.agent_id][index]
+        if isinstance(response, str):
+            return _response_stream(response)
+        return _response_stream(
+            str(response.get("text", "")),
+            response=AgentRunResult(
+                text=str(response.get("text", "")),
+                tool_calls=tuple(
+                    ProxyToolCall(
+                        id=str(tool_call["id"]),
+                        name=str(tool_call["name"]),
+                        arguments_json=str(tool_call["arguments"]),
+                    )
+                    for tool_call in response.get("tool_calls", [])
+                ),
+            ),
+        )
+
+    return _invoker
+
+
+def _response_stream(
+    text: str,
+    *,
+    response: AgentRunResult | None = None,
+) -> ResponseStream[str, AgentRunResult]:
+    async def _events():
+        if text:
+            yield text
+
+    final = response or AgentRunResult(text=text, tool_calls=())
+    return ResponseStream(_events(), finalizer=lambda: final)

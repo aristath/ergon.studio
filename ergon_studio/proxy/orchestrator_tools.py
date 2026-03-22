@@ -78,21 +78,10 @@ def build_orchestrator_internal_tools(
                 "Send another message into an already-open channel by channel id. "
                 "Recipients decides who you are actively addressing."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "channel": {"type": "string"},
-                    "message": {"type": "string"},
-                    "recipients": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": list(specialist_ids),
-                        },
-                    },
-                },
-                "required": ["channel", "message", "recipients"],
-            },
+            parameters=_message_channel_parameters(
+                specialist_ids=specialist_ids,
+                include_channel=True,
+            ),
         ),
         ProxyFunctionTool(
             name="close_channel",
@@ -104,6 +93,29 @@ def build_orchestrator_internal_tools(
                 },
                 "required": ["channel"],
             },
+        ),
+    )
+
+
+def build_participant_internal_tools(
+    registry: RuntimeRegistry,
+) -> tuple[ProxyFunctionTool, ...]:
+    specialist_ids = tuple(
+        agent_id
+        for agent_id in sorted(registry.agent_definitions)
+        if agent_id != "orchestrator"
+    )
+    return (
+        ProxyFunctionTool(
+            name="message_channel",
+            description=(
+                "Send another message into the current channel and explicitly "
+                "target the teammates you want to answer next."
+            ),
+            parameters=_message_channel_parameters(
+                specialist_ids=specialist_ids,
+                include_channel=False,
+            ),
         ),
     )
 
@@ -135,12 +147,17 @@ def parse_message_channel_action(
     tool_call: ProxyToolCall,
     *,
     registry: RuntimeRegistry,
+    require_channel: bool = True,
 ) -> MessageChannelAction:
     if tool_call.name != "message_channel":
         raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
     return MessageChannelAction(
-        channel=_required_text(payload.get("channel"), field="channel"),
+        channel=(
+            _required_text(payload.get("channel"), field="channel")
+            if require_channel
+            else ""
+        ),
         message=_required_text(payload.get("message"), field="message"),
         recipients=_required_staffing_list(
             payload.get("recipients"),
@@ -218,6 +235,32 @@ def _normalize_staffing_list(
             continue
         participants.append(candidate)
     return tuple(participants)
+
+
+def _message_channel_parameters(
+    *,
+    specialist_ids: tuple[str, ...],
+    include_channel: bool,
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "message": {"type": "string"},
+        "recipients": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": list(specialist_ids),
+            },
+        },
+    }
+    required = ["message", "recipients"]
+    if include_channel:
+        properties["channel"] = {"type": "string"}
+        required.insert(0, "channel")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
 
 
 def _required_staffing_list(

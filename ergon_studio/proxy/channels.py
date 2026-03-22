@@ -42,6 +42,27 @@ class ChannelSession:
     channels: dict[str, OpenChannel] = field(default_factory=dict)
 
 
+class ChannelStore:
+    def __init__(self) -> None:
+        self._sessions: dict[str, ChannelSession] = {}
+
+    def get(self, session_id: str) -> ChannelSession | None:
+        return self._sessions.get(session_id)
+
+    def ensure(self, session_id: str) -> ChannelSession:
+        session = self._sessions.get(session_id)
+        if session is None:
+            session = ChannelSession(session_id=session_id)
+            self._sessions[session_id] = session
+        return session
+
+    def put(self, session: ChannelSession) -> None:
+        self._sessions[session.session_id] = session
+
+    def discard(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
+
+
 def describe_open_channels(
     channels: dict[str, OpenChannel],
 ) -> tuple[str, ...]:

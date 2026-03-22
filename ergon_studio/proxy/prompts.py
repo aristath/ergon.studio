@@ -59,9 +59,10 @@ def channel_message_prompt(
     lines = [
         f"You are {agent_id} in channel {channel_name}.",
         (
-            "The lead developer opened this channel to collaborate with you like a "
-            "real teammate, not to run a scripted process."
+            "This channel is a real team conversation, not a scripted process."
         ),
+        "The orchestrator appears as the user in the channel history.",
+        "Your own prior channel replies appear as assistant messages.",
     ]
     if role_instance_label:
         lines.extend(
@@ -80,39 +81,7 @@ def channel_message_prompt(
     lines.extend(
         [
             "",
-            "Conversation summary:",
-            transcript_summary or "(none)",
-            "",
-            "Overall goal:",
-            user_request or "(none)",
-        ]
-    )
-    if channel_transcript:
-        lines.extend(
-            [
-                "",
-                (
-                    "Recent channel messages are provided separately as "
-                    "conversation history."
-                ),
-                (
-                    "Treat orchestrator messages as the lead developer talking to "
-                    "you directly. Your own prior channel replies appear as assistant "
-                    "messages."
-                ),
-            ]
-        )
-    if prior_work:
-        lines.extend(
-            [
-                "",
-                "Recent team notes:",
-                *prior_work[-6:],
-            ]
-        )
-    lines.extend(
-        [
-            "",
+            "Channel history is provided separately as conversation messages.",
             "Reply naturally in the conversation.",
             "Use tools when you need them.",
             (

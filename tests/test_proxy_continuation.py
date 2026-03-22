@@ -2,286 +2,168 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot
 from ergon_studio.proxy.continuation import (
-    ContinuationState,
-    decode_continuation_from_tool_call_id,
-    decode_original_tool_call,
+    continuation_result_map,
+    continuation_tool_calls,
+    decode_pending_id_from_tool_call_id,
     encode_continuation_tool_call,
     latest_pending_continuation,
     original_tool_call_id,
     pending_actors,
+    pending_for_actor,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
+from ergon_studio.proxy.pending_store import PendingSeed, PendingStore
 
 
 class ProxyContinuationTests(unittest.TestCase):
-    def test_encode_and_decode_round_trip(self) -> None:
+    def test_encode_wraps_pending_id_and_original_call_id(self) -> None:
         encoded = encode_continuation_tool_call(
             ProxyToolCall(
                 id="call_1",
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(
-                actor="architect",
-                active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="design",
-                        participants=("architect",),
-                    ),
-                ),
-            ),
+            pending_id="pending_123",
         )
 
-        decoded = decode_continuation_from_tool_call_id(encoded.id)
+        self.assertEqual(decode_pending_id_from_tool_call_id(encoded.id), "pending_123")
+        self.assertEqual(original_tool_call_id(encoded.id), "call_1")
 
-        self.assertIsNotNone(decoded)
-        assert decoded is not None
-        self.assertEqual(decoded.actor, "architect")
-        self.assertEqual(decoded.active_channel_id, "channel-1")
-        self.assertEqual(
-            decoded.channels,
-            (
-                ChannelSnapshot(
-                    channel_id="channel-1",
-                    name="design",
-                    participants=("architect",),
-                ),
-            ),
-        )
-        self.assertEqual(decoded.worklog, ())
-
-    def test_encode_and_decode_round_trip_with_context(self) -> None:
-        encoded = encode_continuation_tool_call(
-            ProxyToolCall(
-                id="call_2",
-                name="write_file",
-                arguments_json='{"path":"main.py"}',
-            ),
-            state=ContinuationState(
-                actor="coder[1]",
-                active_channel_id="channel-2",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-2",
-                        name="best-of-n",
-                        participants=("coder", "coder", "reviewer"),
-                        transcript=(
-                            ChannelMessage("architect", "Use main.py"),
-                            ChannelMessage("coder[2]", "Option B"),
-                        ),
-                    ),
-                ),
-                worklog=("reviewer: keep it small",),
-            ),
-        )
-
-        decoded = decode_continuation_from_tool_call_id(encoded.id)
-
-        self.assertIsNotNone(decoded)
-        assert decoded is not None
-        self.assertEqual(
-            decoded.channels,
-            (
-                ChannelSnapshot(
-                    channel_id="channel-2",
-                    name="best-of-n",
-                    participants=("coder", "coder", "reviewer"),
-                    transcript=(
-                        ChannelMessage("architect", "Use main.py"),
-                        ChannelMessage("coder[2]", "Option B"),
-                    ),
-                ),
-            ),
-        )
-        self.assertEqual(decoded.active_channel_id, "channel-2")
-        self.assertEqual(decoded.worklog, ("reviewer: keep it small",))
-        self.assertEqual(decoded.actor, "coder[1]")
-
-    def test_encode_caps_transcript_and_worklog_payloads(self) -> None:
-        encoded = encode_continuation_tool_call(
-            ProxyToolCall(id="call_3", name="read_file", arguments_json="{}"),
-            state=ContinuationState(
-                actor="coder",
-                active_channel_id="channel-3",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-3",
-                        name="ad hoc",
-                        participants=("coder",),
-                        transcript=tuple(
-                            ChannelMessage("coder", f"line {index}")
-                            for index in range(20)
-                        ),
-                    ),
-                ),
-                worklog=tuple(f"note {index}" for index in range(20)),
-            ),
-        )
-
-        decoded = decode_continuation_from_tool_call_id(encoded.id)
-
-        self.assertIsNotNone(decoded)
-        assert decoded is not None
-        self.assertEqual(
-            decoded.channels,
-            (
-                ChannelSnapshot(
-                    channel_id="channel-3",
-                    name="ad hoc",
-                    participants=("coder",),
-                    transcript=tuple(
-                        ChannelMessage("coder", f"line {index}")
-                        for index in range(8, 20)
-                    ),
-                ),
-            ),
-        )
-        self.assertEqual(
-            decoded.worklog,
-            tuple(f"note {index}" for index in range(8, 20)),
-        )
-
-    def test_latest_pending_continuation_requires_tool_loop_tail(self) -> None:
-        tool_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(
-                actor="coder",
-                active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="ad hoc",
-                        participants=("coder",),
-                    ),
-                ),
-            ),
-        )
-        messages = (
-            ProxyInputMessage(role="user", content="Build it"),
-            ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
-            ProxyInputMessage(
-                role="tool", content="file contents", tool_call_id=tool_call.id
-            ),
-            ProxyInputMessage(role="assistant", content="Done with that."),
-            ProxyInputMessage(role="user", content="Now do something else"),
-        )
-
-        self.assertIsNone(latest_pending_continuation(messages))
-
-    def test_latest_pending_continuation_returns_matching_assistant_and_results(
+    def test_latest_pending_continuation_restores_server_side_pending_state(
         self,
     ) -> None:
-        tool_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(
+        store = PendingStore()
+        record = store.create(
+            seed=PendingSeed(
+                session_id="session_1",
                 actor="coder",
                 active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="ad hoc",
-                        participants=("coder",),
-                    ),
+            ),
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
         )
+        wrapped = encode_continuation_tool_call(
+            record.tool_calls[0],
+            pending_id=record.pending_id,
+        )
         messages = (
-            ProxyInputMessage(role="user", content="Build it"),
-            ProxyInputMessage(role="assistant", content="", tool_calls=(tool_call,)),
+            ProxyInputMessage(role="user", content="Implement it"),
+            ProxyInputMessage(role="assistant", content="", tool_calls=(wrapped,)),
             ProxyInputMessage(
-                role="tool", content="file contents", tool_call_id=tool_call.id
+                role="tool",
+                content="file contents",
+                tool_call_id=wrapped.id,
             ),
         )
 
-        pending = latest_pending_continuation(messages)
+        pending = latest_pending_continuation(messages, pending_store=store)
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.state.active_channel_id, "channel-1")
-        self.assertEqual(pending.assistant_message.tool_calls[0].id, tool_call.id)
-        self.assertEqual(pending.tool_results[0].content, "file contents")
-
-    def test_latest_pending_continuation_allows_multiple_channel_actors(self) -> None:
-        architect_tool_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_1", name="read_file", arguments_json="{}"),
-            state=ContinuationState(
-                actor="architect",
-                active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="debate",
-                        participants=("architect", "coder"),
-                    ),
+        self.assertEqual(pending.session_id, "session_1")
+        self.assertEqual(pending_actors(pending), ("coder",))
+        coder = pending_for_actor(pending, "coder")
+        assert coder is not None
+        self.assertEqual(coder.active_channel_id, "channel-1")
+        self.assertEqual(
+            continuation_tool_calls(coder),
+            (
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json='{"path":"main.py"}',
                 ),
             ),
         )
-        coder_tool_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_2", name="glob", arguments_json="{}"),
-            state=ContinuationState(
-                actor="coder",
-                active_channel_id="channel-1",
-                channels=(
-                    ChannelSnapshot(
-                        channel_id="channel-1",
-                        name="debate",
-                        participants=("architect", "coder"),
-                    ),
-                ),
+        self.assertEqual(continuation_result_map(coder), {"call_1": "file contents"})
+        self.assertIsNone(store.get(record.pending_id))
+
+    def test_latest_pending_continuation_groups_multiple_pending_actors(
+        self,
+    ) -> None:
+        store = PendingStore()
+        architect = store.create(
+            seed=PendingSeed(
+                session_id="session_2",
+                actor="architect",
+                active_channel_id="channel-2",
             ),
+            tool_calls=(
+                ProxyToolCall(id="call_a", name="read_file", arguments_json="{}"),
+            ),
+        )
+        coder = store.create(
+            seed=PendingSeed(
+                session_id="session_2",
+                actor="coder",
+                active_channel_id="channel-2",
+            ),
+            tool_calls=(
+                ProxyToolCall(id="call_b", name="glob", arguments_json="{}"),
+            ),
+        )
+        wrapped_architect = encode_continuation_tool_call(
+            architect.tool_calls[0],
+            pending_id=architect.pending_id,
+        )
+        wrapped_coder = encode_continuation_tool_call(
+            coder.tool_calls[0],
+            pending_id=coder.pending_id,
         )
         messages = (
             ProxyInputMessage(role="user", content="Debate it"),
             ProxyInputMessage(
                 role="assistant",
                 content="",
-                tool_calls=(architect_tool_call, coder_tool_call),
+                tool_calls=(wrapped_architect, wrapped_coder),
             ),
             ProxyInputMessage(
                 role="tool",
                 content="architect context",
-                tool_call_id=architect_tool_call.id,
+                tool_call_id=wrapped_architect.id,
             ),
             ProxyInputMessage(
                 role="tool",
                 content="coder context",
-                tool_call_id=coder_tool_call.id,
+                tool_call_id=wrapped_coder.id,
             ),
         )
 
-        pending = latest_pending_continuation(messages)
+        pending = latest_pending_continuation(messages, pending_store=store)
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.state.active_channel_id, "channel-1")
-        self.assertEqual(pending_actors(pending), ("architect", "coder"))
+        self.assertEqual(pending.session_id, "session_2")
+        self.assertEqual(set(pending_actors(pending)), {"architect", "coder"})
 
-    def test_original_tool_call_id_extracts_wrapped_id(self) -> None:
-        tool_call = encode_continuation_tool_call(
-            ProxyToolCall(id="call_123", name="read_file", arguments_json="{}"),
-            state=ContinuationState(actor="orchestrator"),
+    def test_latest_pending_continuation_rejects_mixed_sessions(self) -> None:
+        store = PendingStore()
+        first = store.create(
+            seed=PendingSeed(session_id="session_a", actor="coder"),
+            tool_calls=(ProxyToolCall(id="call_a", name="read_file", arguments_json="{}"),),
+        )
+        second = store.create(
+            seed=PendingSeed(session_id="session_b", actor="reviewer"),
+            tool_calls=(ProxyToolCall(id="call_b", name="glob", arguments_json="{}"),),
+        )
+        wrapped_first = encode_continuation_tool_call(
+            first.tool_calls[0],
+            pending_id=first.pending_id,
+        )
+        wrapped_second = encode_continuation_tool_call(
+            second.tool_calls[0],
+            pending_id=second.pending_id,
+        )
+        messages = (
+            ProxyInputMessage(role="assistant", content="", tool_calls=(wrapped_first, wrapped_second)),
+            ProxyInputMessage(role="tool", content="a", tool_call_id=wrapped_first.id),
+            ProxyInputMessage(role="tool", content="b", tool_call_id=wrapped_second.id),
         )
 
-        self.assertEqual(original_tool_call_id(tool_call.id), "call_123")
-
-    def test_decode_original_tool_call_restores_wrapped_tool_metadata(self) -> None:
-        tool_call = encode_continuation_tool_call(
-            ProxyToolCall(
-                id="call_123",
-                name="read_file",
-                arguments_json='{"path":"main.py"}',
-            ),
-            state=ContinuationState(actor="orchestrator"),
-        )
-
-        original = decode_original_tool_call(tool_call.id)
-
-        self.assertIsNotNone(original)
-        assert original is not None
-        self.assertEqual(original.id, tool_call.id)
-        self.assertEqual(original.name, "read_file")
-        self.assertEqual(original.arguments_json, '{"path":"main.py"}')
+        self.assertIsNone(latest_pending_continuation(messages, pending_store=store))

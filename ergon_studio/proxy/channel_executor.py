@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_staffing import (
@@ -9,34 +11,51 @@ from ergon_studio.proxy.channel_staffing import (
     expand_staffed_participants,
     participant_context,
 )
-from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot, OpenChannel
+from ergon_studio.proxy.channels import ChannelMessage, OpenChannel
 from ergon_studio.proxy.continuation import (
-    ContinuationState,
     PendingContinuation,
+    PendingToolContext,
     pending_actors,
     pending_for_actor,
 )
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
+    ProxyToolCall,
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
+from ergon_studio.proxy.orchestrator_tools import (
+    build_participant_internal_tools,
+    is_internal_tool_name,
+    parse_message_channel_action,
+)
+from ergon_studio.proxy.pending_store import PendingSeed
 from ergon_studio.proxy.prompts import channel_message_prompt
 from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import ProxyTurnState
+from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = ProxyReasoningDeltaEvent | ProxyToolCallEvent
+
+
+@dataclass(frozen=True)
+class _ChannelDelivery:
+    author: str
+    message: str
+    recipients: tuple[str, ...]
 
 
 class ProxyChannelExecutor:
     def __init__(
         self,
         *,
+        registry: RuntimeRegistry,
         stream_text_agent: Callable[..., ResponseStream[str, AgentRunResult]],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     ) -> None:
+        self._registry = registry
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
 
@@ -44,36 +63,35 @@ class ProxyChannelExecutor:
         self,
         *,
         request: ProxyTurnRequest,
+        session_id: str,
         channel: OpenChannel,
-        channels: dict[str, OpenChannel],
         channel_message: str | None = None,
         recipients: tuple[str, ...] = (),
         state: ProxyTurnState,
-        continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
-        worklog: tuple[str, ...] = (),
+        recent_notes: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
-        channel_participants = channel.participants
-        all_staffed_members = expand_staffed_participants(channel_participants)
-        staffed_members = _targeted_participants(
-            staffed_members=all_staffed_members,
-            recipients=recipients,
-        )
-        persisted_worklog = (
-            continuation.worklog if continuation is not None else worklog
-        )
-        persisted_transcript = tuple(channel.transcript)
+        all_staffed_members = expand_staffed_participants(channel.participants)
         user_request = request.latest_user_text() or ""
+        participant_tools = build_participant_internal_tools(self._registry)
         channel_messages: list[ChannelMessage] = []
 
         async def _events() -> AsyncIterator[ProxyEvent]:
-            current_transcript = list(persisted_transcript)
-            if pending is None and channel_message:
-                current_transcript.append(
-                    ChannelMessage(author="orchestrator", content=channel_message)
+            current_transcript = list(channel.transcript)
+            deliveries: deque[_ChannelDelivery] = deque()
+            pending_tool_events: list[ProxyToolCallEvent] = []
+
+            if channel_message:
+                deliveries.append(
+                    _ChannelDelivery(
+                        author="orchestrator",
+                        message=channel_message,
+                        recipients=recipients,
+                    )
                 )
+
             if pending is not None:
-                actor_results = await asyncio.gather(
+                results = await asyncio.gather(
                     *[
                         self._run_channel_participant(
                             request=request,
@@ -84,7 +102,8 @@ class ProxyChannelExecutor:
                             ),
                             user_request=user_request,
                             channel_transcript=tuple(current_transcript),
-                            prior_work=persisted_worklog,
+                            recent_notes=recent_notes,
+                            participant_tools=participant_tools,
                             pending=_pending_for_actor_or_error(
                                 pending=pending,
                                 actor=actor,
@@ -93,49 +112,80 @@ class ProxyChannelExecutor:
                         for actor in pending_actors(pending)
                     ]
                 )
-                emitted = _emit_participant_results(
-                    actor_results=actor_results,
+                emitted, new_deliveries, new_tool_events = _process_participant_results(
+                    actor_results=results,
+                    request=request,
+                    channel=channel,
                     current_transcript=current_transcript,
                     channel_messages=channel_messages,
-                    channel=channel,
-                    channels=channels,
-                    request=request,
                     state=state,
-                    prior_work=persisted_worklog,
                     emit_tool_calls=self._emit_tool_calls,
+                    session_id=session_id,
+                    registry=self._registry,
                 )
                 for event in emitted:
                     yield event
-                return
-            if not staffed_members:
-                return
+                deliveries.extend(new_deliveries)
+                pending_tool_events.extend(new_tool_events)
 
-            results = await asyncio.gather(
-                *[
-                    self._run_channel_participant(
-                        request=request,
-                        channel_name=channel.name,
-                        participant=participant,
-                        user_request=user_request,
-                        channel_transcript=tuple(current_transcript),
-                        prior_work=persisted_worklog,
-                    )
-                    for participant in staffed_members
+            while deliveries:
+                delivery = deliveries.popleft()
+                delivery_line = ChannelMessage(
+                    author=delivery.author,
+                    content=delivery.message,
+                )
+                current_transcript.append(delivery_line)
+                if delivery.author != "orchestrator":
+                    channel_messages.append(delivery_line)
+                    state.append_reasoning(delivery_line.render())
+                    yield ProxyReasoningDeltaEvent(delivery_line.render())
+
+                targets = _targeted_participants(
+                    staffed_members=all_staffed_members,
+                    recipients=delivery.recipients,
+                )
+                if not targets:
+                    continue
+
+                results = await asyncio.gather(
+                    *[
+                        self._run_channel_participant(
+                            request=request,
+                            channel_name=channel.name,
+                            participant=participant,
+                            user_request=user_request,
+                            channel_transcript=tuple(current_transcript),
+                            recent_notes=recent_notes,
+                            participant_tools=participant_tools,
+                        )
+                        for participant in targets
+                    ]
+                )
+                emitted, new_deliveries, new_tool_events = _process_participant_results(
+                    actor_results=results,
+                    request=request,
+                    channel=channel,
+                    current_transcript=current_transcript,
+                    channel_messages=channel_messages,
+                    state=state,
+                    emit_tool_calls=self._emit_tool_calls,
+                    session_id=session_id,
+                    registry=self._registry,
+                )
+                for event in emitted:
+                    yield event
+                deliveries.extend(new_deliveries)
+                pending_tool_events.extend(new_tool_events)
+
+            if pending_tool_events:
+                ordered = [
+                    ProxyToolCallEvent(call=event.call, index=index)
+                    for index, event in enumerate(pending_tool_events)
                 ]
-            )
-            emitted = _emit_participant_results(
-                actor_results=results,
-                current_transcript=current_transcript,
-                channel_messages=channel_messages,
-                channel=channel,
-                channels=channels,
-                request=request,
-                state=state,
-                prior_work=persisted_worklog,
-                emit_tool_calls=self._emit_tool_calls,
-            )
-            for event in emitted:
-                yield event
+                state.tool_calls = tuple(event.call for event in ordered)
+                state.finish_reason = "tool_calls"
+                for event in ordered:
+                    yield event
 
         return ResponseStream(
             _events(),
@@ -150,8 +200,9 @@ class ProxyChannelExecutor:
         participant: StaffedParticipant,
         user_request: str,
         channel_transcript: tuple[ChannelMessage, ...],
-        prior_work: tuple[str, ...],
-        pending: PendingContinuation | None = None,
+        recent_notes: tuple[str, ...],
+        participant_tools: tuple,
+        pending: PendingToolContext | None = None,
     ) -> _ParticipantResult:
         prompt = channel_message_prompt(
             channel_name=channel_name,
@@ -163,18 +214,20 @@ class ProxyChannelExecutor:
             user_request=user_request,
             transcript_summary=summarize_conversation(request.messages),
             channel_transcript=channel_transcript,
-            prior_work=prior_work,
+            prior_work=recent_notes,
         )
         text = ""
         stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
+            prompt_role="system",
             model_id_override=request.model,
             conversation_messages=_channel_conversation_messages(
                 channel_transcript=channel_transcript,
                 participant_label=participant.label,
             ),
             host_tools=request.tools,
+            extra_tools=participant_tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
             pending_continuation=pending,
@@ -258,92 +311,82 @@ def _channel_conversation_messages(
     return tuple(messages)
 
 
-def _snapshot_channels(
-    *,
-    channels: dict[str, OpenChannel],
-    active_channel: OpenChannel,
-    active_transcript: tuple[ChannelMessage, ...],
-) -> tuple[ChannelSnapshot, ...]:
-    snapshots = []
-    for channel_id, channel in channels.items():
-        if channel_id == active_channel.channel_id:
-            snapshots.append(
-                OpenChannel(
-                    channel_id=channel.channel_id,
-                    name=channel.name,
-                    participants=channel.participants,
-                    transcript=list(active_transcript),
-                ).snapshot()
-            )
-            continue
-        snapshots.append(channel.snapshot())
-    return tuple(snapshots)
-
-
-def _emit_participant_results(
+def _process_participant_results(
     *,
     actor_results: list[_ParticipantResult] | tuple[_ParticipantResult, ...],
+    request: ProxyTurnRequest,
+    channel: OpenChannel,
     current_transcript: list[ChannelMessage],
     channel_messages: list[ChannelMessage],
-    channel: OpenChannel,
-    channels: dict[str, OpenChannel],
-    request: ProxyTurnRequest,
     state: ProxyTurnState,
-    prior_work: tuple[str, ...],
     emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
-) -> list[ProxyEvent]:
-    events: list[ProxyEvent] = []
+    session_id: str,
+    registry: RuntimeRegistry,
+) -> tuple[list[ProxyReasoningDeltaEvent], list[_ChannelDelivery], list[ProxyToolCallEvent]]:
+    reasoning_events: list[ProxyReasoningDeltaEvent] = []
+    deliveries: list[_ChannelDelivery] = []
     tool_events: list[ProxyToolCallEvent] = []
+
     for result in actor_results:
-        text_summary = result.text.strip()
-        if not text_summary:
-            continue
-        line = ChannelMessage(
-            author=result.participant.label,
-            content=text_summary,
-        )
-        channel_messages.append(line)
-        state.append_reasoning(line.render())
-        events.append(ProxyReasoningDeltaEvent(line.render()))
-        current_transcript.append(line)
-    for result in actor_results:
-        if not result.response.tool_calls:
-            continue
-        emitted = emit_tool_calls(
-            tool_calls=result.response.tool_calls,
-            request=request,
-            continuation=ContinuationState(
-                actor=result.participant.label,
-                active_channel_id=channel.channel_id,
-                channels=_snapshot_channels(
-                    channels=channels,
-                    active_channel=channel,
-                    active_transcript=tuple(current_transcript),
-                ),
-                worklog=(
-                    *prior_work,
-                    *(message.render() for message in channel_messages),
-                ),
-            ),
-            state=state,
-        )
-        tool_events.extend(emitted)
-    if tool_events:
-        tool_events = [
-            ProxyToolCallEvent(call=event.call, index=index)
-            for index, event in enumerate(tool_events)
-        ]
-        state.tool_calls = tuple(event.call for event in tool_events)
-        state.finish_reason = "tool_calls"
-    events.extend(tool_events)
-    return events
+        internal_actions: list[_ChannelDelivery] = []
+        host_tool_calls: list[ProxyToolCall] = []
+        for tool_call in result.response.tool_calls:
+            if is_internal_tool_name(tool_call.name):
+                if tool_call.name != "message_channel":
+                    raise ValueError(
+                        f"participants cannot use internal tool: {tool_call.name}"
+                    )
+                action = parse_message_channel_action(
+                    tool_call,
+                    registry=registry,
+                    require_channel=False,
+                )
+                internal_actions.append(
+                    _ChannelDelivery(
+                        author=result.participant.label,
+                        message=action.message,
+                        recipients=action.recipients,
+                    )
+                )
+                continue
+            host_tool_calls.append(tool_call)
+
+        if internal_actions:
+            deliveries.extend(internal_actions)
+        else:
+            text = result.text.strip()
+            if text:
+                line = ChannelMessage(
+                    author=result.participant.label,
+                    content=text,
+                )
+                channel_messages.append(line)
+                current_transcript.append(line)
+                state.append_reasoning(line.render())
+                reasoning_events.append(ProxyReasoningDeltaEvent(line.render()))
+
+        if host_tool_calls:
+            tool_events.extend(
+                emit_tool_calls(
+                    tool_calls=tuple(host_tool_calls),
+                    request=request,
+                    continuation=PendingSeed(
+                        session_id=session_id,
+                        actor=result.participant.label,
+                        active_channel_id=channel.channel_id,
+                    ),
+                    state=state,
+                )
+            )
+
+    return reasoning_events, deliveries, tool_events
 
 
 def _pending_for_actor_or_error(
     *,
     pending: PendingContinuation,
     actor: str,
-) -> PendingContinuation:
+) -> PendingToolContext:
     actor_pending = pending_for_actor(pending, actor)
     if actor_pending is None:
         raise ValueError(f"missing pending tool results for actor: {actor}")

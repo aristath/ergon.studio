@@ -8,11 +8,9 @@ from openai import AsyncOpenAI
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import (
-    ContinuationState,
-    PendingContinuation,
+    PendingToolContext,
     continuation_result_map,
     continuation_tool_calls,
-    decode_original_tool_call,
     encode_continuation_tool_call,
     original_tool_call_id,
 )
@@ -23,6 +21,7 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
+from ergon_studio.proxy.pending_store import PendingSeed, PendingStore
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
@@ -58,9 +57,11 @@ class ProxyAgentRunner:
         registry: RuntimeRegistry,
         *,
         invoker: AgentInvoker | None = None,
+        pending_store: PendingStore | None = None,
     ) -> None:
         self.registry = registry
         self._invoker = invoker or self._invoke_upstream
+        self._pending_store = pending_store or PendingStore()
         api_key = registry.upstream.api_key or "not-needed"
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -72,17 +73,19 @@ class ProxyAgentRunner:
         *,
         agent_id: str,
         prompt: str,
+        prompt_role: str = "user",
         model_id_override: str,
         conversation_messages: tuple[ProxyInputMessage, ...] = (),
         host_tools: tuple[ProxyFunctionTool, ...] = (),
         extra_tools: tuple[ProxyFunctionTool, ...] = (),
         tool_choice: ProxyToolChoice = None,
         parallel_tool_calls: bool | None = None,
-        pending_continuation: PendingContinuation | None = None,
+        pending_continuation: PendingToolContext | None = None,
     ) -> ResponseStream[str, AgentRunResult]:
         invocation = self._build_invocation(
             agent_id=agent_id,
             prompt=prompt,
+            prompt_role=prompt_role,
             model_id_override=model_id_override,
             conversation_messages=conversation_messages,
             host_tools=host_tools,
@@ -99,7 +102,7 @@ class ProxyAgentRunner:
         response: AgentRunResult | None = None,
         tool_calls: tuple[ProxyToolCall, ...] | None = None,
         request: ProxyTurnRequest,
-        continuation: ContinuationState,
+        continuation: PendingSeed,
         state: ProxyTurnState,
     ) -> list[ProxyToolCallEvent]:
         if tool_calls is None:
@@ -116,8 +119,15 @@ class ProxyAgentRunner:
                 tuple(tool_calls),
                 request=request,
             )
+        pending_record = self._pending_store.create(
+            seed=continuation,
+            tool_calls=validated_tool_calls,
+        )
         encoded_calls = tuple(
-            encode_continuation_tool_call(tool_call, state=continuation)
+            encode_continuation_tool_call(
+                tool_call,
+                pending_id=pending_record.pending_id,
+            )
             for tool_call in validated_tool_calls
         )
         events = [
@@ -173,13 +183,14 @@ class ProxyAgentRunner:
         *,
         agent_id: str,
         prompt: str,
+        prompt_role: str,
         model_id_override: str,
         conversation_messages: tuple[ProxyInputMessage, ...],
         host_tools: tuple[ProxyFunctionTool, ...],
         extra_tools: tuple[ProxyFunctionTool, ...],
         tool_choice: ProxyToolChoice,
         parallel_tool_calls: bool | None,
-        pending_continuation: PendingContinuation | None,
+        pending_continuation: PendingToolContext | None,
     ) -> AgentInvocation:
         definition = self.registry.agent_definitions[agent_id]
         resolved_tool_choice = validate_tool_choice(tool_choice, tools=host_tools)
@@ -206,6 +217,7 @@ class ProxyAgentRunner:
                 registry=self.registry,
                 instructions=instructions,
                 prompt=prompt,
+                prompt_role=prompt_role,
                 conversation_messages=conversation_messages,
                 pending_continuation=pending_continuation,
             )
@@ -301,8 +313,9 @@ def build_agent_messages(
     registry: RuntimeRegistry,
     instructions: str,
     prompt: str,
+    prompt_role: str = "user",
     conversation_messages: tuple[ProxyInputMessage, ...],
-    pending_continuation: PendingContinuation | None,
+    pending_continuation: PendingToolContext | None,
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     instruction_role = registry.upstream.instruction_role or "system"
@@ -312,7 +325,8 @@ def build_agent_messages(
             "content": instructions,
         }
     )
-    messages.append({"role": "user", "content": prompt})
+    if prompt:
+        messages.append({"role": prompt_role, "content": prompt})
     messages.extend(
         _openai_message_from_proxy(message) for message in conversation_messages
     )
@@ -325,30 +339,20 @@ def build_agent_messages(
 
 
 def _pending_assistant_message(
-    pending_continuation: PendingContinuation | None,
+    pending_continuation: PendingToolContext | None,
 ) -> dict[str, Any] | None:
     if pending_continuation is None:
         return None
-
-    assistant_content = ""
-    assistant_message = pending_continuation.assistant_message
-    if assistant_message is not None and assistant_message.content:
-        assistant_content = assistant_message.content
 
     tool_calls = [
         _tool_call_message(tool_call)
         for tool_call in continuation_tool_calls(pending_continuation)
     ]
-    if not tool_calls and assistant_message is None:
-        tool_calls = [
-            _tool_call_message(tool_call)
-            for tool_call in _synthetic_tool_calls_from_results(pending_continuation)
-        ]
-    if not assistant_content and not tool_calls:
+    if not tool_calls:
         return None
     payload: dict[str, Any] = {
         "role": "assistant",
-        "content": assistant_content,
+        "content": "",
     }
     if tool_calls:
         payload["tool_calls"] = tool_calls
@@ -356,7 +360,7 @@ def _pending_assistant_message(
 
 
 def _pending_tool_messages(
-    pending_continuation: PendingContinuation | None,
+    pending_continuation: PendingToolContext | None,
 ) -> list[dict[str, Any]]:
     if pending_continuation is None:
         return []
@@ -370,24 +374,10 @@ def _pending_tool_messages(
         messages.append(
             {
                 "role": "tool",
-                "tool_call_id": tool_call.id,
+                "tool_call_id": original_tool_call_id(tool_call.id) or tool_call.id,
                 "content": result_text,
             }
         )
-    if pending_continuation.assistant_message is None:
-        for tool_result in pending_continuation.tool_results:
-            original_call_id = (
-                original_tool_call_id(tool_result.tool_call_id or "")
-                or tool_result.tool_call_id
-                or ""
-            )
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": original_call_id,
-                    "content": tool_result.content,
-                }
-            )
     return messages
 
 
@@ -444,18 +434,6 @@ def _metadata_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
-
-
-def _synthetic_tool_calls_from_results(
-    pending_continuation: PendingContinuation,
-) -> list[ProxyToolCall]:
-    return [
-        tool_call
-        for tool_result in pending_continuation.tool_results
-        if (tool_call := decode_original_tool_call(tool_result.tool_call_id or ""))
-        is not None
-    ]
-
 
 def _agent_profile_context(
     definition: DefinitionDocument,

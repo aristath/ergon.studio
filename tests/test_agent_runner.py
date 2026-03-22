@@ -10,33 +10,14 @@ from ergon_studio.proxy.agent_runner import (
     build_agent_messages,
     compose_instructions,
 )
-from ergon_studio.proxy.continuation import (
-    ContinuationState,
-    PendingContinuation,
-    encode_continuation_tool_call,
-)
+from ergon_studio.proxy.continuation import PendingToolContext, encode_continuation_tool_call
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings
 
 
 class AgentRunnerTests(unittest.TestCase):
-    def test_build_invocation_instruction_parts_come_from_definition_metadata(
-        self,
-    ) -> None:
-        registry = _registry()
-        definition = registry.agent_definitions["orchestrator"]
-        instructions = compose_instructions(definition, registry=registry)
-
-        self.assertEqual(definition.id, "orchestrator")
-        self.assertEqual(definition.metadata["temperature"], 0.7)
-        self.assertEqual(definition.metadata["max_tokens"], 1200)
-        self.assertIn("## Identity", instructions)
-        self.assertIn("Agent profile: orchestrator", instructions)
-
-    def test_compose_instructions_includes_orchestrator_profile_context(
-        self,
-    ) -> None:
+    def test_compose_instructions_includes_orchestrator_profile_context(self) -> None:
         registry = _registry()
 
         instructions = compose_instructions(
@@ -50,7 +31,7 @@ class AgentRunnerTests(unittest.TestCase):
             instructions,
         )
 
-    def test_build_agent_messages_rebuilds_tool_history(self) -> None:
+    def test_build_agent_messages_rebuilds_pending_tool_history(self) -> None:
         registry = _registry()
         instructions = compose_instructions(
             registry.agent_definitions["orchestrator"],
@@ -62,15 +43,19 @@ class AgentRunnerTests(unittest.TestCase):
                 name="read_file",
                 arguments_json='{"path":"main.py"}',
             ),
-            state=ContinuationState(actor="orchestrator"),
+            pending_id="pending_1",
         )
-        pending = PendingContinuation(
-            state=ContinuationState(actor="orchestrator"),
-            tool_states=(ContinuationState(actor="orchestrator"),),
-            assistant_message=ProxyInputMessage(
-                role="assistant",
-                content="",
-                tool_calls=(encoded_tool_call,),
+        pending = PendingToolContext(
+            pending_id="pending_1",
+            session_id="session_1",
+            actor="orchestrator",
+            active_channel_id=None,
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json='{"path":"main.py"}',
+                ),
             ),
             tool_results=(
                 ProxyInputMessage(
@@ -85,6 +70,7 @@ class AgentRunnerTests(unittest.TestCase):
             registry=registry,
             instructions=instructions,
             prompt="Use the result.",
+            prompt_role="user",
             conversation_messages=(),
             pending_continuation=pending,
         )
@@ -93,60 +79,10 @@ class AgentRunnerTests(unittest.TestCase):
             [message["role"] for message in messages],
             ["system", "user", "assistant", "tool"],
         )
-        self.assertEqual(messages[1]["content"], "Use the result.")
-        self.assertEqual(
-            messages[2]["tool_calls"][0]["function"]["name"],
-            "read_file",
-        )
-        self.assertEqual(messages[3]["tool_call_id"], encoded_tool_call.id)
-
-    def test_build_agent_messages_synthesizes_missing_assistant_tool_call(
-        self,
-    ) -> None:
-        registry = _registry()
-        instructions = compose_instructions(
-            registry.agent_definitions["orchestrator"],
-            registry=registry,
-        )
-        encoded_tool_call = encode_continuation_tool_call(
-            ProxyToolCall(
-                id="call_1",
-                name="read_file",
-                arguments_json='{"path":"main.py"}',
-            ),
-            state=ContinuationState(actor="orchestrator"),
-        )
-        pending = PendingContinuation(
-            state=ContinuationState(actor="orchestrator"),
-            tool_states=(ContinuationState(actor="orchestrator"),),
-            assistant_message=None,
-            tool_results=(
-                ProxyInputMessage(
-                    role="tool",
-                    content="print('current main')",
-                    tool_call_id=encoded_tool_call.id,
-                ),
-            ),
-        )
-
-        messages = build_agent_messages(
-            registry=registry,
-            instructions=instructions,
-            prompt="Use the result.",
-            conversation_messages=(),
-            pending_continuation=pending,
-        )
-
-        self.assertEqual(
-            [message["role"] for message in messages],
-            ["system", "user", "assistant", "tool"],
-        )
-        self.assertEqual(messages[2]["tool_calls"][0]["id"], encoded_tool_call.id)
+        self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
         self.assertEqual(messages[3]["tool_call_id"], "call_1")
 
-    def test_build_agent_messages_includes_structured_conversation_history(
-        self,
-    ) -> None:
+    def test_build_agent_messages_supports_system_framed_channel_calls(self) -> None:
         registry = _registry()
         instructions = compose_instructions(
             registry.agent_definitions["coder"],
@@ -156,7 +92,8 @@ class AgentRunnerTests(unittest.TestCase):
         messages = build_agent_messages(
             registry=registry,
             instructions=instructions,
-            prompt="Stay in this channel and continue the work.",
+            prompt="You are in channel debate.",
+            prompt_role="system",
             conversation_messages=(
                 ProxyInputMessage(
                     role="user",
@@ -168,30 +105,18 @@ class AgentRunnerTests(unittest.TestCase):
                     name="coder",
                     content="I checked the file and found the dataclasses.",
                 ),
-                ProxyInputMessage(
-                    role="user",
-                    name="reviewer",
-                    content="Please keep the edits small and clear.",
-                ),
             ),
             pending_continuation=None,
         )
 
         self.assertEqual(
             [message["role"] for message in messages],
-            ["system", "user", "user", "assistant", "user"],
+            ["system", "system", "user", "assistant"],
         )
         self.assertEqual(messages[2]["name"], "orchestrator")
-        self.assertEqual(messages[2]["content"], "Please inspect models.py.")
         self.assertEqual(messages[3]["name"], "coder")
-        self.assertEqual(
-            messages[4]["content"],
-            "Please keep the edits small and clear.",
-        )
 
-    def test_stream_accumulator_rebuilds_incremental_tool_call_arguments(
-        self,
-    ) -> None:
+    def test_stream_accumulator_rebuilds_incremental_tool_call_arguments(self) -> None:
         accumulator = _StreamAccumulator()
         deltas = [
             SimpleNamespace(

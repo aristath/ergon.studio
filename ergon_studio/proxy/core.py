@@ -272,7 +272,12 @@ class ProxyOrchestrationCore:
         session_id: str,
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         if pending is not None and pending.items:
-            channel_id = pending.items[0].active_channel_id or channel_id
+            pending_channel_id = pending.items[0].active_channel_id
+            if pending_channel_id is None:
+                raise ValueError(
+                    "pending channel resume is missing an active channel id"
+                )
+            channel_id = pending_channel_id
         channel = channels.get(channel_id)
         if channel is None:
             state.finish_reason = "error"
@@ -382,6 +387,10 @@ class ProxyOrchestrationCore:
         orchestrator_items: list[PendingToolContext] = []
         for item in pending.items:
             if item.active_channel_id is None:
+                if item.actor != "orchestrator":
+                    raise ValueError(
+                        "pending channel resume is missing an active channel id"
+                    )
                 orchestrator_items.append(item)
                 continue
             channel_pending.setdefault(item.active_channel_id, []).append(item)

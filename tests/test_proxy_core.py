@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
+from ergon_studio.proxy.continuation import decode_pending_id_from_tool_call_id
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
@@ -346,6 +348,87 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         second_result = await second_stream.get_final_response()
 
         self.assertEqual(second_result.content, "Done")
+
+    async def test_stream_turn_rejects_pending_channel_without_channel_id(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "open_channel",
+                            participants=["coder"],
+                            message="Start",
+                            recipients=["coder"],
+                        ),
+                        "Opened",
+                    ],
+                    "coder": [
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "name": "read_file",
+                                    "arguments": '{"path":"main.py"}',
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ),
+        )
+        first_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Start"),),
+            tools=(_host_tool("read_file"),),
+        )
+
+        first_stream = core.stream_turn(first_request, session_id="session_1")
+        first_events = [event async for event in first_stream]
+        await first_stream.get_final_response()
+
+        tool_event = next(
+            event for event in first_events if isinstance(event, ProxyToolCallEvent)
+        )
+        pending_id = decode_pending_id_from_tool_call_id(tool_event.call.id)
+        assert pending_id is not None
+        core._pending_store._records[pending_id] = replace(  # type: ignore[attr-defined]
+            core._pending_store._records[pending_id],  # type: ignore[attr-defined]
+            active_channel_id=None,
+        )
+
+        second_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Start"),
+                ProxyInputMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=(tool_event.call,),
+                ),
+                ProxyInputMessage(
+                    role="tool",
+                    content="file contents",
+                    tool_call_id=tool_event.call.id,
+                ),
+            ),
+            tools=(_host_tool("read_file"),),
+        )
+
+        second_stream = core.stream_turn(second_request, session_id="session_1")
+        events = [event async for event in second_stream]
+        second_result = await second_stream.get_final_response()
+
+        self.assertEqual(second_result.finish_reason, "error")
+        self.assertIn(
+            "pending channel resume is missing an active channel id",
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
+            ),
+        )
 
 
 def _fake_registry() -> RuntimeRegistry:

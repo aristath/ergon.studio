@@ -366,28 +366,15 @@ class ProxyOrchestrationCore:
             tool_calls=state.tool_calls,
             output_items=state.output_items,
         )
-        self._persist_channels_for_result(
-            result=result,
-            session_id=session_id,
-            channels=channels,
-        )
+        if session_id is not None and result.finish_reason not in {
+            "error",
+            "tool_calls",
+        }:
+            if channels:
+                self._channel_sessions[session_id] = channels
+            else:
+                self._channel_sessions.pop(session_id, None)
         return result
-
-    def _persist_channels_for_result(
-        self,
-        *,
-        result: ProxyTurnResult,
-        session_id: str | None,
-        channels: dict[str, Channel],
-    ) -> None:
-        if session_id is None or result.finish_reason in {"error"}:
-            return
-        if result.finish_reason == "tool_calls":
-            return
-        if channels:
-            self._channel_sessions[session_id] = channels
-        else:
-            self._channel_sessions.pop(session_id, None)
 
     async def _resume_pending_groups(
         self,

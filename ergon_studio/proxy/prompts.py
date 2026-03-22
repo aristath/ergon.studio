@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from ergon_studio.proxy.channels import ChannelMessage
 from ergon_studio.proxy.models import ProxyTurnRequest
 from ergon_studio.proxy.transcript import summarize_conversation
 
@@ -8,7 +7,6 @@ from ergon_studio.proxy.transcript import summarize_conversation
 def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
-    worklog: tuple[str, ...] = (),
     open_channels: tuple[str, ...] = (),
 ) -> str:
     lines = [
@@ -40,8 +38,6 @@ def orchestrator_turn_prompt(
     ]
     if open_channels:
         lines.extend(["", "Open channels:", *open_channels])
-    if worklog:
-        lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
 
 
@@ -51,10 +47,6 @@ def channel_message_prompt(
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
-    user_request: str,
-    transcript_summary: str,
-    channel_transcript: tuple[ChannelMessage, ...],
-    prior_work: tuple[str, ...],
 ) -> str:
     lines = [
         f"You are {agent_id} in channel {channel_name}.",

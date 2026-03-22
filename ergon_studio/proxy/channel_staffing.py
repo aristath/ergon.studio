@@ -76,6 +76,37 @@ def participant_context(participant: StaffedParticipant) -> str | None:
     )
 
 
+def resolve_staffed_recipients(
+    *,
+    staffed_members: tuple[StaffedParticipant, ...],
+    recipients: tuple[str, ...],
+) -> tuple[StaffedParticipant, ...]:
+    if not recipients:
+        return ()
+
+    exact_remaining: dict[str, int] = {}
+    agent_remaining: dict[str, int] = {}
+    for recipient in recipients:
+        if "[" in recipient and recipient.endswith("]"):
+            exact_remaining[recipient] = exact_remaining.get(recipient, 0) + 1
+            continue
+        agent_remaining[recipient] = agent_remaining.get(recipient, 0) + 1
+
+    selected: list[StaffedParticipant] = []
+    for participant in staffed_members:
+        exact_count = exact_remaining.get(participant.label, 0)
+        if exact_count > 0:
+            selected.append(participant)
+            exact_remaining[participant.label] = exact_count - 1
+            continue
+        agent_count = agent_remaining.get(participant.agent_id, 0)
+        if agent_count <= 0:
+            continue
+        selected.append(participant)
+        agent_remaining[participant.agent_id] = agent_count - 1
+    return tuple(selected)
+
+
 def _participant_label(
     *,
     agent_id: str,

@@ -10,7 +10,10 @@ from ergon_studio.proxy.agent_runner import (
     build_agent_messages,
     compose_instructions,
 )
-from ergon_studio.proxy.continuation import PendingToolContext, encode_continuation_tool_call
+from ergon_studio.proxy.continuation import (
+    PendingToolContext,
+    encode_continuation_tool_call,
+)
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.upstream import UpstreamSettings

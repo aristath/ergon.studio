@@ -111,6 +111,50 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    async def test_execute_can_target_specific_staffed_label(self) -> None:
+        streamed_agents: list[str] = []
+        streamed_prompts: list[str] = []
+
+        def _stream_text_agent(**kwargs):
+            streamed_agents.append(kwargs["agent_id"])
+            streamed_prompts.append(kwargs["prompt"])
+            return _response_stream("Second reviewer only")
+
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Challenge it"),),
+        )
+        state = ProxyTurnState()
+        channel = OpenChannel(
+            channel_id="channel-1",
+            name="debate",
+            participants=("reviewer", "reviewer"),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            channel_message="Reviewer[2], take this one.",
+            recipients=("reviewer[2]",),
+            state=state,
+        )
+
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(streamed_agents, ["reviewer"])
+        self.assertEqual(len(streamed_prompts), 1)
+        self.assertIn("Current staffed instance: reviewer[2]", streamed_prompts[0])
+        self.assertEqual(
+            result,
+            (ChannelMessage("reviewer[2]", "Second reviewer only"),),
+        )
+
     async def test_execute_routes_participant_message_to_next_recipient(self) -> None:
         agent_order: list[str] = []
 

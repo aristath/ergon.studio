@@ -47,7 +47,9 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.content, "Hello world")
 
-    async def test_stream_turn_opens_channel_and_returns_participant_reply(self) -> None:
+    async def test_stream_turn_opens_channel_and_returns_participant_reply(
+        self,
+    ) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
@@ -259,7 +261,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             model="ergon",
             messages=(
                 ProxyInputMessage(role="user", content="Inspect it"),
-                ProxyInputMessage(role="assistant", content="", tool_calls=first_result.tool_calls),
+                ProxyInputMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=first_result.tool_calls,
+                ),
                 ProxyInputMessage(
                     role="tool",
                     content="file contents",

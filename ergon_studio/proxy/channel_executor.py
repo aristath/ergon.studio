@@ -10,6 +10,7 @@ from ergon_studio.proxy.channel_staffing import (
     StaffedParticipant,
     expand_staffed_participants,
     participant_context,
+    resolve_staffed_recipients,
 )
 from ergon_studio.proxy.channels import ChannelMessage, OpenChannel
 from ergon_studio.proxy.continuation import (
@@ -19,6 +20,7 @@ from ergon_studio.proxy.continuation import (
     pending_for_actor,
 )
 from ergon_studio.proxy.models import (
+    ProxyFunctionTool,
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
@@ -32,7 +34,6 @@ from ergon_studio.proxy.orchestrator_tools import (
 )
 from ergon_studio.proxy.pending_store import PendingSeed
 from ergon_studio.proxy.prompts import channel_message_prompt
-from ergon_studio.proxy.transcript import summarize_conversation
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
@@ -69,10 +70,8 @@ class ProxyChannelExecutor:
         recipients: tuple[str, ...] = (),
         state: ProxyTurnState,
         pending: PendingContinuation | None = None,
-        recent_notes: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         all_staffed_members = expand_staffed_participants(channel.participants)
-        user_request = request.latest_user_text() or ""
         participant_tools = build_participant_internal_tools(self._registry)
         channel_messages: list[ChannelMessage] = []
 
@@ -100,9 +99,7 @@ class ProxyChannelExecutor:
                                 staffed_members=all_staffed_members,
                                 actor=actor,
                             ),
-                            user_request=user_request,
                             channel_transcript=tuple(current_transcript),
-                            recent_notes=recent_notes,
                             participant_tools=participant_tools,
                             pending=_pending_for_actor_or_error(
                                 pending=pending,
@@ -123,8 +120,8 @@ class ProxyChannelExecutor:
                     session_id=session_id,
                     registry=self._registry,
                 )
-                for event in emitted:
-                    yield event
+                for reasoning_event in emitted:
+                    yield reasoning_event
                 deliveries.extend(new_deliveries)
                 pending_tool_events.extend(new_tool_events)
 
@@ -153,9 +150,7 @@ class ProxyChannelExecutor:
                             request=request,
                             channel_name=channel.name,
                             participant=participant,
-                            user_request=user_request,
                             channel_transcript=tuple(current_transcript),
-                            recent_notes=recent_notes,
                             participant_tools=participant_tools,
                         )
                         for participant in targets
@@ -172,8 +167,8 @@ class ProxyChannelExecutor:
                     session_id=session_id,
                     registry=self._registry,
                 )
-                for event in emitted:
-                    yield event
+                for reasoning_event in emitted:
+                    yield reasoning_event
                 deliveries.extend(new_deliveries)
                 pending_tool_events.extend(new_tool_events)
 
@@ -184,8 +179,8 @@ class ProxyChannelExecutor:
                 ]
                 state.tool_calls = tuple(event.call for event in ordered)
                 state.finish_reason = "tool_calls"
-                for event in ordered:
-                    yield event
+                for tool_event in ordered:
+                    yield tool_event
 
         return ResponseStream(
             _events(),
@@ -198,10 +193,8 @@ class ProxyChannelExecutor:
         request: ProxyTurnRequest,
         channel_name: str,
         participant: StaffedParticipant,
-        user_request: str,
         channel_transcript: tuple[ChannelMessage, ...],
-        recent_notes: tuple[str, ...],
-        participant_tools: tuple,
+        participant_tools: tuple[ProxyFunctionTool, ...],
         pending: PendingToolContext | None = None,
     ) -> _ParticipantResult:
         prompt = channel_message_prompt(
@@ -211,10 +204,6 @@ class ProxyChannelExecutor:
                 participant.label if participant.label != participant.agent_id else None
             ),
             role_instance_context=participant_context(participant),
-            user_request=user_request,
-            transcript_summary=summarize_conversation(request.messages),
-            channel_transcript=channel_transcript,
-            prior_work=recent_notes,
         )
         text = ""
         stream = self._stream_text_agent(
@@ -270,19 +259,10 @@ def _targeted_participants(
     staffed_members: tuple[StaffedParticipant, ...],
     recipients: tuple[str, ...],
 ) -> tuple[StaffedParticipant, ...]:
-    if not recipients:
-        return ()
-    remaining: dict[str, int] = {}
-    for recipient in recipients:
-        remaining[recipient] = remaining.get(recipient, 0) + 1
-    selected: list[StaffedParticipant] = []
-    for participant in staffed_members:
-        remaining_count = remaining.get(participant.agent_id, 0)
-        if remaining_count <= 0:
-            continue
-        selected.append(participant)
-        remaining[participant.agent_id] = remaining_count - 1
-    return tuple(selected)
+    return resolve_staffed_recipients(
+        staffed_members=staffed_members,
+        recipients=recipients,
+    )
 
 
 def _channel_conversation_messages(
@@ -322,7 +302,11 @@ def _process_participant_results(
     emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     session_id: str,
     registry: RuntimeRegistry,
-) -> tuple[list[ProxyReasoningDeltaEvent], list[_ChannelDelivery], list[ProxyToolCallEvent]]:
+) -> tuple[
+    list[ProxyReasoningDeltaEvent],
+    list[_ChannelDelivery],
+    list[ProxyToolCallEvent],
+]:
     reasoning_events: list[ProxyReasoningDeltaEvent] = []
     deliveries: list[_ChannelDelivery] = []
     tool_events: list[ProxyToolCallEvent] = []

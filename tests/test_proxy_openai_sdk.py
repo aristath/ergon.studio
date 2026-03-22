@@ -252,7 +252,13 @@ class _FakeCore:
             },
         )()
 
-    def stream_turn(self, request, *, created_at: int | None = None):
+    def stream_turn(
+        self,
+        request,
+        *,
+        created_at: int | None = None,
+        session_id: str | None = None,
+    ):
         events = list(self._events)
         content = "".join(
             event.delta for event in events if isinstance(event, ProxyContentDeltaEvent)

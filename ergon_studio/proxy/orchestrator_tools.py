@@ -63,10 +63,12 @@ def build_orchestrator_internal_tools(
                     "message": {"type": "string"},
                     "recipients": {
                         "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": list(specialist_ids),
-                        },
+                        "items": {"type": "string"},
+                        "description": (
+                            "Explicit teammates to address. Use role ids like "
+                            "'coder' or staffed labels like 'coder[2]' when a "
+                            "channel has repeated instances."
+                        ),
                     },
                 },
                 "required": ["message", "recipients"],
@@ -79,7 +81,6 @@ def build_orchestrator_internal_tools(
                 "Recipients decides who you are actively addressing."
             ),
             parameters=_message_channel_parameters(
-                specialist_ids=specialist_ids,
                 include_channel=True,
             ),
         ),
@@ -100,11 +101,6 @@ def build_orchestrator_internal_tools(
 def build_participant_internal_tools(
     registry: RuntimeRegistry,
 ) -> tuple[ProxyFunctionTool, ...]:
-    specialist_ids = tuple(
-        agent_id
-        for agent_id in sorted(registry.agent_definitions)
-        if agent_id != "orchestrator"
-    )
     return (
         ProxyFunctionTool(
             name="message_channel",
@@ -113,7 +109,6 @@ def build_participant_internal_tools(
                 "target the teammates you want to answer next."
             ),
             parameters=_message_channel_parameters(
-                specialist_ids=specialist_ids,
                 include_channel=False,
             ),
         ),
@@ -135,9 +130,8 @@ def parse_open_channel_action(
             registry=registry,
         ),
         message=_required_text(payload.get("message"), field="message"),
-        recipients=_required_staffing_list(
+        recipients=_required_recipient_list(
             payload.get("recipients"),
-            registry=registry,
             field="recipients",
         ),
     )
@@ -159,9 +153,8 @@ def parse_message_channel_action(
             else ""
         ),
         message=_required_text(payload.get("message"), field="message"),
-        recipients=_required_staffing_list(
+        recipients=_required_recipient_list(
             payload.get("recipients"),
-            registry=registry,
             field="recipients",
         ),
     )
@@ -239,17 +232,18 @@ def _normalize_staffing_list(
 
 def _message_channel_parameters(
     *,
-    specialist_ids: tuple[str, ...],
     include_channel: bool,
 ) -> dict[str, object]:
     properties: dict[str, object] = {
         "message": {"type": "string"},
         "recipients": {
             "type": "array",
-            "items": {
-                "type": "string",
-                "enum": list(specialist_ids),
-            },
+            "items": {"type": "string"},
+            "description": (
+                "Explicit teammates to address. Use role ids like 'coder' or "
+                "staffed labels like 'coder[2]' when repeated instances are on "
+                "the channel."
+            ),
         },
     }
     required = ["message", "recipients"]
@@ -263,13 +257,21 @@ def _message_channel_parameters(
     }
 
 
-def _required_staffing_list(
+def _required_recipient_list(
     value: object,
     *,
-    registry: RuntimeRegistry,
     field: str,
 ) -> tuple[str, ...]:
-    participants = _normalize_staffing_list(value, registry=registry)
-    if not participants:
-        raise ValueError(f"{field} must name at least one specialist")
-    return participants
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{field} must name at least one teammate")
+    recipients: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field} entries must be strings")
+        candidate = item.strip()
+        if not candidate or candidate == "orchestrator":
+            raise ValueError(
+                f"{field} entries must be non-empty teammate identifiers"
+            )
+        recipients.append(candidate)
+    return tuple(recipients)

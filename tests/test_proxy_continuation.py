@@ -146,11 +146,23 @@ class ProxyContinuationTests(unittest.TestCase):
         store = PendingStore()
         first = store.create(
             seed=PendingSeed(session_id="session_a", actor="coder"),
-            tool_calls=(ProxyToolCall(id="call_a", name="read_file", arguments_json="{}"),),
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_a",
+                    name="read_file",
+                    arguments_json="{}",
+                ),
+            ),
         )
         second = store.create(
             seed=PendingSeed(session_id="session_b", actor="reviewer"),
-            tool_calls=(ProxyToolCall(id="call_b", name="glob", arguments_json="{}"),),
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_b",
+                    name="glob",
+                    arguments_json="{}",
+                ),
+            ),
         )
         wrapped_first = encode_continuation_tool_call(
             first.tool_calls[0],
@@ -161,7 +173,11 @@ class ProxyContinuationTests(unittest.TestCase):
             pending_id=second.pending_id,
         )
         messages = (
-            ProxyInputMessage(role="assistant", content="", tool_calls=(wrapped_first, wrapped_second)),
+            ProxyInputMessage(
+                role="assistant",
+                content="",
+                tool_calls=(wrapped_first, wrapped_second),
+            ),
             ProxyInputMessage(role="tool", content="a", tool_call_id=wrapped_first.id),
             ProxyInputMessage(role="tool", content="b", tool_call_id=wrapped_second.id),
         )

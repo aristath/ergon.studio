@@ -6,10 +6,14 @@ from uuid import uuid4
 
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
+from ergon_studio.proxy.channel_staffing import (
+    expand_staffed_participants,
+    resolve_staffed_recipients,
+)
 from ergon_studio.proxy.channels import (
     ChannelMessage,
-    ChannelStore,
     ChannelSession,
+    ChannelStore,
     OpenChannel,
     describe_open_channels,
 )
@@ -17,11 +21,11 @@ from ergon_studio.proxy.continuation import (
     PendingContinuation,
     PendingToolContext,
     latest_pending_continuation,
+    pending_actors,
 )
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
-    ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
     ProxyToolCallEvent,
@@ -102,13 +106,11 @@ class ProxyOrchestrationCore:
                 else:
                     session = session or self._new_channel_session(session_id)
                     channels = session.channels
-                worklog: list[str] = []
                 next_channel_number = _next_channel_number(channels)
                 if pending is not None:
                     async for event in self._resume_pending_groups(
                         request=request,
                         state=state,
-                        worklog=worklog,
                         channels=channels,
                         next_channel_number=next_channel_number,
                         session_id=session.session_id,
@@ -122,7 +124,6 @@ class ProxyOrchestrationCore:
                 async for event in self._run_orchestrator_loop(
                     request=request,
                     state=state,
-                    worklog=worklog,
                     channels=channels,
                     next_channel_number=next_channel_number,
                     session_id=session.session_id,
@@ -153,7 +154,6 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
-        worklog: list[str],
         channels: dict[str, OpenChannel],
         next_channel_number: int,
         session_id: str,
@@ -166,7 +166,6 @@ class ProxyOrchestrationCore:
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
-                    worklog=tuple(worklog),
                     open_channels=describe_open_channels(channels),
                 ),
                 model_id_override=request.model,
@@ -211,16 +210,13 @@ class ProxyOrchestrationCore:
                             message=open_action.message,
                             recipients=open_action.recipients,
                             state=state,
-                            worklog=tuple(worklog),
                             session_id=session_id,
                         )
                         async for internal_event in channel_stream:
                             yield internal_event
                         if state.finish_reason == "tool_calls":
                             return
-                        result = await channel_stream.get_final_response()
-                        if result:
-                            worklog.extend(message.render() for message in result)
+                        await channel_stream.get_final_response()
                         continue
                     if tool_call.name == "message_channel":
                         message_action = parse_message_channel_action(
@@ -234,16 +230,13 @@ class ProxyOrchestrationCore:
                             message=message_action.message,
                             recipients=message_action.recipients,
                             state=state,
-                            worklog=tuple(worklog),
                             session_id=session_id,
                         )
                         async for internal_event in channel_stream:
                             yield internal_event
                         if state.finish_reason == "tool_calls":
                             return
-                        result = await channel_stream.get_final_response()
-                        if result:
-                            worklog.extend(message.render() for message in result)
+                        await channel_stream.get_final_response()
                         continue
                     if tool_call.name == "close_channel":
                         close_action = parse_close_channel_action(tool_call)
@@ -256,10 +249,6 @@ class ProxyOrchestrationCore:
                         )
                         state.append_reasoning(notice)
                         yield ProxyReasoningDeltaEvent(notice)
-                        if closed.transcript:
-                            worklog.extend(
-                                message.render() for message in closed.transcript[-6:]
-                            )
                         continue
                     raise ValueError(f"unsupported internal action: {tool_call.name}")
                 if host_tool_calls:
@@ -295,7 +284,6 @@ class ProxyOrchestrationCore:
         recipients: tuple[str, ...] = (),
         state: ProxyTurnState,
         pending: PendingContinuation | None = None,
-        worklog: tuple[str, ...] = (),
         session_id: str,
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         if pending is not None and pending.items:
@@ -332,7 +320,6 @@ class ProxyOrchestrationCore:
             recipients=recipients,
             state=state,
             pending=pending,
-            recent_notes=worklog,
         )
         channel_result: tuple[ChannelMessage, ...] = ()
 
@@ -414,12 +401,15 @@ class ProxyOrchestrationCore:
         session: ChannelSession | None,
         pending: PendingContinuation,
     ) -> ChannelSession:
+        active_session: ChannelSession
         if session is not None and session.session_id == pending.session_id:
             active_session = session
         else:
-            active_session = self._channel_store.get(pending.session_id)
-            if active_session is None:
+            stored_session = self._channel_store.get(pending.session_id)
+            if stored_session is None:
                 active_session = self._channel_store.ensure(pending.session_id)
+            else:
+                active_session = stored_session
         active_session.channels = active_session.channels
         self._channel_store.put(active_session)
         return active_session
@@ -429,14 +419,13 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
-        worklog: list[str],
         channels: dict[str, OpenChannel],
         next_channel_number: int,
         session_id: str,
         pending: PendingContinuation,
     ) -> AsyncIterator[ProxyEvent]:
-        channel_pending: dict[str, list] = {}
-        orchestrator_items = []
+        channel_pending: dict[str, list[PendingToolContext]] = {}
+        orchestrator_items: list[PendingToolContext] = []
         for item in pending.items:
             if item.active_channel_id is None:
                 orchestrator_items.append(item)
@@ -453,22 +442,17 @@ class ProxyOrchestrationCore:
                     items=tuple(items),
                 ),
                 state=state,
-                worklog=tuple(worklog),
                 session_id=session_id,
             )
             async for event in stream:
                 yield event
             if state.finish_reason == "tool_calls":
                 return
-            worklog.extend(
-                message.render()
-                for message in await stream.get_final_response()
-            )
+            await stream.get_final_response()
 
         async for event in self._run_orchestrator_loop(
             request=request,
             state=state,
-            worklog=worklog,
             channels=channels,
             next_channel_number=next_channel_number,
             session_id=session_id,
@@ -547,17 +531,21 @@ def _validate_channel_recipients(
     channel: OpenChannel,
     recipients: tuple[str, ...],
 ) -> None:
-    available: dict[str, int] = {}
-    for participant in channel.participants:
-        available[participant] = available.get(participant, 0) + 1
-    requested: dict[str, int] = {}
-    for recipient in recipients:
-        requested[recipient] = requested.get(recipient, 0) + 1
-    invalid = [
-        recipient
-        for recipient, count in requested.items()
-        if count > available.get(recipient, 0)
-    ]
+    staffed_members = expand_staffed_participants(channel.participants)
+    resolved = resolve_staffed_recipients(
+        staffed_members=staffed_members,
+        recipients=recipients,
+    )
+    if len(resolved) == len(recipients):
+        return
+
+    available: set[str] = set()
+    for participant in staffed_members:
+        available.add(participant.agent_id)
+        available.add(participant.label)
+    invalid = [recipient for recipient in recipients if recipient not in available]
+    if not invalid:
+        invalid = list(recipients)
     if invalid:
         raise ValueError(
             "channel recipients are not staffed in this channel: "

@@ -15,7 +15,6 @@ from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
     ProxyOutputItemRef,
-    ProxyReasoningDeltaEvent,
     ProxyToolCall,
     ProxyToolCallEvent,
 )
@@ -250,7 +249,9 @@ class _FakeCore:
             content="Done.",
             reasoning="",
             tool_calls=tuple(
-                event.call for event in self.events if isinstance(event, ProxyToolCallEvent)
+                event.call
+                for event in self.events
+                if isinstance(event, ProxyToolCallEvent)
             ),
             output_items=(ProxyOutputItemRef(kind="content"),),
         )

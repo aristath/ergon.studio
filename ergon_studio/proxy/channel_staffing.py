@@ -15,15 +15,15 @@ class StaffedParticipant:
 def expand_staffed_participants(
     base_participants: tuple[str, ...],
 ) -> tuple[StaffedParticipant, ...]:
-    base_counts = _participant_counts(base_participants)
+    base_counts = Counter(base_participants)
     staffed_participants: list[StaffedParticipant] = []
-    emitted_counts: dict[str, int] = {}
+    emitted_counts: Counter[str] = Counter()
     for agent_id in base_participants:
         total_instances = base_counts.get(agent_id, 0)
         if total_instances <= 0:
             continue
-        instance_index = emitted_counts.get(agent_id, 0) + 1
-        emitted_counts[agent_id] = instance_index
+        emitted_counts[agent_id] += 1
+        instance_index = emitted_counts[agent_id]
         if instance_index > total_instances:
             continue
         staffed_participants.append(
@@ -146,12 +146,3 @@ def _participant_label(
     if total_instances <= 1:
         return agent_id
     return f"{agent_id}[{instance_index}]"
-
-
-def _participant_counts(
-    participants: tuple[str, ...],
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for agent_id in participants:
-        counts[agent_id] = counts.get(agent_id, 0) + 1
-    return counts

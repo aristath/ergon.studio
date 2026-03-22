@@ -190,12 +190,24 @@ class ProxyOrchestrationCore:
                             except ValueError:
                                 continue
                         channel_id = f"channel-{highest_channel_number + 1}"
-                        channel = _open_channel(
-                            registry=self.registry,
-                            channel_id=channel_id,
-                            preset=open_action.preset,
-                            participants=open_action.participants,
-                        )
+                        if open_action.preset is not None:
+                            channel = Channel(
+                                channel_id=channel_id,
+                                name=open_action.preset,
+                                participants=self.registry.channel_presets[
+                                    open_action.preset
+                                ],
+                            )
+                        elif open_action.participants:
+                            channel = Channel(
+                                channel_id=channel_id,
+                                name="ad hoc",
+                                participants=open_action.participants,
+                            )
+                        else:
+                            raise ValueError(
+                                "open_channel needs a preset or participants target"
+                            )
                         channels[channel.channel_id] = channel
                         channel_stream = self._message_channel(
                             request=request,
@@ -424,25 +436,3 @@ class ProxyOrchestrationCore:
             ),
         ):
             yield event
-
-
-def _open_channel(
-    *,
-    registry: RuntimeRegistry,
-    channel_id: str,
-    preset: str | None,
-    participants: tuple[str, ...],
-) -> Channel:
-    if preset is not None:
-        return Channel(
-            channel_id=channel_id,
-            name=preset,
-            participants=registry.channel_presets[preset],
-        )
-    if participants:
-        return Channel(
-            channel_id=channel_id,
-            name="ad hoc",
-            participants=participants,
-        )
-    raise ValueError("open_channel needs a preset or participants target")

@@ -298,15 +298,7 @@ class ProxyOrchestrationCore:
             channel_id = pending_channel_id
         channel = channels.get(channel_id)
         if channel is None:
-            state.finish_reason = "error"
-            error_text = f"unknown channel: {channel_id}"
-            state.content = error_text
-            async def _error_events() -> AsyncIterator[ProxyEvent]:
-                yield ProxyContentDeltaEvent(error_text)
-            return ResponseStream(
-                _error_events(),
-                finalizer=lambda: (),
-            )
+            raise ValueError(f"unknown channel: {channel_id}")
         if pending is None:
             require_staffed_recipients(
                 staffed_members=expand_staffed_participants(channel.participants),

@@ -14,6 +14,11 @@ from ergon_studio.app_config import (
 from ergon_studio.app_config import (
     definitions_dir as default_definitions_dir,
 )
+from ergon_studio.debug_log import (
+    configure_debug_logging,
+    default_debug_log_path,
+    log_event,
+)
 from ergon_studio.proxy.server import serve_proxy
 from ergon_studio.proxy_runtime import prepare_proxy_runtime
 from ergon_studio.workspace import ensure_workspace
@@ -44,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--upstream-api-key", type=str, default=None)
     parser.add_argument("--instruction-role", type=str, default=None)
     parser.add_argument("--disable-tool-calling", action="store_true")
+    parser.add_argument("--log", action="store_true")
     return parser
 
 
@@ -64,6 +70,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        if args.log:
+            configure_debug_logging(default_debug_log_path())
+        log_event(
+            "cli_invocation",
+            serve=args.serve,
+            app_dir=args.app_dir,
+            definitions_dir=args.definitions_dir,
+            host=args.host,
+            port=args.port,
+            upstream_base_url=args.upstream_base_url,
+            upstream_api_key_present=bool(args.upstream_api_key),
+            instruction_role=args.instruction_role,
+            disable_tool_calling=args.disable_tool_calling,
+            log_enabled=args.log,
+        )
         app_dir = args.app_dir or default_app_dir()
         if args.serve:
             config = _resolve_config(
@@ -76,6 +97,12 @@ def main(argv: list[str] | None = None) -> int:
                 disable_tool_calling=args.disable_tool_calling,
             )
             definitions_dir = args.definitions_dir or default_definitions_dir(app_dir)
+            log_event(
+                "cli_mode",
+                mode="serve",
+                app_dir=app_dir,
+                definitions_dir=definitions_dir,
+            )
             return run_proxy_server(definitions_dir=definitions_dir, config=config)
 
         workspace = ensure_workspace(app_dir)
@@ -89,12 +116,19 @@ def main(argv: list[str] | None = None) -> int:
             disable_tool_calling=args.disable_tool_calling,
         )
         definitions_dir = args.definitions_dir or workspace.definitions_dir
+        log_event(
+            "cli_mode",
+            mode="config_tui",
+            app_dir=workspace.app_dir,
+            definitions_dir=definitions_dir,
+        )
         return _run_config_tui(
             app_dir=workspace.app_dir,
             definitions_dir=definitions_dir,
             initial_config=config,
         )
     except ValueError as exc:
+        log_event("cli_error", error=str(exc))
         parser.exit(2, f"error: {exc}\n")
 
 

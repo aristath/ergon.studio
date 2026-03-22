@@ -6,6 +6,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from ergon_studio.debug_log import log_event
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.continuation import (
     PendingToolContext,
@@ -95,6 +96,7 @@ class ProxyAgentRunner:
             parallel_tool_calls=parallel_tool_calls,
             pending_continuation=pending_continuation,
         )
+        log_event("agent_invocation", invocation=invocation)
         return self._invoker(invocation)
 
     def emit_tool_call_events(
@@ -141,6 +143,14 @@ class ProxyAgentRunner:
         ]
         if not events:
             return []
+        log_event(
+            "host_tool_calls_emitted",
+            session_id=session_id,
+            actor=actor,
+            active_channel_id=active_channel_id,
+            pending_id=pending_record.pending_id,
+            tool_calls=encoded_calls,
+        )
         state.tool_calls = encoded_calls
         state.finish_reason = "tool_calls"
         for call in encoded_calls:
@@ -279,17 +289,36 @@ class ProxyAgentRunner:
                     content = getattr(delta, "content", None)
                     if isinstance(content, str) and content:
                         accumulator.text += content
+                        log_event(
+                            "agent_delta",
+                            agent_id=invocation.agent_id,
+                            delta=content,
+                        )
                         yield content
                     tool_deltas = getattr(delta, "tool_calls", None)
                     if isinstance(tool_deltas, list):
                         accumulator.append_tool_deltas(tool_deltas)
+                        log_event(
+                            "agent_tool_delta",
+                            agent_id=invocation.agent_id,
+                            tool_delta_count=len(tool_deltas),
+                        )
+
+        def _finalize() -> AgentRunResult:
+            result = AgentRunResult(
+                text=accumulator.text,
+                tool_calls=accumulator.tool_calls(),
+            )
+            log_event(
+                "agent_result",
+                agent_id=invocation.agent_id,
+                result=result,
+            )
+            return result
 
         return ResponseStream(
             _events(),
-            finalizer=lambda: AgentRunResult(
-                text=accumulator.text,
-                tool_calls=accumulator.tool_calls(),
-            ),
+            finalizer=_finalize,
         )
 def compose_instructions(
     definition: DefinitionDocument,

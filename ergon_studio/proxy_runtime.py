@@ -8,6 +8,7 @@ from ergon_studio.app_config import (
     validate_proxy_host,
     validate_proxy_port,
 )
+from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.registry import RuntimeRegistry, load_registry
 from ergon_studio.upstream import (
@@ -43,6 +44,17 @@ def prepare_proxy_runtime(
     if verify_upstream:
         ensure_upstream_reachable(upstream)
     registry = load_registry(definitions_dir, upstream=upstream)
+    log_event(
+        "proxy_runtime_prepared",
+        definitions_dir=definitions_dir,
+        host=host,
+        port=port,
+        upstream_base_url=upstream_base_url,
+        instruction_role=upstream.instruction_role,
+        tool_calling=upstream.tool_calling,
+        agent_count=len(registry.agent_definitions),
+        channel_preset_count=len(registry.channel_presets),
+    )
     return PreparedProxyRuntime(
         host=host,
         port=port,

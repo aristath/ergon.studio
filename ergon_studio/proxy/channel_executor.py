@@ -4,6 +4,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
+from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_staffing import (
     StaffedParticipant,
@@ -65,6 +66,15 @@ class ProxyChannelExecutor:
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         all_staffed_members = expand_staffed_participants(channel.participants)
         channel_messages: list[ChannelMessage] = []
+        log_event(
+            "channel_execute_start",
+            session_id=session_id,
+            channel_id=channel.channel_id,
+            channel_name=channel.name,
+            channel_message=channel_message,
+            recipients=recipients,
+            pending_actors=tuple(item.actor for item in pending) if pending else (),
+        )
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             current_transcript = list(channel.transcript)
@@ -104,6 +114,7 @@ class ProxyChannelExecutor:
                         )
                     result = await self._run_channel_participant(
                         request=request,
+                        session_id=session_id,
                         channel_name=channel.name,
                         participant=participant,
                         channel_transcript=tuple(current_transcript),
@@ -133,6 +144,15 @@ class ProxyChannelExecutor:
                     author=delivery.author,
                     content=delivery.message,
                 )
+                log_event(
+                    "channel_delivery",
+                    session_id=session_id,
+                    channel_id=channel.channel_id,
+                    channel_name=channel.name,
+                    author=delivery.author,
+                    message=delivery.message,
+                    recipients=delivery.recipients,
+                )
                 current_transcript.append(delivery_line)
                 if delivery.author != "orchestrator":
                     channel_messages.append(delivery_line)
@@ -147,6 +167,7 @@ class ProxyChannelExecutor:
                 for participant in targets:
                     result = await self._run_channel_participant(
                         request=request,
+                        session_id=session_id,
                         channel_name=channel.name,
                         participant=participant,
                         channel_transcript=tuple(current_transcript),
@@ -188,11 +209,19 @@ class ProxyChannelExecutor:
         self,
         *,
         request: ProxyTurnRequest,
+        session_id: str,
         channel_name: str,
         participant: StaffedParticipant,
         channel_transcript: tuple[ChannelMessage, ...],
         pending: PendingToolContext | None = None,
     ) -> AgentRunResult:
+        log_event(
+            "participant_run_start",
+            session_id=session_id,
+            channel_name=channel_name,
+            participant=participant.label,
+            pending=bool(pending),
+        )
         prompt = channel_message_prompt(
             channel_name=channel_name,
             agent_id=participant.agent_id,
@@ -218,7 +247,15 @@ class ProxyChannelExecutor:
         )
         async for _ in stream:
             pass
-        return await stream.get_final_response()
+        response = await stream.get_final_response()
+        log_event(
+            "participant_run_result",
+            session_id=session_id,
+            channel_name=channel_name,
+            participant=participant.label,
+            response=response,
+        )
+        return response
 
 
 def _channel_conversation_messages(
@@ -286,6 +323,15 @@ def _process_participant_results(
                     recipients=action.recipients,
                 )
             )
+            log_event(
+                "participant_message_channel",
+                session_id=session_id,
+                channel_id=channel.channel_id,
+                channel_name=channel.name,
+                participant=participant.label,
+                message=action.message,
+                recipients=action.recipients,
+            )
             continue
         host_tool_calls.append(tool_call)
 
@@ -298,12 +344,28 @@ def _process_participant_results(
                 author=participant.label,
                 content=text,
             )
+            log_event(
+                "channel_message",
+                session_id=session_id,
+                channel_id=channel.channel_id,
+                channel_name=channel.name,
+                author=participant.label,
+                content=text,
+            )
             channel_messages.append(line)
             current_transcript.append(line)
             state.append_reasoning(line.render())
             reasoning_events.append(ProxyReasoningDeltaEvent(line.render()))
 
     if host_tool_calls:
+        log_event(
+            "participant_host_tool_calls",
+            session_id=session_id,
+            channel_id=channel.channel_id,
+            channel_name=channel.name,
+            participant=participant.label,
+            tool_calls=host_tool_calls,
+        )
         tool_events.extend(
             emit_tool_calls(
                 tool_calls=tuple(host_tool_calls),

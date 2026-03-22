@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
 from ergon_studio.proxy.channel_staffing import (
@@ -83,6 +84,11 @@ class ProxyOrchestrationCore:
             nonlocal active_session_id
             nonlocal channels
             try:
+                log_event(
+                    "turn_start",
+                    requested_session_id=session_id,
+                    request=request,
+                )
                 pending = latest_pending_continuation(
                     request.messages,
                     pending_store=self._pending_store,
@@ -90,9 +96,20 @@ class ProxyOrchestrationCore:
                 if pending is not None:
                     active_session_id = pending[0].session_id
                     channels = self._channel_sessions.get(active_session_id) or {}
+                    log_event(
+                        "turn_resume_pending",
+                        session_id=active_session_id,
+                        pending=pending,
+                        open_channels=tuple(channels),
+                    )
                 else:
                     active_session_id = session_id or f"session_{uuid4().hex}"
                     channels = self._channel_sessions.get(active_session_id) or {}
+                    log_event(
+                        "turn_session_ready",
+                        session_id=active_session_id,
+                        open_channels=tuple(channels),
+                    )
                 if pending is not None:
                     async for event in self._resume_pending_groups(
                         request=request,
@@ -114,10 +131,22 @@ class ProxyOrchestrationCore:
                 ):
                     yield event
             except ValueError as exc:
+                log_event(
+                    "turn_error",
+                    session_id=active_session_id,
+                    error=str(exc),
+                    error_type="ValueError",
+                )
                 state.finish_reason = "error"
                 state.content = str(exc)
                 yield ProxyContentDeltaEvent(state.content)
             except Exception as exc:
+                log_event(
+                    "turn_error",
+                    session_id=active_session_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                    error_type=type(exc).__name__,
+                )
                 state.finish_reason = "error"
                 state.content = f"{type(exc).__name__}: {exc}"
                 yield ProxyContentDeltaEvent(state.content)
@@ -143,6 +172,12 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
         while True:
+            log_event(
+                "orchestrator_run_start",
+                session_id=session_id,
+                pending=bool(pending),
+                open_channels=describe_open_channels(channels),
+            )
             internal_tools = build_orchestrator_internal_tools(self.registry)
             orchestrator_stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
@@ -159,10 +194,20 @@ class ProxyOrchestrationCore:
                 pending_continuation=pending,
             )
             async for delta in orchestrator_stream:
+                log_event(
+                    "orchestrator_delta",
+                    session_id=session_id,
+                    delta=delta,
+                )
                 state.append_content(delta)
                 yield ProxyContentDeltaEvent(delta)
             pending = None
             response = await orchestrator_stream.get_final_response()
+            log_event(
+                "orchestrator_run_result",
+                session_id=session_id,
+                response=response,
+            )
             processed_internal_action = False
             if response.tool_calls:
                 host_tool_calls: list[ProxyToolCall] = []
@@ -209,6 +254,13 @@ class ProxyOrchestrationCore:
                                 "open_channel needs a preset or participants target"
                             )
                         channels[channel.channel_id] = channel
+                        log_event(
+                            "open_channel_action",
+                            session_id=session_id,
+                            channel=channel,
+                            message=open_action.message,
+                            recipients=open_action.recipients,
+                        )
                         channel_stream = self._message_channel(
                             request=request,
                             channels=channels,
@@ -227,6 +279,13 @@ class ProxyOrchestrationCore:
                     if tool_call.name == "message_channel":
                         message_action = parse_message_channel_action(
                             tool_call,
+                        )
+                        log_event(
+                            "message_channel_action",
+                            session_id=session_id,
+                            channel=message_action.channel,
+                            message=message_action.message,
+                            recipients=message_action.recipients,
                         )
                         channel_stream = self._message_channel(
                             request=request,
@@ -251,6 +310,12 @@ class ProxyOrchestrationCore:
                         notice = (
                             f"Orchestrator: closing channel {closed.channel_id} "
                             f"({closed.name}).\n"
+                        )
+                        log_event(
+                            "close_channel_action",
+                            session_id=session_id,
+                            channel_id=closed.channel_id,
+                            channel_name=closed.name,
                         )
                         state.append_reasoning(notice)
                         yield ProxyReasoningDeltaEvent(notice)
@@ -336,6 +401,15 @@ class ProxyOrchestrationCore:
             pending=pending,
         )
         channel_result: tuple[ChannelMessage, ...] = ()
+        log_event(
+            "channel_stream_start",
+            session_id=session_id,
+            channel_id=channel.channel_id,
+            channel_name=channel.name,
+            message=message,
+            recipients=recipients,
+            pending_actors=tuple(item.actor for item in pending) if pending else (),
+        )
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             nonlocal channel_result
@@ -350,6 +424,14 @@ class ProxyOrchestrationCore:
                     ChannelMessage(author="orchestrator", content=message)
                 )
             channel.transcript.extend(channel_result)
+            log_event(
+                "channel_stream_complete",
+                session_id=session_id,
+                channel_id=channel.channel_id,
+                channel_name=channel.name,
+                produced_messages=channel_result,
+                finish_reason=state.finish_reason,
+            )
 
         return ResponseStream(
             _events(),
@@ -378,6 +460,12 @@ class ProxyOrchestrationCore:
                 self._channel_sessions[session_id] = channels
             else:
                 self._channel_sessions.pop(session_id, None)
+        log_event(
+            "turn_result",
+            session_id=session_id,
+            result=result,
+            open_channels=tuple(channels),
+        )
         return result
 
     async def _resume_pending_groups(
@@ -389,6 +477,11 @@ class ProxyOrchestrationCore:
         session_id: str,
         pending: PendingContinuation,
     ) -> AsyncIterator[ProxyEvent]:
+        log_event(
+            "pending_resume_start",
+            session_id=session_id,
+            pending=pending,
+        )
         channel_pending: dict[str, list[PendingToolContext]] = {}
         orchestrator_items: list[PendingToolContext] = []
         for item in pending:

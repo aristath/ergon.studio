@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
+from ergon_studio.debug_log import default_debug_log_path
 from ergon_studio.proxy_cli import main
 
 
@@ -153,3 +154,36 @@ class ProxyCliTests(unittest.TestCase):
 
         self.assertEqual(exc.exception.code, 2)
         self.assertIn("upstream endpoint is not reachable", stderr.getvalue())
+
+    def test_proxy_cli_enables_debug_log_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            prepared = _PreparedRuntime(
+                host="127.0.0.1",
+                port=4000,
+                core=object(),
+            )
+            with (
+                patch(
+                    "ergon_studio.proxy_cli.prepare_proxy_runtime",
+                    return_value=prepared,
+                ),
+                patch("ergon_studio.proxy_cli.serve_proxy"),
+                patch(
+                    "ergon_studio.proxy_cli.configure_debug_logging"
+                ) as configure_debug_logging,
+            ):
+                exit_code = main(
+                    [
+                        "--serve",
+                        "--log",
+                        "--app-dir",
+                        temp_dir,
+                        "--definitions-dir",
+                        str(Path(temp_dir) / "definitions"),
+                        "--upstream-base-url",
+                        "http://localhost:8080/v1",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        configure_debug_logging.assert_called_once_with(default_debug_log_path())

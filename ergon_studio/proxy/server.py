@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 from uuid import uuid4
 
+from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.chat_adapter import (
     build_chat_completion_response,
     encode_chat_stream_done,
@@ -113,15 +114,24 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             request = parse_chat_completion_request(payload)
         except RequestBodyTooLargeError as exc:
+            log_event("http_request_rejected", route=self.path, error=str(exc))
             self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
             return
         except ValueError as exc:
+            log_event("http_request_rejected", route=self.path, error=str(exc))
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
 
         completion_id = f"chatcmpl_{uuid4().hex}"
         created_at = int(time.time())
         session_id = self._request_session_id()
+        log_event(
+            "http_request",
+            route=self.path,
+            session_id=session_id,
+            stream=request.stream,
+            request=request,
+        )
         if request.stream:
             self._send_sse_headers(session_id=session_id)
             try:
@@ -134,8 +144,19 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                     )
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
+                log_event(
+                    "http_stream_disconnected",
+                    route=self.path,
+                    session_id=session_id,
+                )
                 return
             except Exception as exc:
+                log_event(
+                    "http_stream_failure",
+                    route=self.path,
+                    session_id=session_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 self._stream_chat_failure(
                     completion_id=completion_id,
                     model=request.model,
@@ -149,15 +170,33 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 self._run_chat_completion(request, session_id=session_id)
             )
         except Exception as exc:
+            log_event(
+                "http_request_failure",
+                route=self.path,
+                session_id=session_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
             )
             return
         if result.finish_reason == "error":
+            log_event(
+                "http_request_failure",
+                route=self.path,
+                session_id=session_id,
+                result=result,
+            )
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
             )
             return
+        log_event(
+            "http_request_complete",
+            route=self.path,
+            session_id=session_id,
+            result=result,
+        )
         self._send_json(
             HTTPStatus.OK,
             build_chat_completion_response(
@@ -215,15 +254,24 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             request = parse_responses_request(payload)
         except RequestBodyTooLargeError as exc:
+            log_event("http_request_rejected", route=self.path, error=str(exc))
             self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
             return
         except ValueError as exc:
+            log_event("http_request_rejected", route=self.path, error=str(exc))
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
 
         response_id = f"resp_{uuid4().hex}"
         created_at = int(time.time())
         session_id = self._request_session_id()
+        log_event(
+            "http_request",
+            route=self.path,
+            session_id=session_id,
+            stream=request.stream,
+            request=request,
+        )
         if request.stream:
             self._send_sse_headers(session_id=session_id)
             try:
@@ -236,8 +284,19 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                     )
                 )
             except (BrokenPipeError, ConnectionResetError, OSError):
+                log_event(
+                    "http_stream_disconnected",
+                    route=self.path,
+                    session_id=session_id,
+                )
                 return
             except Exception as exc:
+                log_event(
+                    "http_stream_failure",
+                    route=self.path,
+                    session_id=session_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 self._stream_responses_failure(
                     response_id=response_id,
                     model=request.model,
@@ -251,15 +310,33 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 self._run_chat_completion(request, session_id=session_id)
             )
         except Exception as exc:
+            log_event(
+                "http_request_failure",
+                route=self.path,
+                session_id=session_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
             )
             return
         if result.finish_reason == "error":
+            log_event(
+                "http_request_failure",
+                route=self.path,
+                session_id=session_id,
+                result=result,
+            )
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
             )
             return
+        log_event(
+            "http_request_complete",
+            route=self.path,
+            session_id=session_id,
+            result=result,
+        )
         self._send_json(
             HTTPStatus.OK,
             build_responses_response(
@@ -518,12 +595,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
 def serve_proxy(*, host: str, port: int, core: ProxyOrchestrationCore) -> None:
     server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
+    log_event("proxy_server_start", host=host, port=port)
     try:
         try:
             server.serve_forever()
         except KeyboardInterrupt:
+            log_event("proxy_server_interrupt", host=host, port=port)
             return
     finally:
+        log_event("proxy_server_stop", host=host, port=port)
         server.server_close()
 
 
@@ -551,6 +631,7 @@ def start_proxy_server_in_thread(
     server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    log_event("proxy_server_thread_start", host=host, port=port)
     return ProxyServerHandle(server, thread)
 
 

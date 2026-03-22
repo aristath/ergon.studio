@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ergon_studio.app_config import ProxyAppConfig
+from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import ProxyServerHandle, start_proxy_server_in_thread
 from ergon_studio.proxy_runtime import prepare_proxy_runtime
@@ -39,6 +40,12 @@ class ProxyServerController:
         config: ProxyAppConfig,
         definitions_dir: Path,
     ) -> ProxyServerStatus:
+        log_event(
+            "server_controller_start",
+            host=config.host,
+            port=config.port,
+            definitions_dir=definitions_dir,
+        )
         prepared = prepare_proxy_runtime(
             definitions_dir=definitions_dir,
             config=config,
@@ -82,11 +89,21 @@ class ProxyServerController:
 
         self._host = prepared.host
         self._registry = prepared.registry
+        log_event(
+            "server_controller_started",
+            host=self._host,
+            port=self._handle.port if self._handle is not None else None,
+        )
         return self.status
 
     def stop(self) -> None:
         if self._handle is None:
             return
+        log_event(
+            "server_controller_stop",
+            host=self._host,
+            port=self._handle.port,
+        )
         self._handle.close()
         self._handle = None
         self._registry = None

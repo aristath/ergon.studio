@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 
@@ -83,6 +84,10 @@ def resolve_staffed_recipients(
 ) -> tuple[StaffedParticipant, ...]:
     if not recipients:
         return ()
+    _validate_duplicate_recipient_selection(
+        staffed_members=staffed_members,
+        recipients=recipients,
+    )
     remaining = list(staffed_members)
     selected: list[StaffedParticipant] = []
     for recipient in recipients:
@@ -95,6 +100,42 @@ def resolve_staffed_recipients(
             continue
         selected.append(remaining.pop(match_index))
     return tuple(selected)
+
+
+def _validate_duplicate_recipient_selection(
+    *,
+    staffed_members: tuple[StaffedParticipant, ...],
+    recipients: tuple[str, ...],
+) -> None:
+    repeated_roles = Counter(
+        participant.agent_id
+        for participant in staffed_members
+        if participant.total_instances > 1
+    )
+    if not repeated_roles:
+        return
+
+    labels_to_roles = {
+        participant.label: participant.agent_id for participant in staffed_members
+    }
+    generic_counts: Counter[str] = Counter()
+    explicit_counts: Counter[str] = Counter()
+    for recipient in recipients:
+        role = labels_to_roles.get(recipient)
+        if role is not None and recipient != role:
+            explicit_counts[role] += 1
+            continue
+        generic_counts[recipient] += 1
+
+    for role, total_instances in repeated_roles.items():
+        generic_count = generic_counts.get(role, 0)
+        if not generic_count:
+            continue
+        if explicit_counts.get(role, 0) or generic_count != total_instances:
+            raise ValueError(
+                "duplicate staffed recipients must be addressed explicitly for "
+                f"{role}: use staffed labels like {role}[1]"
+            )
 
 
 def _participant_label(

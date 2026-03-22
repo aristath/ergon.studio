@@ -207,6 +207,37 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             (ChannelMessage("reviewer[2]", "Second reviewer only"),),
         )
 
+    async def test_execute_rejects_ambiguous_duplicate_recipient(self) -> None:
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=lambda **kwargs: _response_stream("unused"),
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Challenge it"),),
+        )
+        state = ProxyTurnState()
+        channel = Channel(
+            channel_id="channel-1",
+            name="debate",
+            participants=("reviewer", "reviewer"),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            channel_message="Reviewer, take this one.",
+            recipients=("reviewer",),
+            state=state,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "duplicate staffed recipients must be addressed explicitly for reviewer",
+        ):
+            [event async for event in stream]
+
     async def test_execute_routes_participant_message_to_next_recipient(self) -> None:
         agent_order: list[str] = []
 

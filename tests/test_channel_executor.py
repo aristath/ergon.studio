@@ -377,7 +377,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             ),
             state=ProxyTurnState(),
             pending=PendingContinuation(
-                session_id="session_1",
                 items=(
                     PendingToolContext(
                         pending_id="pending_1",
@@ -446,7 +445,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             channel=channel,
             state=ProxyTurnState(),
             pending=PendingContinuation(
-                session_id="session_1",
                 items=(
                     PendingToolContext(
                         pending_id="pending_a",
@@ -535,7 +533,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             channel=channel,
             state=ProxyTurnState(),
             pending=PendingContinuation(
-                session_id="session_1",
                 items=(
                     PendingToolContext(
                         pending_id="pending_1",

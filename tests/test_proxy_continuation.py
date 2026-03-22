@@ -66,7 +66,7 @@ class ProxyContinuationTests(unittest.TestCase):
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.session_id, "session_1")
+        self.assertEqual(pending.items[0].session_id, "session_1")
         self.assertEqual(pending_actors(pending), ("coder",))
         coder = pending_for_actor(pending, "coder")
         assert coder is not None
@@ -139,7 +139,7 @@ class ProxyContinuationTests(unittest.TestCase):
 
         self.assertIsNotNone(pending)
         assert pending is not None
-        self.assertEqual(pending.session_id, "session_2")
+        self.assertEqual(pending.items[0].session_id, "session_2")
         self.assertEqual(set(pending_actors(pending)), {"architect", "coder"})
 
     def test_latest_pending_continuation_rejects_mixed_sessions(self) -> None:

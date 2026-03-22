@@ -21,7 +21,6 @@ class PendingToolContext:
 
 @dataclass(frozen=True)
 class PendingContinuation:
-    session_id: str
     items: tuple[PendingToolContext, ...]
 
 
@@ -104,10 +103,7 @@ def latest_pending_continuation(
     )
     for pending_id in pending_order:
         pending_store.discard(pending_id)
-    return PendingContinuation(
-        session_id=items[0].session_id,
-        items=items,
-    )
+    return PendingContinuation(items=items)
 
 
 def continuation_tool_calls(

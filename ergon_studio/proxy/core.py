@@ -91,7 +91,7 @@ class ProxyOrchestrationCore:
                     pending_store=self._pending_store,
                 )
                 if pending is not None:
-                    active_session_id = pending.session_id
+                    active_session_id = pending.items[0].session_id
                     channels = self._channel_sessions.get(active_session_id) or {}
                 else:
                     active_session_id = session_id or f"session_{uuid4().hex}"
@@ -389,7 +389,6 @@ class ProxyOrchestrationCore:
                 channels=channels,
                 channel_id=channel_id,
                 pending=PendingContinuation(
-                    session_id=pending.session_id,
                     items=tuple(items),
                 ),
                 state=state,

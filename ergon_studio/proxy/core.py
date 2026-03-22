@@ -180,7 +180,20 @@ class ProxyOrchestrationCore:
                             tool_call,
                             registry=self.registry,
                         )
-                        channel_id = f"channel-{_next_channel_number(channels)}"
+                        highest_channel_number = 0
+                        for existing_channel_id in channels:
+                            if not existing_channel_id.startswith("channel-"):
+                                continue
+                            try:
+                                highest_channel_number = max(
+                                    highest_channel_number,
+                                    int(
+                                        existing_channel_id.removeprefix("channel-")
+                                    ),
+                                )
+                            except ValueError:
+                                continue
+                        channel_id = f"channel-{highest_channel_number + 1}"
                         channel = _open_channel(
                             registry=self.registry,
                             channel_id=channel_id,
@@ -235,7 +248,9 @@ class ProxyOrchestrationCore:
                         state.append_reasoning(notice)
                         yield ProxyReasoningDeltaEvent(notice)
                         continue
-                    raise ValueError(f"unsupported internal action: {tool_call.name}")
+                    raise ValueError(
+                        f"unsupported internal action: {tool_call.name}"
+                    )
                 if host_tool_calls:
                     pending_host_tool_calls.extend(
                         self._agent_runner.emit_tool_call_events(
@@ -255,7 +270,9 @@ class ProxyOrchestrationCore:
             if processed_internal_action:
                 continue
 
-            if _requires_host_tool_result(request):
+            if request.tool_choice == "required" or isinstance(
+                request.tool_choice, dict
+            ):
                 raise ValueError("model ignored required host tool choice")
             return
 
@@ -306,7 +323,16 @@ class ProxyOrchestrationCore:
                 f"({channel.name})."
             )
         else:
-            intro = _channel_intro(channel)
+            roster = ", ".join(channel.participants)
+            if channel.name == "ad hoc":
+                intro = (
+                    f"Orchestrator: opening channel {channel.channel_id} with {roster}."
+                )
+            else:
+                intro = (
+                    f"Orchestrator: opening channel {channel.channel_id} "
+                    f"({channel.name}) with {roster}."
+                )
         channel_stream = self._channel_executor.execute(
             request=request,
             session_id=session_id,
@@ -426,13 +452,6 @@ class ProxyOrchestrationCore:
             yield event
 
 
-def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
-    tool_choice = request.tool_choice
-    if tool_choice == "required":
-        return True
-    return isinstance(tool_choice, dict)
-
-
 def _open_channel(
     *,
     registry: RuntimeRegistry,
@@ -453,25 +472,3 @@ def _open_channel(
             participants=participants,
         )
     raise ValueError("open_channel needs a preset or participants target")
-
-
-def _channel_intro(channel: Channel) -> str:
-    roster = ", ".join(channel.participants)
-    if channel.name == "ad hoc":
-        return f"Orchestrator: opening channel {channel.channel_id} with {roster}."
-    return (
-        f"Orchestrator: opening channel {channel.channel_id} "
-        f"({channel.name}) with {roster}."
-    )
-
-
-def _next_channel_number(channels: dict[str, Channel]) -> int:
-    highest = 0
-    for channel_id in channels:
-        if not channel_id.startswith("channel-"):
-            continue
-        try:
-            highest = max(highest, int(channel_id.removeprefix("channel-")))
-        except ValueError:
-            continue
-    return highest + 1

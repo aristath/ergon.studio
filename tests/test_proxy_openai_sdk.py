@@ -256,7 +256,6 @@ class _FakeCore:
         self,
         request,
         *,
-        created_at: int | None = None,
         session_id: str | None = None,
     ):
         events = list(self._events)

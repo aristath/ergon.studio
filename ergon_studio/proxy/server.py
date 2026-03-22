@@ -180,7 +180,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     ) -> ProxyTurnResult:
         stream = self.proxy_server.core.stream_turn(
             request,
-            created_at=int(time.time()),
             session_id=session_id,
         )
         async for _event in stream:
@@ -197,7 +196,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         stream = self.proxy_server.core.stream_turn(
             request,
-            created_at=created_at,
             session_id=session_id,
         )
         async for event in stream:
@@ -308,7 +306,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         sequence_number = 2
         stream = self.proxy_server.core.stream_turn(
             request,
-            created_at=created_at,
             session_id=session_id,
         )
         try:

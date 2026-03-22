@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -79,11 +78,8 @@ class ProxyOrchestrationCore:
         self,
         request: ProxyTurnRequest,
         *,
-        created_at: int | None = None,
         session_id: str | None = None,
     ) -> ResponseStream[ProxyEvent, ProxyTurnResult]:
-        if created_at is None:
-            created_at = int(time.time())
         state = ProxyTurnState()
         session: ChannelSession | None = None
         channels: dict[str, Channel] = {}
@@ -142,7 +138,6 @@ class ProxyOrchestrationCore:
         return ResponseStream(
             _events(),
             finalizer=lambda: self._finalize_turn(
-                request=request,
                 state=state,
                 session=session,
                 channels=channels,
@@ -352,7 +347,6 @@ class ProxyOrchestrationCore:
     def _finalize_turn(
         self,
         *,
-        request: ProxyTurnRequest,
         state: ProxyTurnState,
         session: ChannelSession | None,
         channels: dict[str, Channel],
@@ -365,7 +359,6 @@ class ProxyOrchestrationCore:
             output_items=state.output_items,
         )
         self._persist_channels_for_result(
-            request=request,
             result=result,
             session=session,
             channels=channels,
@@ -375,7 +368,6 @@ class ProxyOrchestrationCore:
     def _persist_channels_for_result(
         self,
         *,
-        request: ProxyTurnRequest,
         result: ProxyTurnResult,
         session: ChannelSession | None,
         channels: dict[str, Channel],

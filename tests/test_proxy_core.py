@@ -33,7 +33,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Hi"),),
         )
 
-        stream = core.stream_turn(request, created_at=1, session_id="session_1")
+        stream = core.stream_turn(request, session_id="session_1")
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
@@ -72,7 +72,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Implement it"),),
         )
 
-        stream = core.stream_turn(request, created_at=1, session_id="session_1")
+        stream = core.stream_turn(request, session_id="session_1")
         events = [event async for event in stream]
         result = await stream.get_final_response()
 
@@ -121,7 +121,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         first_stream = core.stream_turn(
             first_request,
-            created_at=1,
             session_id="session_1",
         )
         [event async for event in first_stream]
@@ -129,7 +128,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         second_stream = core.stream_turn(
             second_request,
-            created_at=2,
             session_id="session_1",
         )
         events = [event async for event in second_stream]
@@ -185,7 +183,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         first_stream = core.stream_turn(
             open_request,
-            created_at=1,
             session_id="session_1",
         )
         [event async for event in first_stream]
@@ -193,7 +190,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         close_stream = core.stream_turn(
             close_request,
-            created_at=2,
             session_id="session_1",
         )
         [event async for event in close_stream]
@@ -201,7 +197,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         stream = core.stream_turn(
             reopen_request,
-            created_at=3,
             session_id="session_1",
         )
         events = [event async for event in stream]
@@ -248,7 +243,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         first_stream = core.stream_turn(
             first_request,
-            created_at=1,
             session_id="session_1",
         )
         first_events = [event async for event in first_stream]
@@ -277,7 +271,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         second_stream = core.stream_turn(
             second_request,
-            created_at=2,
             session_id="session_1",
         )
         [event async for event in second_stream]

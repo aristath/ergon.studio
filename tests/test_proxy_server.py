@@ -239,7 +239,7 @@ class _FakeCore:
         self.events = list(events)
         self.registry = _fake_registry()
 
-    def stream_turn(self, _request, *, created_at=None, session_id=None):
+    def stream_turn(self, _request, *, session_id=None):
         async def _events():
             for event in self.events:
                 yield event

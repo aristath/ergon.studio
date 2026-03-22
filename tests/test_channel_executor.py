@@ -307,6 +307,57 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect: Coder, implement this plan.", reasoning)
         self.assertIn("coder: Implemented.", reasoning)
 
+    async def test_execute_rejects_participant_message_to_non_staffed_recipient(
+        self,
+    ) -> None:
+        def _stream_text_agent(**kwargs):
+            return _response_stream(
+                "",
+                response=AgentRunResult(
+                    text="",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="internal_1",
+                            name="message_channel",
+                            arguments_json=json.dumps(
+                                {
+                                    "message": "QA, check this.",
+                                    "recipients": ["qa"],
+                                }
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=Channel(
+                channel_id="channel-1",
+                name="debate",
+                participants=("architect", "coder"),
+            ),
+            channel_message="Architect, decide the direction.",
+            recipients=("architect",),
+            state=ProxyTurnState(),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "channel recipients are not staffed in this channel: qa",
+        ):
+            [event async for event in stream]
+
     async def test_execute_resumes_same_participant_after_tool_result(self) -> None:
         captured_seeds: list[PendingSeed] = []
         call_count = 0

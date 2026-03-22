@@ -102,6 +102,31 @@ def resolve_staffed_recipients(
     return tuple(selected)
 
 
+def require_staffed_recipients(
+    *,
+    staffed_members: tuple[StaffedParticipant, ...],
+    recipients: tuple[str, ...],
+) -> tuple[StaffedParticipant, ...]:
+    selected = resolve_staffed_recipients(
+        staffed_members=staffed_members,
+        recipients=recipients,
+    )
+    if len(selected) == len(recipients):
+        return selected
+
+    available: set[str] = set()
+    for participant in staffed_members:
+        available.add(participant.agent_id)
+        available.add(participant.label)
+    invalid = [recipient for recipient in recipients if recipient not in available]
+    if not invalid:
+        invalid = list(recipients)
+    raise ValueError(
+        "channel recipients are not staffed in this channel: "
+        + ", ".join(sorted(invalid))
+    )
+
+
 def _validate_duplicate_recipient_selection(
     *,
     staffed_members: tuple[StaffedParticipant, ...],

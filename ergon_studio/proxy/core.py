@@ -7,7 +7,7 @@ from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
 from ergon_studio.proxy.channel_staffing import (
     expand_staffed_participants,
-    resolve_staffed_recipients,
+    require_staffed_recipients,
 )
 from ergon_studio.proxy.channels import (
     Channel,
@@ -285,7 +285,10 @@ class ProxyOrchestrationCore:
                 finalizer=lambda: (),
             )
         if pending is None:
-            _validate_channel_recipients(channel, recipients)
+            require_staffed_recipients(
+                staffed_members=expand_staffed_participants(channel.participants),
+                recipients=recipients,
+            )
         if pending is not None:
             intro = (
                 f"Orchestrator: continuing channel {channel.channel_id} "
@@ -463,29 +466,3 @@ def _next_channel_number(channels: dict[str, Channel]) -> int:
         except ValueError:
             continue
     return highest + 1
-
-
-def _validate_channel_recipients(
-    channel: Channel,
-    recipients: tuple[str, ...],
-) -> None:
-    staffed_members = expand_staffed_participants(channel.participants)
-    resolved = resolve_staffed_recipients(
-        staffed_members=staffed_members,
-        recipients=recipients,
-    )
-    if len(resolved) == len(recipients):
-        return
-
-    available: set[str] = set()
-    for participant in staffed_members:
-        available.add(participant.agent_id)
-        available.add(participant.label)
-    invalid = [recipient for recipient in recipients if recipient not in available]
-    if not invalid:
-        invalid = list(recipients)
-    if invalid:
-        raise ValueError(
-            "channel recipients are not staffed in this channel: "
-            + ", ".join(sorted(invalid))
-        )

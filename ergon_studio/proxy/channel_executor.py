@@ -9,7 +9,7 @@ from ergon_studio.proxy.channel_staffing import (
     StaffedParticipant,
     expand_staffed_participants,
     participant_context,
-    resolve_staffed_recipients,
+    require_staffed_recipients,
 )
 from ergon_studio.proxy.channels import Channel, ChannelMessage
 from ergon_studio.proxy.continuation import (
@@ -134,12 +134,10 @@ class ProxyChannelExecutor:
                     state.append_reasoning(delivery_line.render())
                     yield ProxyReasoningDeltaEvent(delivery_line.render())
 
-                targets = _targeted_participants(
+                targets = require_staffed_recipients(
                     staffed_members=all_staffed_members,
                     recipients=delivery.recipients,
                 )
-                if not targets:
-                    continue
 
                 for participant in targets:
                     result = await self._run_channel_participant(
@@ -247,17 +245,6 @@ def _continuation_participant(
         if participant.label == actor:
             return participant
     raise ValueError(f"pending actor is not staffed in this channel: {actor}")
-
-
-def _targeted_participants(
-    *,
-    staffed_members: tuple[StaffedParticipant, ...],
-    recipients: tuple[str, ...],
-) -> tuple[StaffedParticipant, ...]:
-    return resolve_staffed_recipients(
-        staffed_members=staffed_members,
-        recipients=recipients,
-    )
 
 
 def _channel_conversation_messages(

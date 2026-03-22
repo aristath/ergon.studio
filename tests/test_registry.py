@@ -13,9 +13,9 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workrooms_dir = root_dir / "workrooms"
+            channels_dir = root_dir / "channels"
             agents_dir.mkdir(parents=True)
-            workrooms_dir.mkdir(parents=True)
+            channels_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -71,7 +71,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "standard-build.md").write_text(
+            (channels_dir / "standard-build.md").write_text(
                 (
                     "---\n"
                     "id: standard-build\n"
@@ -84,7 +84,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "research-then-decide.md").write_text(
+            (channels_dir / "research-then-decide.md").write_text(
                 (
                     "---\n"
                     "id: research-then-decide\n"
@@ -96,7 +96,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "debate.md").write_text(
+            (channels_dir / "debate.md").write_text(
                 (
                     "---\n"
                     "id: debate\n"
@@ -116,11 +116,11 @@ class RegistryTests(unittest.TestCase):
             )
 
             self.assertIn("orchestrator", registry.agent_definitions)
-            self.assertIn("standard-build", registry.workroom_definitions)
-            self.assertIn("research-then-decide", registry.workroom_definitions)
-            self.assertIn("debate", registry.workroom_definitions)
+            self.assertIn("standard-build", registry.channel_presets)
+            self.assertIn("research-then-decide", registry.channel_presets)
+            self.assertIn("debate", registry.channel_presets)
             self.assertEqual(
-                registry.workroom_definitions["standard-build"],
+                registry.channel_presets["standard-build"],
                 ("architect", "coder"),
             )
             self.assertEqual(registry.upstream.base_url, "http://localhost:8080/v1")
@@ -139,7 +139,7 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             (root_dir / "agents").mkdir(parents=True)
-            (root_dir / "workrooms").mkdir(parents=True)
+            (root_dir / "channels").mkdir(parents=True)
             with self.assertRaisesRegex(
                 ValueError, "missing required agent definition"
             ):
@@ -148,13 +148,13 @@ class RegistryTests(unittest.TestCase):
                     upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
                 )
 
-    def test_load_registry_rejects_workrooms_with_unknown_agents(self) -> None:
+    def test_load_registry_rejects_channel_presets_with_unknown_agents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workrooms_dir = root_dir / "workrooms"
+            channels_dir = root_dir / "channels"
             agents_dir.mkdir(parents=True)
-            workrooms_dir.mkdir(parents=True)
+            channels_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -166,7 +166,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "standard-build.md").write_text(
+            (channels_dir / "standard-build.md").write_text(
                 (
                     "---\n"
                     "id: standard-build\n"
@@ -181,20 +181,20 @@ class RegistryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "workroom preset 'standard-build' references unknown agents: coder",
+                "channel preset 'standard-build' references unknown agents: coder",
             ):
                 load_registry(
                     root_dir,
                     upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
                 )
 
-    def test_load_registry_requires_workroom_participants(self) -> None:
+    def test_load_registry_requires_channel_preset_participants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workrooms_dir = root_dir / "workrooms"
+            channels_dir = root_dir / "channels"
             agents_dir.mkdir(parents=True)
-            workrooms_dir.mkdir(parents=True)
+            channels_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -206,7 +206,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "broken.md").write_text(
+            (channels_dir / "broken.md").write_text(
                 "---\nid: broken\n---\n## Purpose\nBroken.\n",
                 encoding="utf-8",
             )
@@ -217,13 +217,13 @@ class RegistryTests(unittest.TestCase):
                     upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
                 )
 
-    def test_load_registry_rejects_non_list_workroom_participants(self) -> None:
+    def test_load_registry_rejects_non_list_channel_preset_participants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workrooms_dir = root_dir / "workrooms"
+            channels_dir = root_dir / "channels"
             agents_dir.mkdir(parents=True)
-            workrooms_dir.mkdir(parents=True)
+            channels_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -235,7 +235,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "broken.md").write_text(
+            (channels_dir / "broken.md").write_text(
                 "---\nid: broken\nparticipants: coder\n---\n## Purpose\nBroken.\n",
                 encoding="utf-8",
             )
@@ -246,13 +246,13 @@ class RegistryTests(unittest.TestCase):
                     upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
                 )
 
-    def test_load_registry_rejects_empty_workroom_participants(self) -> None:
+    def test_load_registry_rejects_empty_channel_preset_participants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir) / "definitions"
             agents_dir = root_dir / "agents"
-            workrooms_dir = root_dir / "workrooms"
+            channels_dir = root_dir / "channels"
             agents_dir.mkdir(parents=True)
-            workrooms_dir.mkdir(parents=True)
+            channels_dir.mkdir(parents=True)
             (agents_dir / "orchestrator.md").write_text(
                 (
                     "---\n"
@@ -264,7 +264,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (workrooms_dir / "broken.md").write_text(
+            (channels_dir / "broken.md").write_text(
                 "---\nid: broken\nparticipants:\n  - \"\"\n---\n## Purpose\nBroken.\n",
                 encoding="utf-8",
             )

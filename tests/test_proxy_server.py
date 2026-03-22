@@ -604,16 +604,16 @@ class ProxyServerTests(unittest.TestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["coder"],
                             message="Continue the build from the plan",
                         ),
-                        "Workroom final summary",
+                        "Channel final summary",
                     ],
                     "architect": [
                         {
@@ -626,17 +626,9 @@ class ProxyServerTests(unittest.TestCase):
                                 }
                             ],
                         },
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Architecture plan",
-                        ),
+                        "Architecture plan",
                     ],
-                    "coder": [
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Built feature",
-                        )
-                    ],
+                    "coder": ["Built feature"],
                 }
             ),
         )
@@ -708,7 +700,7 @@ class ProxyServerTests(unittest.TestCase):
 
         self.assertEqual(second_payload["choices"][0]["finish_reason"], "stop")
         self.assertEqual(
-            second_payload["choices"][0]["message"]["content"], "Workroom final summary"
+            second_payload["choices"][0]["message"]["content"], "Channel final summary"
         )
 
     def test_chat_completions_streams_tool_calls_with_separate_finish_chunk(
@@ -1103,7 +1095,7 @@ class _FakeCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workroom_definitions": {},
+                "channel_presets": {},
             },
         )()
 
@@ -1142,7 +1134,7 @@ class _FailingCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workroom_definitions": {},
+                "channel_presets": {},
             },
         )()
 
@@ -1173,7 +1165,7 @@ class _LateFailingCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workroom_definitions": {},
+                "channel_presets": {},
             },
         )()
 
@@ -1276,7 +1268,7 @@ def _proxy_registry() -> RuntimeRegistry:
                 sections={"Identity": "Coder."},
             ),
         },
-        workroom_definitions={
+        channel_presets={
             "standard-build": ("architect",),
         },
     )

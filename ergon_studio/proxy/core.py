@@ -4,6 +4,12 @@ import time
 from collections.abc import AsyncIterator
 
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
+from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
+from ergon_studio.proxy.channels import (
+    ChannelSnapshot,
+    OpenChannel,
+    describe_open_channels,
+)
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     PendingContinuation,
@@ -20,11 +26,12 @@ from ergon_studio.proxy.models import (
 from ergon_studio.proxy.orchestrator_tools import (
     build_orchestrator_internal_tools,
     is_internal_tool_name,
-    parse_message_workroom_action,
+    parse_close_channel_action,
+    parse_message_channel_action,
+    parse_open_channel_action,
 )
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
-from ergon_studio.proxy.workroom_executor import ProxyWorkroomExecutor
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
 
@@ -37,8 +44,6 @@ ProxyEvent = (
 
 
 class ProxyOrchestrationCore:
-    _MAX_INTERNAL_MOVES = 8
-
     def __init__(
         self,
         registry: RuntimeRegistry,
@@ -50,11 +55,11 @@ class ProxyOrchestrationCore:
             registry,
             invoker=agent_invoker,
         )
-        workroom_executor = ProxyWorkroomExecutor(
+        channel_executor = ProxyChannelExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
-        self._workroom_executor = workroom_executor
+        self._channel_executor = channel_executor
 
     def stream_turn(
         self,
@@ -70,10 +75,14 @@ class ProxyOrchestrationCore:
             try:
                 pending = latest_pending_continuation(request.messages)
                 worklog = list(pending.state.worklog if pending is not None else ())
+                channels = _channels_from_pending(pending)
+                next_channel_number = _next_channel_number(channels)
                 if pending is not None:
-                    if pending.state.workroom_name is not None:
-                        stream = self._message_workroom(
+                    if pending.state.active_channel_id is not None:
+                        stream = self._message_channel(
                             request=request,
+                            channels=channels,
+                            channel_id=pending.state.active_channel_id,
                             continuation=pending.state,
                             pending=pending,
                             state=state,
@@ -88,6 +97,8 @@ class ProxyOrchestrationCore:
                             request=request,
                             state=state,
                             worklog=worklog,
+                            channels=channels,
+                            next_channel_number=next_channel_number,
                         ):
                             yield event
                         return
@@ -95,6 +106,8 @@ class ProxyOrchestrationCore:
                         request=request,
                         state=state,
                         worklog=worklog,
+                        channels=channels,
+                        next_channel_number=next_channel_number,
                         pending_orchestrator=pending,
                     ):
                         yield event
@@ -104,6 +117,8 @@ class ProxyOrchestrationCore:
                     request=request,
                     state=state,
                     worklog=worklog,
+                    channels=channels,
+                    next_channel_number=next_channel_number,
                 ):
                     yield event
             except ValueError as exc:
@@ -133,16 +148,19 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         worklog: list[str],
+        channels: dict[str, OpenChannel],
+        next_channel_number: int,
         pending_orchestrator: PendingContinuation | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
-        for _ in range(self._MAX_INTERNAL_MOVES):
+        while True:
             internal_tools = build_orchestrator_internal_tools(self.registry)
             orchestrator_stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
                     request,
                     worklog=tuple(worklog),
+                    open_channels=describe_open_channels(channels),
                 ),
                 model_id_override=request.model,
                 host_tools=request.tools,
@@ -179,121 +197,152 @@ class ProxyOrchestrationCore:
                 for tool_event in self._agent_runner.emit_tool_call_events(
                     tool_calls=host_tool_calls,
                     request=request,
-                    continuation=_orchestrator_continuation_state(tuple(worklog)),
+                    continuation=_orchestrator_continuation_state(
+                        worklog=tuple(worklog),
+                        channels=channels,
+                    ),
                     state=state,
                 ):
                     yield tool_event
                 return
             if internal_tool_calls:
-                action = parse_message_workroom_action(
-                    internal_tool_calls[0],
-                    registry=self.registry,
-                )
-                workroom_stream = self._message_workroom(
-                    request=request,
-                    workroom_name=action.preset,
-                    participants=action.participants,
-                    workroom_message=action.message,
-                    state=state,
-                    worklog=tuple(worklog),
-                )
-                async for internal_event in workroom_stream:
-                    yield internal_event
-                if state.finish_reason == "tool_calls":
-                    return
-                result = await workroom_stream.get_final_response()
-                if result:
-                    worklog.extend(result)
-                else:
-                    return
-                continue
+                tool_call = internal_tool_calls[0]
+                if tool_call.name == "open_channel":
+                    open_action = parse_open_channel_action(
+                        tool_call,
+                        registry=self.registry,
+                    )
+                    channel_id = f"channel-{next_channel_number}"
+                    next_channel_number += 1
+                    channel = _open_channel(
+                        registry=self.registry,
+                        channel_id=channel_id,
+                        preset=open_action.preset,
+                        participants=open_action.participants,
+                    )
+                    channels[channel.channel_id] = channel
+                    channel_stream = self._message_channel(
+                        request=request,
+                        channels=channels,
+                        channel_id=channel.channel_id,
+                        message=open_action.message,
+                        state=state,
+                        worklog=tuple(worklog),
+                    )
+                    async for internal_event in channel_stream:
+                        yield internal_event
+                    if state.finish_reason == "tool_calls":
+                        return
+                    result = await channel_stream.get_final_response()
+                    if result:
+                        worklog.extend(result)
+                    continue
+                if tool_call.name == "message_channel":
+                    message_action = parse_message_channel_action(tool_call)
+                    channel_stream = self._message_channel(
+                        request=request,
+                        channels=channels,
+                        channel_id=message_action.channel,
+                        message=message_action.message,
+                        state=state,
+                        worklog=tuple(worklog),
+                    )
+                    async for internal_event in channel_stream:
+                        yield internal_event
+                    if state.finish_reason == "tool_calls":
+                        return
+                    result = await channel_stream.get_final_response()
+                    if result:
+                        worklog.extend(result)
+                    continue
+                if tool_call.name == "close_channel":
+                    close_action = parse_close_channel_action(tool_call)
+                    closed = channels.pop(close_action.channel, None)
+                    if closed is None:
+                        raise ValueError(f"unknown channel: {close_action.channel}")
+                    notice = (
+                        f"Orchestrator: closing channel {closed.channel_id} "
+                        f"({closed.name}).\n"
+                    )
+                    state.append_reasoning(notice)
+                    yield ProxyReasoningDeltaEvent(notice)
+                    if closed.transcript:
+                        worklog.extend(tuple(closed.transcript[-6:]))
+                    continue
+                raise ValueError(f"unsupported internal action: {tool_call.name}")
 
             if _requires_host_tool_result(request):
                 raise ValueError("model ignored required host tool choice")
             return
 
-        raise ValueError("orchestrator exceeded internal move limit")
-
-    def _message_workroom(
+    def _message_channel(
         self,
         *,
         request: ProxyTurnRequest,
-        workroom_name: str | None = None,
-        participants: tuple[str, ...] = (),
-        workroom_message: str | None = None,
+        channels: dict[str, OpenChannel],
+        channel_id: str,
+        message: str | None = None,
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
-        if (
-            continuation is None
-            and workroom_name is None
-            and not participants
-        ):
+        if continuation is not None:
+            channel_id = continuation.active_channel_id or channel_id
+        channel = channels.get(channel_id)
+        if channel is None:
             state.finish_reason = "error"
-            error_text = "message_workroom needs a preset or participants target."
+            error_text = f"unknown channel: {channel_id}"
             state.content = error_text
             return ResponseStream(
                 _single_event_stream(ProxyContentDeltaEvent(error_text)),
                 finalizer=lambda: (),
             )
         if continuation is not None:
-            assert continuation.workroom_name is not None
-            workroom_name = continuation.workroom_name
-            intro = _workroom_notice(
-                f"Orchestrator: continuing workroom {workroom_name} with "
+            intro = _channel_notice(
+                f"Orchestrator: continuing channel {channel.channel_id} "
+                f"({channel.name}) with "
                 f"{continuation.actor}."
             )
-            participants = continuation.workroom_participants
-            workroom_message = continuation.workroom_message
         else:
-            resolved = _resolve_workroom_target(
-                registry=self.registry,
-                preset=workroom_name,
-                participants=participants,
-            )
-            if resolved is None:
-                error_text = f"Unknown workroom: {workroom_name or '(none)'}"
-                state.finish_reason = "error"
-                state.content = error_text
-                return ResponseStream(
-                    _single_event_stream(ProxyContentDeltaEvent(error_text)),
-                    finalizer=lambda: (),
-                )
-            workroom_name, participants = resolved
-            intro = _workroom_notice(_workroom_intro(workroom_name))
-        workroom_stream = self._workroom_executor.execute(
+            intro = _channel_notice(_channel_intro(channel))
+        channel_stream = self._channel_executor.execute(
             request=request,
-            workroom_name=workroom_name,
-            participants=participants,
-            workroom_message=workroom_message,
+            channel=channel,
+            channels=channels,
+            channel_message=message,
             state=state,
             continuation=continuation,
             pending=pending,
             worklog=worklog,
         )
-        workroom_result: tuple[str, ...] = ()
+        channel_result: tuple[str, ...] = ()
 
         async def _events() -> AsyncIterator[ProxyEvent]:
-            nonlocal workroom_result
+            nonlocal channel_result
             state.append_reasoning(intro)
             yield ProxyReasoningDeltaEvent(intro)
-            async for event in workroom_stream:
+            async for event in channel_stream:
                 yield event
-            workroom_result = await workroom_stream.get_final_response()
+            channel_result = await channel_stream.get_final_response()
+            if message and continuation is None:
+                channel.transcript.append(f"orchestrator: {message}")
+            channel.transcript.extend(channel_result)
 
         return ResponseStream(
             _events(),
-            finalizer=lambda: workroom_result,
+            finalizer=lambda: channel_result,
         )
 
 
 def _orchestrator_continuation_state(
+    *,
     worklog: tuple[str, ...],
+    channels: dict[str, OpenChannel],
 ) -> ContinuationState:
     return ContinuationState(
         actor="orchestrator",
+        channels=tuple(_snapshot_open_channels(channels)),
         worklog=worklog,
     )
 
@@ -309,27 +358,74 @@ async def _single_event_stream(event: ProxyEvent) -> AsyncIterator[ProxyEvent]:
     yield event
 
 
-def _resolve_workroom_target(
+def _open_channel(
     *,
     registry: RuntimeRegistry,
+    channel_id: str,
     preset: str | None,
     participants: tuple[str, ...],
-) -> tuple[str, tuple[str, ...]] | None:
+) -> OpenChannel:
     if preset is not None:
-        resolved_participants = registry.workroom_definitions.get(preset)
+        resolved_participants = registry.channel_presets.get(preset)
         if resolved_participants is None:
-            return None
-        return preset, participants or resolved_participants
+            raise ValueError(f"unknown channel preset: {preset}")
+        return OpenChannel(
+            channel_id=channel_id,
+            name=preset,
+            participants=participants or resolved_participants,
+        )
     if participants:
-        return "ad hoc", participants
-    return None
+        return OpenChannel(
+            channel_id=channel_id,
+            name="ad hoc",
+            participants=participants,
+        )
+    raise ValueError("open_channel needs a preset or participants target")
 
 
-def _workroom_notice(base: str) -> str:
+def _channel_notice(base: str) -> str:
     return base + "\n"
 
 
-def _workroom_intro(workroom_name: str) -> str:
-    if workroom_name == "ad hoc":
-        return "Orchestrator: opening an ad hoc workroom."
-    return f"Orchestrator: opening workroom {workroom_name}."
+def _channel_intro(channel: OpenChannel) -> str:
+    roster = ", ".join(channel.participants)
+    if channel.name == "ad hoc":
+        return f"Orchestrator: opening channel {channel.channel_id} with {roster}."
+    return (
+        f"Orchestrator: opening channel {channel.channel_id} "
+        f"({channel.name}) with {roster}."
+    )
+
+
+def _channels_from_pending(
+    pending: PendingContinuation | None,
+) -> dict[str, OpenChannel]:
+    if pending is None:
+        return {}
+    return {
+        channel.channel_id: OpenChannel(
+            channel_id=channel.channel_id,
+            name=channel.name,
+            participants=channel.participants,
+            transcript=list(channel.transcript),
+        )
+        for channel in pending.state.channels
+    }
+
+
+def _next_channel_number(channels: dict[str, OpenChannel]) -> int:
+    highest = 0
+    for channel_id in channels:
+        if not channel_id.startswith("channel-"):
+            continue
+        try:
+            highest = max(highest, int(channel_id.removeprefix("channel-")))
+        except ValueError:
+            continue
+    return highest + 1
+
+
+def _snapshot_open_channels(
+    channels: dict[str, OpenChannel],
+) -> tuple[ChannelSnapshot, ...]:
+    return tuple(channel.snapshot() for channel in channels.values())

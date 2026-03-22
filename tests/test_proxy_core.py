@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
+from ergon_studio.proxy.channels import ChannelSnapshot
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     decode_continuation_from_tool_call_id,
@@ -158,7 +159,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["agent_id"], "orchestrator")
         self.assertEqual(captured["model_id_override"], "gpt-oss-20b")
 
-    async def test_stream_turn_allows_text_before_workroom_action(
+    async def test_stream_turn_allows_text_before_channel_action(
         self,
     ) -> None:
         core = ProxyOrchestrationCore(
@@ -170,8 +171,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "text": "Starting now",
                             "tool_calls": [
                                 {
-                                    "id": "internal_message_workroom",
-                                    "name": "message_workroom",
+                                    "id": "internal_open_channel",
+                                    "name": "open_channel",
                                     "arguments": json.dumps(
                                         {
                                             "participants": ["coder"],
@@ -204,7 +205,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Starting now", content)
         self.assertNotEqual(result.finish_reason, "error")
 
-    async def test_stream_turn_opens_single_person_workroom_and_then_replies(
+    async def test_stream_turn_opens_single_person_channel_and_then_replies(
         self,
     ) -> None:
         core = ProxyOrchestrationCore(
@@ -213,7 +214,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["coder"],
                             message="Implement it",
                         ),
@@ -237,11 +238,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("opening an ad hoc workroom", reasoning.lower())
+        self.assertIn("opening channel channel-1 with coder", reasoning.lower())
         self.assertIn("coder: Patch", reasoning)
         self.assertEqual(result.content, "Final summary")
 
-    async def test_stream_turn_keeps_solo_worker_until_it_replies_to_lead_dev(
+    async def test_stream_turn_lets_solo_channel_reply_naturally_then_returns(
         self,
     ) -> None:
         agent_order: list[str] = []
@@ -255,18 +256,14 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["coder"],
                             message="Update the README.",
                         ),
                         "Final summary",
                     ],
                     "coder": [
-                        "Checked README.md and found the current intro.",
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Updated the README intro and added setup notes.",
-                        ),
+                        "Updated the README intro and added setup notes.",
                     ],
                 },
                 capture=_capture,
@@ -275,7 +272,6 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         request = ProxyTurnRequest(
             model="ergon",
             messages=(ProxyInputMessage(role="user", content="Update the README"),),
-            tools=(_host_tool("read_file"), _host_tool("write_file")),
         )
 
         stream = core.stream_turn(request, created_at=1)
@@ -287,31 +283,30 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("coder: Checked README.md", reasoning)
         self.assertIn("coder: Updated the README intro", reasoning)
         self.assertEqual(
             agent_order,
-            ["orchestrator", "coder", "coder", "orchestrator"],
+            ["orchestrator", "coder", "orchestrator"],
         )
         self.assertEqual(result.content, "Final summary")
 
-    async def test_stream_turn_handles_workroom_rounds(self) -> None:
+    async def test_stream_turn_handles_channel_conversations(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="standard-build",
                             message="Build calculator",
                         ),
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["coder"],
                             message="Implement the approved plan",
                         ),
-                        "Workroom final summary",
+                        "Channel final summary",
                     ],
                     "architect": ["Plan"],
                     "coder": ["Built"],
@@ -332,24 +327,24 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("workroom standard-build", reasoning)
+        self.assertIn("opening channel channel-1 (standard-build)", reasoning)
         self.assertIn("architect: Plan", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Workroom final summary")
+        self.assertEqual(result.content, "Channel final summary")
 
-    async def test_stream_turn_workroom_can_staff_specific_specialists(self) -> None:
+    async def test_stream_turn_channel_can_staff_specific_specialists(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="standard-build",
                             participants=["coder"],
                             message="Build calculator",
                         ),
-                        "Workroom final summary",
+                        "Channel final summary",
                     ],
                     "coder": ["Built"],
                 }
@@ -371,7 +366,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("architect:", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(result.content, "Workroom final summary")
+        self.assertEqual(result.content, "Channel final summary")
 
     async def test_stream_turn_emits_tool_call_events_for_direct_mode(self) -> None:
         core = ProxyOrchestrationCore(
@@ -412,17 +407,18 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.tool_calls[0].name, "read_file")
         continuation = decode_continuation_from_tool_call_id(result.tool_calls[0].id)
         self.assertIsNotNone(continuation)
+        assert continuation is not None
         self.assertEqual(continuation.actor, "orchestrator")
-        self.assertIsNone(continuation.workroom_name)
+        self.assertIsNone(continuation.active_channel_id)
 
-    async def test_stream_turn_resumes_workroom_from_tool_result(self) -> None:
+    async def test_stream_turn_resumes_channel_from_tool_result(self) -> None:
         first_core = ProxyOrchestrationCore(
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="standard-build",
                             message="Build calculator",
                         ),
@@ -460,25 +456,15 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             _fake_registry(),
             agent_invoker=_fake_agent_invoker(
                 {
-                    "architect": [
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Architecture plan",
-                        )
-                    ],
-                    "coder": [
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Built feature",
-                        )
-                    ],
+                    "architect": ["Architecture plan"],
+                    "coder": ["Built feature"],
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["coder"],
                             message="Continue from the architecture plan",
                         ),
-                        "Workroom final summary",
+                        "Channel final summary",
                     ],
                 }
             ),
@@ -509,18 +495,27 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             for event in resumed_events
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
-        self.assertIn("continuing workroom standard-build with architect", reasoning)
+        self.assertIn(
+            "continuing channel channel-1 (standard-build) with architect",
+            reasoning,
+        )
         self.assertIn("architect: Architecture", reasoning)
         self.assertIn("coder: Built", reasoning)
-        self.assertEqual(resumed_result.content, "Workroom final summary")
+        self.assertEqual(resumed_result.content, "Channel final summary")
         self.assertEqual(resumed_result.finish_reason, "stop")
 
     async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
         tool_call = _host_continuation_tool_call(
             state=ContinuationState(
                 actor="coder",
-                workroom_name="ad hoc",
-                workroom_participants=("coder",),
+                active_channel_id="channel-1",
+                channels=(
+                    ChannelSnapshot(
+                        channel_id="channel-1",
+                        name="ad hoc",
+                        participants=("coder",),
+                    ),
+                ),
             ),
             call_id="call_1",
             name="read_file",
@@ -560,17 +555,17 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reasoning, "")
         self.assertEqual(result.content, "Fresh reply")
 
-    async def test_workroom_continuation_keeps_remaining_participants_in_same_round(
+    async def test_channel_continuation_resumes_same_participant_after_tool_loop(
         self,
     ) -> None:
-        registry = _multi_participant_workroom_registry()
+        registry = _multi_participant_channel_registry()
         first_core = ProxyOrchestrationCore(
             registry,
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="build-room",
                             message="Build calculator",
                         ),
@@ -587,6 +582,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             ],
                         }
                     ],
+                    "coder": ["Built feature draft"],
+                    "reviewer": ["Reviewed current draft"],
                 }
             ),
         )
@@ -607,20 +604,8 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             registry,
             agent_invoker=_fake_agent_invoker(
                 {
-                    "orchestrator": ["Workroom final summary"],
-                    "architect": [
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Architecture plan",
-                        )
-                    ],
-                    "coder": [
-                        _internal_action(
-                            "reply_lead_dev",
-                            message="Built feature",
-                        )
-                    ],
-                    "reviewer": ["Reviewed result"],
+                    "orchestrator": ["Channel final summary"],
+                    "architect": ["Architecture plan"],
                 }
             ),
         )
@@ -650,19 +635,17 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
         self.assertIn("architect: Architecture", reasoning)
-        self.assertIn("coder: Built", reasoning)
-        self.assertIn("reviewer: Reviewed", reasoning)
-        self.assertEqual(resumed_result.content, "Workroom final summary")
+        self.assertEqual(resumed_result.content, "Channel final summary")
 
-    async def test_workroom_uses_template_participant_order(self) -> None:
-        registry = _advanced_workroom_registry()
+    async def test_channel_uses_preset_participant_order(self) -> None:
+        registry = _advanced_channel_registry()
         core = ProxyOrchestrationCore(
             registry,
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="debate",
                             message="Choose an approach",
                         ),
@@ -694,20 +677,22 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reviewer: Decision-ready", reasoning)
         self.assertEqual(result.content, "Debate final summary")
 
-    async def test_message_workroom_can_replace_room_staffing(self) -> None:
-        registry = _advanced_workroom_registry()
+    async def test_orchestrator_can_open_a_second_channel_with_new_staffing(
+        self,
+    ) -> None:
+        registry = _advanced_channel_registry()
         core = ProxyOrchestrationCore(
             registry,
             agent_invoker=_fake_agent_invoker(
                 {
                     "orchestrator": [
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             preset="debate",
                             message="Build it",
                         ),
                         _internal_action(
-                            "message_workroom",
+                            "open_channel",
                             participants=["reviewer"],
                             message="Reviewer, give the final verdict.",
                         ),
@@ -770,7 +755,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         tool_choice = captured["tool_choice"]
         self.assertEqual(
             [tool.name for tool in tools],
-            ["write_file", "message_workroom"],
+            ["write_file", "open_channel", "message_channel", "close_channel"],
         )
         self.assertEqual(
             tool_choice,
@@ -1052,7 +1037,7 @@ class _FakeRegistry:
                     sections={"Identity": "Reviewer."},
                 ),
             },
-            workroom_definitions={
+            channel_presets={
                 "standard-build": ("architect",),
             },
         )
@@ -1112,9 +1097,9 @@ def _fake_registry():
     return _FakeRegistry()
 
 
-def _multi_participant_workroom_registry():
+def _multi_participant_channel_registry():
     registry = _FakeRegistry()
-    registry.workroom_definitions["build-room"] = (
+    registry.channel_presets["build-room"] = (
         "architect",
         "coder",
         "reviewer",
@@ -1136,11 +1121,11 @@ def _provider_registry(*, tool_calling: bool) -> RuntimeRegistry:
                 sections={"Identity": "Lead engineer."},
             ),
         },
-        workroom_definitions={},
+        channel_presets={},
     )
 
 
-def _advanced_workroom_registry() -> RuntimeRegistry:
+def _advanced_channel_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
         agent_definitions={
@@ -1180,7 +1165,7 @@ def _advanced_workroom_registry() -> RuntimeRegistry:
                 sections={"Identity": "Reviewer."},
             ),
         },
-        workroom_definitions={
+        channel_presets={
             "debate": ("architect", "brainstormer", "architect", "reviewer"),
         },
     )

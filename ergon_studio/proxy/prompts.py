@@ -8,6 +8,7 @@ def orchestrator_turn_prompt(
     request: ProxyTurnRequest,
     *,
     worklog: tuple[str, ...] = (),
+    open_channels: tuple[str, ...] = (),
 ) -> str:
     lines = [
         "You are the lead developer in an AI software firm.",
@@ -17,16 +18,15 @@ def orchestrator_turn_prompt(
             "forward yourself."
         ),
         (
-            "When you need help from the team, message one workroom at a time "
-            "instead of describing a plan in JSON."
+            "When you need help from the team, open a channel to the relevant "
+            "people instead of describing a plan in JSON."
         ),
         (
             "Do not send a product-manager-facing answer while you are still "
             "gathering internal help."
         ),
         (
-            "If you are going to message a workroom or use a tool in this move, "
-            "emit only the tool call and no assistant text."
+            "When you need a channel or a host tool, use the tool call directly."
         ),
         "",
         "Conversation summary:",
@@ -35,27 +35,29 @@ def orchestrator_turn_prompt(
         "Latest user request:",
         request.latest_user_text() or "(none)",
     ]
+    if open_channels:
+        lines.extend(["", "Open channels:", *open_channels])
     if worklog:
         lines.extend(["", "Team work so far:", *worklog[-12:]])
     return "\n".join(lines).strip()
 
 
-def workroom_round_prompt(
+def channel_message_prompt(
     *,
-    workroom_name: str,
+    channel_name: str,
     agent_id: str,
     role_instance_label: str | None = None,
     role_instance_context: str | None = None,
     user_request: str,
-    workroom_message: str | None = None,
     transcript_summary: str,
+    channel_transcript: tuple[str, ...],
     prior_work: tuple[str, ...],
 ) -> str:
     lines = [
-        f"You are {agent_id} working inside workroom {workroom_name}.",
+        f"You are {agent_id} in channel {channel_name}.",
         (
-            "The lead developer is using this workroom for collaboration, not as "
-            "a rigid script."
+            "The lead developer opened this channel to collaborate with you like a "
+            "real teammate, not to run a scripted process."
         ),
     ]
     if role_instance_label:
@@ -82,37 +84,30 @@ def workroom_round_prompt(
             user_request or "(none)",
         ]
     )
-    if workroom_message:
+    if channel_transcript:
         lines.extend(
             [
                 "",
-                "Latest lead-dev message to this workroom:",
-                workroom_message,
+                "Channel transcript so far:",
+                *channel_transcript[-8:],
             ]
         )
     if prior_work:
         lines.extend(
             [
                 "",
-                "Relevant team work so far:",
+                "Recent team notes:",
                 *prior_work[-6:],
             ]
         )
     lines.extend(
         [
             "",
-            "Keep ownership of the task while you are still actively working.",
+            "Reply naturally in the conversation.",
+            "Use tools when you need them.",
             (
-                "Do not hand the task back to the lead developer after every small "
-                "status update."
-            ),
-            (
-                "Use tools when you need them and keep working through the task "
-                "until you are done, blocked, or truly need a decision."
-            ),
-            (
-                "When you are done, blocked, or need a decision from the lead "
-                "developer, call `reply_lead_dev` with a concise update."
+                "Do not invent process markers or status keywords. Just say what "
+                "you found, changed, or need in plain language."
             ),
         ]
     )

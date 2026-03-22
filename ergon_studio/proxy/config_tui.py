@@ -312,14 +312,14 @@ class ProxyConfigApp(App[None]):
 
     #endpoint-form,
     #agent-sidebar,
-    #workroom-sidebar,
+    #channel-sidebar,
     #agent-editor-pane,
-    #workroom-editor-pane {
+    #channel-editor-pane {
         padding: 1;
     }
 
     #agent-sidebar,
-    #workroom-sidebar {
+    #channel-sidebar {
         width: 30;
     }
 
@@ -365,11 +365,11 @@ class ProxyConfigApp(App[None]):
                     directory=self.definitions_dir / "agents",
                     apply_mutation=self._apply_definition_mutation,
                 )
-            with TabPane("Workroom Presets", id="workrooms-tab"):
+            with TabPane("Channel Presets", id="channels-tab"):
                 yield DefinitionEditor(
-                    title="Workroom Presets",
-                    definition_kind="workroom",
-                    directory=self.definitions_dir / "workrooms",
+                    title="Channel Presets",
+                    definition_kind="channel",
+                    directory=self.definitions_dir / "channels",
                     apply_mutation=self._apply_definition_mutation,
                 )
         yield Footer()
@@ -709,11 +709,11 @@ def _new_definition_template(definition_kind: str, definition_id: str) -> str:
         "  - coder\n"
         "---\n\n"
         "## Purpose\n"
-        "Describe what this workroom preset is for.\n\n"
+        "Describe what this channel preset is for.\n\n"
         "## Use When\n"
         "Describe when the lead developer should reach for it.\n\n"
         "## Notes\n"
-        "Workroom presets are tactics for the orchestrator, not rigid scripts.\n"
+        "Channel presets are tactics for the orchestrator, not rigid scripts.\n"
     )
 
 

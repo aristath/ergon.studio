@@ -456,17 +456,17 @@ def _agent_profile_context(
                 continue
             agent_role = str(candidate.metadata.get("role", agent_id))
             agent_summaries.append(f"{agent_id}({agent_role})")
-        workroom_summaries = []
-        for workroom_id, participants in sorted(registry.workroom_definitions.items()):
+        preset_summaries = []
+        for channel_id, participants in sorted(registry.channel_presets.items()):
             participant_summary = ", ".join(participants)
-            workroom_summaries.append(f"{workroom_id}({participant_summary})")
+            preset_summaries.append(f"{channel_id}({participant_summary})")
         lines.append(
             "Available specialists: "
             + (", ".join(agent_summaries) if agent_summaries else "none")
         )
         lines.append(
-            "Available workroom presets: "
-            + (", ".join(workroom_summaries) if workroom_summaries else "none")
+            "Available channel presets: "
+            + (", ".join(preset_summaries) if preset_summaries else "none")
         )
     return "\n".join(lines)
 

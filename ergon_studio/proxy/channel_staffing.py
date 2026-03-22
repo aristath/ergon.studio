@@ -71,8 +71,8 @@ def participant_context(participant: StaffedParticipant) -> str | None:
         return None
     return (
         f"You are instance {participant.instance_index} of "
-        f"{participant.total_instances} staffed {participant.agent_id}s for this "
-        "round. Produce an independently useful contribution."
+        f"{participant.total_instances} staffed {participant.agent_id}s in this "
+        "channel. Produce a distinct, independently useful contribution."
     )
 
 

@@ -248,7 +248,7 @@ class _FakeCore:
             {
                 "upstream": UpstreamSettings(base_url="http://localhost:8080/v1"),
                 "agent_definitions": {},
-                "workroom_definitions": {},
+                "channel_presets": {},
             },
         )()
 

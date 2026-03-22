@@ -24,11 +24,12 @@ understands your goal, decides what kind of help is needed, and coordinates
 the team.
 
 - For simple tasks, the orchestrator handles them directly.
-- For bigger work, it opens workrooms — collaborative spaces where
-  specialists (architect, coder, reviewer, tester, critic, researcher) work
-  on focused assignments.
-- After each step, the orchestrator reads the results and decides what
-  happens next: iterate, change approach, bring in someone else, or deliver.
+- For bigger work, it opens channels — one-on-one calls or conference calls
+  where specialists (architect, coder, reviewer, tester, critic, researcher)
+  collaborate in natural language.
+- After each conversation, the orchestrator reads the results and decides
+  what happens next: iterate, change approach, bring in someone else, or
+  deliver.
 
 The orchestrator stays in control throughout. There's no rigid pipeline — just
 judgment, delegation, and iteration.
@@ -84,7 +85,7 @@ The first launch creates a workspace at `~/.config/ergon/` containing:
 
 - `config.json` — upstream endpoint, proxy host/port
 - `definitions/agents/*.md` — agent role definitions
-- `definitions/workrooms/*.md` — workroom presets
+- `definitions/channels/*.md` — channel presets
 
 ### CLI Options
 
@@ -104,7 +105,7 @@ The configuration TUI has tabs for:
 
 - Upstream endpoint settings
 - Agent definitions
-- Workroom presets
+- Channel presets
 
 Navigation: `Tab`/`Shift+Tab` to move focus, arrow keys inside lists and
 editors.
@@ -127,9 +128,9 @@ Agents are defined as markdown files with YAML frontmatter. You can edit the
 defaults or add your own — a designer, security auditor, documentation writer,
 or anything else that fits your workflow.
 
-## Workrooms
+## Channels
 
-Workrooms are collaborative spaces where agents work together. The
+Channels are collaborative conversations where agents work together. The
 orchestrator opens them as needed.
 
 Ergon ships with two presets:
@@ -139,7 +140,7 @@ Ergon ships with two presets:
 - **debate** — Architect, coder, critic, and reviewer discuss a problem from
   different angles before committing to a plan.
 
-The orchestrator can also open ad-hoc workrooms with any combination of
+The orchestrator can also open ad-hoc channels with any combination of
 agents. Presets are shortcuts, not constraints.
 
 ## Development

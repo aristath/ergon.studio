@@ -8,9 +8,9 @@ participants:
 ---
 
 ## Purpose
-Generate multiple independent implementation attempts in one round.
+Generate multiple independent implementation attempts in one channel.
 
 ## Use When
 - one good answer is unlikely on the first try
 - the task is tricky enough that multiple coding approaches may pay off
-- the lead developer plans to compare the outputs in a later round
+- the lead developer plans to compare the outputs after hearing everyone

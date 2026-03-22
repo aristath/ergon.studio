@@ -15,25 +15,25 @@ class WorkspacePaths:
     config_path: Path
     definitions_dir: Path
     agents_dir: Path
-    workrooms_dir: Path
+    channels_dir: Path
 
 
 def ensure_workspace(app_dir: Path) -> WorkspacePaths:
     agents_dir = definitions_dir(app_dir) / "agents"
-    workrooms_dir = definitions_dir(app_dir) / "workrooms"
+    channels_dir = definitions_dir(app_dir) / "channels"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    workrooms_dir.mkdir(parents=True, exist_ok=True)
+    channels_dir.mkdir(parents=True, exist_ok=True)
     _seed_bundled_definitions(agents_dir, _bundled_definition_files("agents"))
     _seed_bundled_definitions(
-        workrooms_dir,
-        _bundled_definition_files("workrooms"),
+        channels_dir,
+        _bundled_definition_files("channels"),
     )
     return WorkspacePaths(
         app_dir=app_dir,
         config_path=config_path(app_dir),
         definitions_dir=definitions_dir(app_dir),
         agents_dir=agents_dir,
-        workrooms_dir=workrooms_dir,
+        channels_dir=channels_dir,
     )
 
 

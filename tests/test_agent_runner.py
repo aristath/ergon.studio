@@ -46,7 +46,7 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertIn("Available specialists: coder(coder)", instructions)
         self.assertIn(
-            "Available workroom presets: best-of-n(coder, coder, reviewer)",
+            "Available channel presets: best-of-n(coder, coder, reviewer)",
             instructions,
         )
 
@@ -66,6 +66,7 @@ class AgentRunnerTests(unittest.TestCase):
         )
         pending = PendingContinuation(
             state=ContinuationState(actor="orchestrator"),
+            tool_states=(ContinuationState(actor="orchestrator"),),
             assistant_message=ProxyInputMessage(
                 role="assistant",
                 content="",
@@ -116,6 +117,7 @@ class AgentRunnerTests(unittest.TestCase):
         )
         pending = PendingContinuation(
             state=ContinuationState(actor="orchestrator"),
+            tool_states=(ContinuationState(actor="orchestrator"),),
             assistant_message=None,
             tool_results=(
                 ProxyInputMessage(
@@ -198,7 +200,7 @@ def _registry() -> RuntimeRegistry:
                 sections={"Identity": "Reviewer."},
             ),
         },
-        workroom_definitions={
+        channel_presets={
             "best-of-n": ("coder", "coder", "reviewer"),
         },
     )

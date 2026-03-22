@@ -6,31 +6,25 @@ from dataclasses import dataclass
 from ergon_studio.proxy.models import ProxyFunctionTool, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 
-INTERNAL_TOOL_NAMES = frozenset({"message_workroom", "reply_lead_dev"})
-
-WORKROOM_INTERNAL_TOOLS = (
-    ProxyFunctionTool(
-        name="reply_lead_dev",
-        description=(
-            "Send a concise update back to the lead developer when you are "
-            "done, blocked, or need a decision."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "message": {"type": "string"},
-            },
-            "required": ["message"],
-        },
-    ),
-)
+INTERNAL_TOOL_NAMES = frozenset({"open_channel", "message_channel", "close_channel"})
 
 
 @dataclass(frozen=True)
-class MessageWorkroomAction:
+class OpenChannelAction:
     preset: str | None
     participants: tuple[str, ...]
     message: str
+
+
+@dataclass(frozen=True)
+class MessageChannelAction:
+    channel: str
+    message: str
+
+
+@dataclass(frozen=True)
+class CloseChannelAction:
+    channel: str
 
 
 def build_orchestrator_internal_tools(
@@ -41,13 +35,13 @@ def build_orchestrator_internal_tools(
         for agent_id in sorted(registry.agent_definitions)
         if agent_id != "orchestrator"
     )
-    workroom_ids = tuple(sorted(registry.workroom_definitions))
+    preset_ids = tuple(sorted(registry.channel_presets))
     return (
         ProxyFunctionTool(
-            name="message_workroom",
+            name="open_channel",
             description=(
-                "Message a workroom. Provide a preset or participants "
-                "to target the room you want. Repeating a participant means "
+                "Open a new channel with teammates. Provide a preset or participants "
+                "to choose who is on the call. Repeating a participant means "
                 "multiple staffed instances of that role."
             ),
             parameters={
@@ -55,7 +49,7 @@ def build_orchestrator_internal_tools(
                 "properties": {
                     "preset": {
                         "type": "string",
-                        "enum": list(workroom_ids),
+                        "enum": list(preset_ids),
                     },
                     "participants": {
                         "type": "array",
@@ -69,18 +63,43 @@ def build_orchestrator_internal_tools(
                 "required": ["message"],
             },
         ),
+        ProxyFunctionTool(
+            name="message_channel",
+            description=(
+                "Send another message into an already-open channel by channel id."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+                "required": ["channel", "message"],
+            },
+        ),
+        ProxyFunctionTool(
+            name="close_channel",
+            description="Close an open channel when the conversation is done.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string"},
+                },
+                "required": ["channel"],
+            },
+        ),
     )
 
 
-def parse_message_workroom_action(
+def parse_open_channel_action(
     tool_call: ProxyToolCall,
     *,
     registry: RuntimeRegistry,
-) -> MessageWorkroomAction:
-    if tool_call.name != "message_workroom":
+) -> OpenChannelAction:
+    if tool_call.name != "open_channel":
         raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
-    return MessageWorkroomAction(
+    return OpenChannelAction(
         preset=_optional_preset(payload.get("preset"), registry),
         participants=_normalize_staffing_list(
             payload.get("participants"),
@@ -90,13 +109,23 @@ def parse_message_workroom_action(
     )
 
 
-def parse_reply_lead_dev_message(
-    tool_call: ProxyToolCall,
-) -> str:
-    if tool_call.name != "reply_lead_dev":
-        raise ValueError(f"unsupported workroom tool: {tool_call.name}")
+def parse_message_channel_action(tool_call: ProxyToolCall) -> MessageChannelAction:
+    if tool_call.name != "message_channel":
+        raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
-    return _required_text(payload.get("message"), field="message")
+    return MessageChannelAction(
+        channel=_required_text(payload.get("channel"), field="channel"),
+        message=_required_text(payload.get("message"), field="message"),
+    )
+
+
+def parse_close_channel_action(tool_call: ProxyToolCall) -> CloseChannelAction:
+    if tool_call.name != "close_channel":
+        raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
+    payload = _parse_tool_payload(tool_call)
+    return CloseChannelAction(
+        channel=_required_text(payload.get("channel"), field="channel"),
+    )
 
 
 def is_internal_tool_name(name: str) -> bool:
@@ -133,8 +162,8 @@ def _optional_preset(
     stripped = value.strip()
     if not stripped:
         return None
-    if stripped not in registry.workroom_definitions:
-        raise ValueError(f"unknown workroom preset: {stripped}")
+    if stripped not in registry.channel_presets:
+        raise ValueError(f"unknown channel preset: {stripped}")
     return stripped
 
 

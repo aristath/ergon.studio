@@ -111,7 +111,8 @@ class ProxyChannelExecutor:
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
-                            actor_result=result,
+                            participant=participant,
+                            response=result,
                             request=request,
                             channel=channel,
                             current_transcript=current_transcript,
@@ -152,7 +153,8 @@ class ProxyChannelExecutor:
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
-                            actor_result=result,
+                            participant=participant,
+                            response=result,
                             request=request,
                             channel=channel,
                             current_transcript=current_transcript,
@@ -190,7 +192,7 @@ class ProxyChannelExecutor:
         participant: StaffedParticipant,
         channel_transcript: tuple[ChannelMessage, ...],
         pending: PendingToolContext | None = None,
-    ) -> _ParticipantResult:
+    ) -> AgentRunResult:
         prompt = channel_message_prompt(
             channel_name=channel_name,
             agent_id=participant.agent_id,
@@ -216,14 +218,7 @@ class ProxyChannelExecutor:
         )
         async for _ in stream:
             pass
-        response = await stream.get_final_response()
-        return _ParticipantResult(participant=participant, response=response)
-
-
-@dataclass(frozen=True)
-class _ParticipantResult:
-    participant: StaffedParticipant
-    response: AgentRunResult
+        return await stream.get_final_response()
 
 
 def _channel_conversation_messages(
@@ -254,7 +249,8 @@ def _channel_conversation_messages(
 
 def _process_participant_results(
     *,
-    actor_result: _ParticipantResult,
+    participant: StaffedParticipant,
+    response: AgentRunResult,
     request: ProxyTurnRequest,
     channel: Channel,
     current_transcript: list[ChannelMessage],
@@ -273,7 +269,7 @@ def _process_participant_results(
 
     internal_actions: list[_ChannelDelivery] = []
     host_tool_calls: list[ProxyToolCall] = []
-    for tool_call in actor_result.response.tool_calls:
+    for tool_call in response.tool_calls:
         if is_internal_tool_name(tool_call.name):
             if tool_call.name != "message_channel":
                 raise ValueError(
@@ -285,7 +281,7 @@ def _process_participant_results(
             )
             internal_actions.append(
                 _ChannelDelivery(
-                    author=actor_result.participant.label,
+                    author=participant.label,
                     message=action.message,
                     recipients=action.recipients,
                 )
@@ -296,10 +292,10 @@ def _process_participant_results(
     if internal_actions:
         deliveries.extend(internal_actions)
     else:
-        text = actor_result.response.text.strip()
+        text = response.text.strip()
         if text:
             line = ChannelMessage(
-                author=actor_result.participant.label,
+                author=participant.label,
                 content=text,
             )
             channel_messages.append(line)
@@ -313,7 +309,7 @@ def _process_participant_results(
                 tool_calls=tuple(host_tool_calls),
                 request=request,
                 session_id=session_id,
-                actor=actor_result.participant.label,
+                actor=participant.label,
                 active_channel_id=channel.channel_id,
                 state=state,
             )

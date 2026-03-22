@@ -440,7 +440,7 @@ def _open_channel(
         return Channel(
             channel_id=channel_id,
             name=preset,
-            participants=participants or resolved_participants,
+            participants=resolved_participants,
         )
     if participants:
         return Channel(

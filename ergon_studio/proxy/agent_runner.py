@@ -396,9 +396,8 @@ def _pending_assistant_message(
     payload: dict[str, Any] = {
         "role": "assistant",
         "content": "",
+        "tool_calls": tool_calls,
     }
-    if tool_calls:
-        payload["tool_calls"] = tool_calls
     return payload
 
 

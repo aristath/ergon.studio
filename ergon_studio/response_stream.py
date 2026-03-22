@@ -25,11 +25,7 @@ class ResponseStream[UpdateT, FinalT](AsyncIterable[UpdateT]):
 
     async def __anext__(self) -> UpdateT:
         iterator = await self._ensure_iterator()
-        try:
-            update = await iterator.__anext__()
-        except StopAsyncIteration:
-            raise
-        return update
+        return await iterator.__anext__()
 
     async def get_final_response(self) -> FinalT:
         if self._finalized:

@@ -18,6 +18,7 @@ from ergon_studio.proxy.continuation import (
 )
 from ergon_studio.proxy.models import (
     ProxyFunctionTool,
+    ProxyInputMessage,
     ProxyToolCall,
     ProxyToolCallEvent,
     ProxyTurnRequest,
@@ -72,6 +73,7 @@ class ProxyAgentRunner:
         agent_id: str,
         prompt: str,
         model_id_override: str,
+        conversation_messages: tuple[ProxyInputMessage, ...] = (),
         host_tools: tuple[ProxyFunctionTool, ...] = (),
         extra_tools: tuple[ProxyFunctionTool, ...] = (),
         tool_choice: ProxyToolChoice = None,
@@ -82,6 +84,7 @@ class ProxyAgentRunner:
             agent_id=agent_id,
             prompt=prompt,
             model_id_override=model_id_override,
+            conversation_messages=conversation_messages,
             host_tools=host_tools,
             extra_tools=extra_tools,
             tool_choice=tool_choice,
@@ -171,6 +174,7 @@ class ProxyAgentRunner:
         agent_id: str,
         prompt: str,
         model_id_override: str,
+        conversation_messages: tuple[ProxyInputMessage, ...],
         host_tools: tuple[ProxyFunctionTool, ...],
         extra_tools: tuple[ProxyFunctionTool, ...],
         tool_choice: ProxyToolChoice,
@@ -202,6 +206,7 @@ class ProxyAgentRunner:
                 registry=self.registry,
                 instructions=instructions,
                 prompt=prompt,
+                conversation_messages=conversation_messages,
                 pending_continuation=pending_continuation,
             )
         )
@@ -296,6 +301,7 @@ def build_agent_messages(
     registry: RuntimeRegistry,
     instructions: str,
     prompt: str,
+    conversation_messages: tuple[ProxyInputMessage, ...],
     pending_continuation: PendingContinuation | None,
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
@@ -307,6 +313,9 @@ def build_agent_messages(
         }
     )
     messages.append({"role": "user", "content": prompt})
+    messages.extend(
+        _openai_message_from_proxy(message) for message in conversation_messages
+    )
 
     assistant_message = _pending_assistant_message(pending_continuation)
     if assistant_message is not None:
@@ -391,6 +400,22 @@ def _tool_call_message(tool_call: ProxyToolCall) -> dict[str, Any]:
             "arguments": tool_call.arguments_json,
         },
     }
+
+
+def _openai_message_from_proxy(message: ProxyInputMessage) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "role": message.role,
+        "content": message.content,
+    }
+    if message.name is not None:
+        payload["name"] = message.name
+    if message.tool_call_id is not None:
+        payload["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            _tool_call_message(tool_call) for tool_call in message.tool_calls
+        ]
+    return payload
 
 
 def _tool_to_openai(tool: ProxyFunctionTool) -> dict[str, Any]:

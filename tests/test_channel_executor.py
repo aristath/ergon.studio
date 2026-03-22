@@ -282,10 +282,10 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_channel_prompt_includes_message_transcript_and_team_notes(
         self,
     ) -> None:
-        streamed_prompts: list[str] = []
+        streamed_kwargs: list[dict[str, object]] = []
 
         def _stream_text_agent(**kwargs):
-            streamed_prompts.append(kwargs["prompt"])
+            streamed_kwargs.append(kwargs)
             return _response_stream("Reviewer chose candidate 2")
 
         executor = ProxyChannelExecutor(
@@ -302,7 +302,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             name="debate",
             participants=("reviewer",),
             transcript=[
-                ChannelMessage("orchestrator", "Choose one clear direction."),
                 ChannelMessage("architect", "Option A"),
                 ChannelMessage("coder", "Option B"),
             ],
@@ -323,9 +322,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
                         name="debate",
                         participants=("reviewer",),
                         transcript=(
-                            ChannelMessage(
-                                "orchestrator", "Choose one clear direction."
-                            ),
                             ChannelMessage("architect", "Option A"),
                             ChannelMessage("coder", "Option B"),
                         ),
@@ -337,12 +333,37 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         [event async for event in stream]
 
-        reviewer_prompt = streamed_prompts[0]
-        self.assertIn("Channel transcript so far:", reviewer_prompt)
-        self.assertIn("orchestrator: Choose one clear direction.", reviewer_prompt)
-        self.assertIn("architect: Option A", reviewer_prompt)
+        reviewer_prompt = streamed_kwargs[0]["prompt"]
+        assert isinstance(reviewer_prompt, str)
+        self.assertIn(
+            "Recent channel messages are provided separately as conversation history.",
+            reviewer_prompt,
+        )
         self.assertIn("Recent team notes:", reviewer_prompt)
         self.assertIn("researcher: constraints noted", reviewer_prompt)
+        self.assertNotIn("architect: Option A", reviewer_prompt)
+        conversation_messages = streamed_kwargs[0]["conversation_messages"]
+        assert isinstance(conversation_messages, tuple)
+        self.assertEqual(
+            conversation_messages,
+            (
+                ProxyInputMessage(
+                    role="user",
+                    name="architect",
+                    content="Option A",
+                ),
+                ProxyInputMessage(
+                    role="user",
+                    name="coder",
+                    content="Option B",
+                ),
+                ProxyInputMessage(
+                    role="user",
+                    name="orchestrator",
+                    content="Choose one clear direction.",
+                ),
+            ),
+        )
 
 
 def _pending_tool_result(call_id: str):

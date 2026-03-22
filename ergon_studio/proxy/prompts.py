@@ -30,9 +30,7 @@ def orchestrator_turn_prompt(
             "Do not send a product-manager-facing answer while you are still "
             "gathering internal help."
         ),
-        (
-            "When you need a channel or a host tool, use the tool call directly."
-        ),
+        ("When you need a channel or a host tool, use the tool call directly."),
         "",
         "Conversation summary:",
         summarize_conversation(request.messages, limit=12) or "(none)",
@@ -93,8 +91,15 @@ def channel_message_prompt(
         lines.extend(
             [
                 "",
-                "Channel transcript so far:",
-                *(message.render() for message in channel_transcript[-8:]),
+                (
+                    "Recent channel messages are provided separately as "
+                    "conversation history."
+                ),
+                (
+                    "Treat orchestrator messages as the lead developer talking to "
+                    "you directly. Your own prior channel replies appear as assistant "
+                    "messages."
+                ),
             ]
         )
     if prior_work:

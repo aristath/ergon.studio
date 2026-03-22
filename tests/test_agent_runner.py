@@ -85,6 +85,7 @@ class AgentRunnerTests(unittest.TestCase):
             registry=registry,
             instructions=instructions,
             prompt="Use the result.",
+            conversation_messages=(),
             pending_continuation=pending,
         )
 
@@ -132,6 +133,7 @@ class AgentRunnerTests(unittest.TestCase):
             registry=registry,
             instructions=instructions,
             prompt="Use the result.",
+            conversation_messages=(),
             pending_continuation=pending,
         )
 
@@ -141,6 +143,51 @@ class AgentRunnerTests(unittest.TestCase):
         )
         self.assertEqual(messages[2]["tool_calls"][0]["id"], encoded_tool_call.id)
         self.assertEqual(messages[3]["tool_call_id"], "call_1")
+
+    def test_build_agent_messages_includes_structured_conversation_history(
+        self,
+    ) -> None:
+        registry = _registry()
+        instructions = compose_instructions(
+            registry.agent_definitions["coder"],
+            registry=registry,
+        )
+
+        messages = build_agent_messages(
+            registry=registry,
+            instructions=instructions,
+            prompt="Stay in this channel and continue the work.",
+            conversation_messages=(
+                ProxyInputMessage(
+                    role="user",
+                    name="orchestrator",
+                    content="Please inspect models.py.",
+                ),
+                ProxyInputMessage(
+                    role="assistant",
+                    name="coder",
+                    content="I checked the file and found the dataclasses.",
+                ),
+                ProxyInputMessage(
+                    role="user",
+                    name="reviewer",
+                    content="Please keep the edits small and clear.",
+                ),
+            ),
+            pending_continuation=None,
+        )
+
+        self.assertEqual(
+            [message["role"] for message in messages],
+            ["system", "user", "user", "assistant", "user"],
+        )
+        self.assertEqual(messages[2]["name"], "orchestrator")
+        self.assertEqual(messages[2]["content"], "Please inspect models.py.")
+        self.assertEqual(messages[3]["name"], "coder")
+        self.assertEqual(
+            messages[4]["content"],
+            "Please keep the edits small and clear.",
+        )
 
     def test_stream_accumulator_rebuilds_incremental_tool_call_arguments(
         self,

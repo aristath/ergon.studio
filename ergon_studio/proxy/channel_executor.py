@@ -17,6 +17,7 @@ from ergon_studio.proxy.continuation import (
     pending_for_actor,
 )
 from ergon_studio.proxy.models import (
+    ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCallEvent,
     ProxyTurnRequest,
@@ -169,6 +170,10 @@ class ProxyChannelExecutor:
             agent_id=participant.agent_id,
             prompt=prompt,
             model_id_override=request.model,
+            conversation_messages=_channel_conversation_messages(
+                channel_transcript=channel_transcript,
+                participant_label=participant.label,
+            ),
             host_tools=request.tools,
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
@@ -225,6 +230,32 @@ def _targeted_participants(
         selected.append(participant)
         remaining[participant.agent_id] = remaining_count - 1
     return tuple(selected)
+
+
+def _channel_conversation_messages(
+    *,
+    channel_transcript: tuple[ChannelMessage, ...],
+    participant_label: str,
+) -> tuple[ProxyInputMessage, ...]:
+    messages: list[ProxyInputMessage] = []
+    for message in channel_transcript:
+        if message.author == participant_label:
+            messages.append(
+                ProxyInputMessage(
+                    role="assistant",
+                    content=message.content,
+                    name=message.author,
+                )
+            )
+            continue
+        messages.append(
+            ProxyInputMessage(
+                role="user",
+                content=message.content,
+                name=message.author,
+            )
+        )
+    return tuple(messages)
 
 
 def _snapshot_channels(

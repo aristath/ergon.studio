@@ -111,6 +111,58 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    async def test_multi_recipient_message_replies_in_explicit_order(self) -> None:
+        captured_conversations: list[tuple[ProxyInputMessage, ...]] = []
+
+        def _stream_text_agent(**kwargs):
+            captured_conversations.append(kwargs["conversation_messages"])
+            if kwargs["agent_id"] == "reviewer":
+                return _response_stream("Reviewer critique")
+            return _response_stream("Architect direction")
+
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Discuss it"),),
+        )
+        state = ProxyTurnState()
+        channel = OpenChannel(
+            channel_id="channel-1",
+            name="debate",
+            participants=("architect", "reviewer"),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            channel_message="Reviewer, then architect, weigh in.",
+            recipients=("reviewer", "architect"),
+            state=state,
+        )
+
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(
+            result,
+            (
+                ChannelMessage("reviewer", "Reviewer critique"),
+                ChannelMessage("architect", "Architect direction"),
+            ),
+        )
+        self.assertEqual(
+            [message.name for message in captured_conversations[0]],
+            ["orchestrator"],
+        )
+        self.assertEqual(
+            [message.name for message in captured_conversations[1]],
+            ["orchestrator", "reviewer"],
+        )
+
     async def test_execute_can_target_specific_staffed_label(self) -> None:
         streamed_agents: list[str] = []
         streamed_prompts: list[str] = []
@@ -330,6 +382,103 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(event, ProxyReasoningDeltaEvent)
         )
         self.assertIn("coder: Updated main.py", reasoning)
+
+    async def test_pending_resumes_update_transcript_before_next_actor(self) -> None:
+        captured_conversations: list[tuple[ProxyInputMessage, ...]] = []
+
+        def _stream_text_agent(**kwargs):
+            captured_conversations.append(kwargs["conversation_messages"])
+            if kwargs["agent_id"] == "architect":
+                return _response_stream("Architecture checked")
+            return _response_stream("Implementation updated")
+
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Continue"),),
+            tools=(_host_tool("read_file"),),
+        )
+        channel = OpenChannel(
+            channel_id="channel-1",
+            name="debate",
+            participants=("architect", "coder"),
+            transcript=[ChannelMessage("orchestrator", "Continue.")],
+        )
+
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            state=ProxyTurnState(),
+            pending=PendingContinuation(
+                session_id="session_1",
+                items=(
+                    PendingToolContext(
+                        pending_id="pending_a",
+                        session_id="session_1",
+                        actor="architect",
+                        active_channel_id="channel-1",
+                        tool_calls=(
+                            ProxyToolCall(
+                                id="call_a",
+                                name="read_file",
+                                arguments_json='{"path":"plan.md"}',
+                            ),
+                        ),
+                        tool_results=(
+                            ProxyInputMessage(
+                                role="tool",
+                                content="plan text",
+                                tool_call_id="ergon:3:pending_a:call_a",
+                            ),
+                        ),
+                    ),
+                    PendingToolContext(
+                        pending_id="pending_b",
+                        session_id="session_1",
+                        actor="coder",
+                        active_channel_id="channel-1",
+                        tool_calls=(
+                            ProxyToolCall(
+                                id="call_b",
+                                name="read_file",
+                                arguments_json='{"path":"main.py"}',
+                            ),
+                        ),
+                        tool_results=(
+                            ProxyInputMessage(
+                                role="tool",
+                                content="main text",
+                                tool_call_id="ergon:3:pending_b:call_b",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(
+            result,
+            (
+                ChannelMessage("architect", "Architecture checked"),
+                ChannelMessage("coder", "Implementation updated"),
+            ),
+        )
+        self.assertEqual(
+            [message.name for message in captured_conversations[0]],
+            ["orchestrator"],
+        )
+        self.assertEqual(
+            [message.name for message in captured_conversations[1]],
+            ["orchestrator", "architect"],
+        )
 
 
 def _registry() -> RuntimeRegistry:

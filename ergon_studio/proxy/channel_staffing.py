@@ -83,27 +83,17 @@ def resolve_staffed_recipients(
 ) -> tuple[StaffedParticipant, ...]:
     if not recipients:
         return ()
-
-    exact_remaining: dict[str, int] = {}
-    agent_remaining: dict[str, int] = {}
-    for recipient in recipients:
-        if "[" in recipient and recipient.endswith("]"):
-            exact_remaining[recipient] = exact_remaining.get(recipient, 0) + 1
-            continue
-        agent_remaining[recipient] = agent_remaining.get(recipient, 0) + 1
-
+    remaining = list(staffed_members)
     selected: list[StaffedParticipant] = []
-    for participant in staffed_members:
-        exact_count = exact_remaining.get(participant.label, 0)
-        if exact_count > 0:
-            selected.append(participant)
-            exact_remaining[participant.label] = exact_count - 1
+    for recipient in recipients:
+        match_index = -1
+        for index, participant in enumerate(remaining):
+            if recipient == participant.label or recipient == participant.agent_id:
+                match_index = index
+                break
+        if match_index < 0:
             continue
-        agent_count = agent_remaining.get(participant.agent_id, 0)
-        if agent_count <= 0:
-            continue
-        selected.append(participant)
-        agent_remaining[participant.agent_id] = agent_count - 1
+        selected.append(remaining.pop(match_index))
     return tuple(selected)
 
 

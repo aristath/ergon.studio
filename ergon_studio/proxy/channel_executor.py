@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -90,40 +89,38 @@ class ProxyChannelExecutor:
                 )
 
             if pending is not None:
-                results = await asyncio.gather(
-                    *[
-                        self._run_channel_participant(
+                for actor in pending_actors(pending):
+                    result = await self._run_channel_participant(
+                        request=request,
+                        channel_name=channel.name,
+                        participant=_continuation_participant(
+                            staffed_members=all_staffed_members,
+                            actor=actor,
+                        ),
+                        channel_transcript=tuple(current_transcript),
+                        participant_tools=participant_tools,
+                        pending=_pending_for_actor_or_error(
+                            pending=pending,
+                            actor=actor,
+                        ),
+                    )
+                    emitted, new_deliveries, new_tool_events = (
+                        _process_participant_results(
+                            actor_results=(result,),
                             request=request,
-                            channel_name=channel.name,
-                            participant=_continuation_participant(
-                                staffed_members=all_staffed_members,
-                                actor=actor,
-                            ),
-                            channel_transcript=tuple(current_transcript),
-                            participant_tools=participant_tools,
-                            pending=_pending_for_actor_or_error(
-                                pending=pending,
-                                actor=actor,
-                            ),
+                            channel=channel,
+                            current_transcript=current_transcript,
+                            channel_messages=channel_messages,
+                            state=state,
+                            emit_tool_calls=self._emit_tool_calls,
+                            session_id=session_id,
+                            registry=self._registry,
                         )
-                        for actor in pending_actors(pending)
-                    ]
-                )
-                emitted, new_deliveries, new_tool_events = _process_participant_results(
-                    actor_results=results,
-                    request=request,
-                    channel=channel,
-                    current_transcript=current_transcript,
-                    channel_messages=channel_messages,
-                    state=state,
-                    emit_tool_calls=self._emit_tool_calls,
-                    session_id=session_id,
-                    registry=self._registry,
-                )
-                for reasoning_event in emitted:
-                    yield reasoning_event
-                deliveries.extend(new_deliveries)
-                pending_tool_events.extend(new_tool_events)
+                    )
+                    for reasoning_event in emitted:
+                        yield reasoning_event
+                    deliveries.extend(new_deliveries)
+                    pending_tool_events.extend(new_tool_events)
 
             while deliveries:
                 delivery = deliveries.popleft()
@@ -144,33 +141,31 @@ class ProxyChannelExecutor:
                 if not targets:
                     continue
 
-                results = await asyncio.gather(
-                    *[
-                        self._run_channel_participant(
+                for participant in targets:
+                    result = await self._run_channel_participant(
+                        request=request,
+                        channel_name=channel.name,
+                        participant=participant,
+                        channel_transcript=tuple(current_transcript),
+                        participant_tools=participant_tools,
+                    )
+                    emitted, new_deliveries, new_tool_events = (
+                        _process_participant_results(
+                            actor_results=(result,),
                             request=request,
-                            channel_name=channel.name,
-                            participant=participant,
-                            channel_transcript=tuple(current_transcript),
-                            participant_tools=participant_tools,
+                            channel=channel,
+                            current_transcript=current_transcript,
+                            channel_messages=channel_messages,
+                            state=state,
+                            emit_tool_calls=self._emit_tool_calls,
+                            session_id=session_id,
+                            registry=self._registry,
                         )
-                        for participant in targets
-                    ]
-                )
-                emitted, new_deliveries, new_tool_events = _process_participant_results(
-                    actor_results=results,
-                    request=request,
-                    channel=channel,
-                    current_transcript=current_transcript,
-                    channel_messages=channel_messages,
-                    state=state,
-                    emit_tool_calls=self._emit_tool_calls,
-                    session_id=session_id,
-                    registry=self._registry,
-                )
-                for reasoning_event in emitted:
-                    yield reasoning_event
-                deliveries.extend(new_deliveries)
-                pending_tool_events.extend(new_tool_events)
+                    )
+                    for reasoning_event in emitted:
+                        yield reasoning_event
+                    deliveries.extend(new_deliveries)
+                    pending_tool_events.extend(new_tool_events)
 
             if pending_tool_events:
                 ordered = [

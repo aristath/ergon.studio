@@ -31,7 +31,6 @@ from ergon_studio.proxy.orchestrator_tools import (
 )
 from ergon_studio.proxy.prompts import channel_message_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
-from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = ProxyReasoningDeltaEvent | ProxyToolCallEvent
@@ -48,11 +47,9 @@ class ProxyChannelExecutor:
     def __init__(
         self,
         *,
-        registry: RuntimeRegistry,
         stream_text_agent: Callable[..., ResponseStream[str, AgentRunResult]],
         emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     ) -> None:
-        self._registry = registry
         self._stream_text_agent = stream_text_agent
         self._emit_tool_calls = emit_tool_calls
 
@@ -111,7 +108,6 @@ class ProxyChannelExecutor:
                             state=state,
                             emit_tool_calls=self._emit_tool_calls,
                             session_id=session_id,
-                            registry=self._registry,
                         )
                     )
                     for reasoning_event in emitted:
@@ -154,7 +150,6 @@ class ProxyChannelExecutor:
                             state=state,
                             emit_tool_calls=self._emit_tool_calls,
                             session_id=session_id,
-                            registry=self._registry,
                         )
                     )
                     for reasoning_event in emitted:
@@ -274,7 +269,6 @@ def _process_participant_results(
     state: ProxyTurnState,
     emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     session_id: str,
-    registry: RuntimeRegistry,
 ) -> tuple[
     list[ProxyReasoningDeltaEvent],
     list[_ChannelDelivery],
@@ -294,7 +288,6 @@ def _process_participant_results(
                 )
             action = parse_message_channel_action(
                 tool_call,
-                registry=registry,
                 require_channel=False,
             )
             internal_actions.append(

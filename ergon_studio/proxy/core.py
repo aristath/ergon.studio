@@ -64,7 +64,6 @@ class ProxyOrchestrationCore:
             pending_store=self._pending_store,
         )
         channel_executor = ProxyChannelExecutor(
-            registry=registry,
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
@@ -218,7 +217,6 @@ class ProxyOrchestrationCore:
                     if tool_call.name == "message_channel":
                         message_action = parse_message_channel_action(
                             tool_call,
-                            registry=self.registry,
                         )
                         channel_stream = self._message_channel(
                             request=request,

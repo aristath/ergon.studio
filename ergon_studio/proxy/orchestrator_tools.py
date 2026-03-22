@@ -144,7 +144,6 @@ def parse_open_channel_action(
 def parse_message_channel_action(
     tool_call: ProxyToolCall,
     *,
-    registry: RuntimeRegistry,
     require_channel: bool = True,
 ) -> MessageChannelAction:
     if tool_call.name != "message_channel":

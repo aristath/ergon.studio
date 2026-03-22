@@ -31,7 +31,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Refine")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -74,7 +73,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Challenge")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -120,7 +118,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Architect direction")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -172,7 +169,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Second reviewer only")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -208,7 +204,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_rejects_ambiguous_duplicate_recipient(self) -> None:
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=lambda **kwargs: _response_stream("unused"),
             emit_tool_calls=_no_tool_calls,
         )
@@ -264,7 +259,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Implemented.")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -330,7 +324,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             )
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -392,7 +385,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return [ProxyToolCallEvent(call=tool_calls[0], index=0)]
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
         )
@@ -477,7 +469,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Implementation updated")
 
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
         )
@@ -563,7 +554,6 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_resume_fails_when_actor_is_not_staffed(self) -> None:
         executor = ProxyChannelExecutor(
-            registry=_registry(),
             stream_text_agent=lambda **kwargs: _response_stream("unused"),
             emit_tool_calls=_no_tool_calls,
         )

@@ -123,12 +123,18 @@ def parse_open_channel_action(
     if tool_call.name != "open_channel":
         raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
+    preset = _optional_preset(payload.get("preset"), registry)
+    participants = _normalize_staffing_list(
+        payload.get("participants"),
+        registry=registry,
+    )
+    if preset is not None and participants:
+        raise ValueError(
+            "open_channel requires either preset or participants, not both"
+        )
     return OpenChannelAction(
-        preset=_optional_preset(payload.get("preset"), registry),
-        participants=_normalize_staffing_list(
-            payload.get("participants"),
-            registry=registry,
-        ),
+        preset=preset,
+        participants=participants,
         message=_required_text(payload.get("message"), field="message"),
         recipients=_required_recipient_list(
             payload.get("recipients"),

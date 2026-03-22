@@ -118,6 +118,42 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder: Patch applied", reasoning)
         self.assertEqual(result.content, "Final summary")
 
+    async def test_stream_turn_rejects_mixed_preset_and_participants(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "open_channel",
+                            preset="standard-build",
+                            participants=["coder"],
+                            message="Build it",
+                            recipients=["coder"],
+                        ),
+                    ],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+
+        stream = core.stream_turn(request, session_id="session_1")
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertIn(
+            "open_channel requires either preset or participants, not both",
+            "".join(
+                event.delta
+                for event in events
+                if isinstance(event, ProxyContentDeltaEvent)
+            ),
+        )
+
     async def test_stream_turn_persists_channels_by_session_id(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),

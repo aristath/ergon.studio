@@ -429,6 +429,10 @@ def _open_channel(
     preset: str | None,
     participants: tuple[str, ...],
 ) -> Channel:
+    if preset is not None and participants:
+        raise ValueError(
+            "open_channel requires either preset or participants, not both"
+        )
     if preset is not None:
         resolved_participants = registry.channel_presets.get(preset)
         if resolved_participants is None:

@@ -19,9 +19,7 @@ class PendingToolContext:
     tool_results: tuple[ProxyInputMessage, ...] = ()
 
 
-@dataclass(frozen=True)
-class PendingContinuation:
-    items: tuple[PendingToolContext, ...]
+PendingContinuation = tuple[PendingToolContext, ...]
 
 
 def encode_continuation_tool_call(
@@ -103,7 +101,7 @@ def latest_pending_continuation(
     )
     for pending_id in pending_order:
         pending_store.discard(pending_id)
-    return PendingContinuation(items=items)
+    return items
 
 
 def continuation_tool_calls(
@@ -131,14 +129,14 @@ def continuation_result_map(pending: PendingToolContext) -> dict[str, str]:
 
 
 def pending_actors(pending: PendingContinuation) -> tuple[str, ...]:
-    return tuple(item.actor for item in pending.items)
+    return tuple(item.actor for item in pending)
 
 
 def pending_for_actor(
     pending: PendingContinuation,
     actor: str,
 ) -> PendingToolContext | None:
-    for item in pending.items:
+    for item in pending:
         if item.actor == actor:
             return item
     return None

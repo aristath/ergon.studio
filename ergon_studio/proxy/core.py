@@ -91,7 +91,7 @@ class ProxyOrchestrationCore:
                     pending_store=self._pending_store,
                 )
                 if pending is not None:
-                    active_session_id = pending.items[0].session_id
+                    active_session_id = pending[0].session_id
                     channels = self._channel_sessions.get(active_session_id) or {}
                 else:
                     active_session_id = session_id or f"session_{uuid4().hex}"
@@ -286,8 +286,8 @@ class ProxyOrchestrationCore:
         pending: PendingContinuation | None = None,
         session_id: str,
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
-        if pending is not None and pending.items:
-            pending_channel_id = pending.items[0].active_channel_id
+        if pending:
+            pending_channel_id = pending[0].active_channel_id
             if pending_channel_id is None:
                 raise ValueError(
                     "pending channel resume is missing an active channel id"
@@ -409,7 +409,7 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         channel_pending: dict[str, list[PendingToolContext]] = {}
         orchestrator_items: list[PendingToolContext] = []
-        for item in pending.items:
+        for item in pending:
             if item.active_channel_id is None:
                 if item.actor != "orchestrator":
                     raise ValueError(
@@ -424,9 +424,7 @@ class ProxyOrchestrationCore:
                 request=request,
                 channels=channels,
                 channel_id=channel_id,
-                pending=PendingContinuation(
-                    items=tuple(items),
-                ),
+                pending=tuple(items),
                 state=state,
                 session_id=session_id,
             )

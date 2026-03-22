@@ -8,7 +8,7 @@ from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
 from ergon_studio.proxy.channels import Channel, ChannelMessage
-from ergon_studio.proxy.continuation import PendingContinuation, PendingToolContext
+from ergon_studio.proxy.continuation import PendingToolContext
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
@@ -432,26 +432,24 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
                 transcript=[ChannelMessage("orchestrator", "Update it.")],
             ),
             state=ProxyTurnState(),
-            pending=PendingContinuation(
-                items=(
-                    PendingToolContext(
-                        pending_id="pending_1",
-                        session_id="session_1",
-                        actor="coder",
-                        active_channel_id="channel-1",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id="call_1",
-                                name="read_file",
-                                arguments_json='{"path":"main.py"}',
-                            ),
+            pending=(
+                PendingToolContext(
+                    pending_id="pending_1",
+                    session_id="session_1",
+                    actor="coder",
+                    active_channel_id="channel-1",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="call_1",
+                            name="read_file",
+                            arguments_json='{"path":"main.py"}',
                         ),
-                        tool_results=(
-                            ProxyInputMessage(
-                                role="tool",
-                                content="file contents",
-                                tool_call_id="ergon:3:pending_1:call_1",
-                            ),
+                    ),
+                    tool_results=(
+                        ProxyInputMessage(
+                            role="tool",
+                            content="file contents",
+                            tool_call_id="ergon:3:pending_1:call_1",
                         ),
                     ),
                 ),
@@ -500,46 +498,44 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             session_id="session_1",
             channel=channel,
             state=ProxyTurnState(),
-            pending=PendingContinuation(
-                items=(
-                    PendingToolContext(
-                        pending_id="pending_a",
-                        session_id="session_1",
-                        actor="architect",
-                        active_channel_id="channel-1",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id="call_a",
-                                name="read_file",
-                                arguments_json='{"path":"plan.md"}',
-                            ),
-                        ),
-                        tool_results=(
-                            ProxyInputMessage(
-                                role="tool",
-                                content="plan text",
-                                tool_call_id="ergon:3:pending_a:call_a",
-                            ),
+            pending=(
+                PendingToolContext(
+                    pending_id="pending_a",
+                    session_id="session_1",
+                    actor="architect",
+                    active_channel_id="channel-1",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="call_a",
+                            name="read_file",
+                            arguments_json='{"path":"plan.md"}',
                         ),
                     ),
-                    PendingToolContext(
-                        pending_id="pending_b",
-                        session_id="session_1",
-                        actor="coder",
-                        active_channel_id="channel-1",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id="call_b",
-                                name="read_file",
-                                arguments_json='{"path":"main.py"}',
-                            ),
+                    tool_results=(
+                        ProxyInputMessage(
+                            role="tool",
+                            content="plan text",
+                            tool_call_id="ergon:3:pending_a:call_a",
                         ),
-                        tool_results=(
-                            ProxyInputMessage(
-                                role="tool",
-                                content="main text",
-                                tool_call_id="ergon:3:pending_b:call_b",
-                            ),
+                    ),
+                ),
+                PendingToolContext(
+                    pending_id="pending_b",
+                    session_id="session_1",
+                    actor="coder",
+                    active_channel_id="channel-1",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="call_b",
+                            name="read_file",
+                            arguments_json='{"path":"main.py"}',
+                        ),
+                    ),
+                    tool_results=(
+                        ProxyInputMessage(
+                            role="tool",
+                            content="main text",
+                            tool_call_id="ergon:3:pending_b:call_b",
                         ),
                     ),
                 ),
@@ -588,26 +584,24 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             session_id="session_1",
             channel=channel,
             state=ProxyTurnState(),
-            pending=PendingContinuation(
-                items=(
-                    PendingToolContext(
-                        pending_id="pending_1",
-                        session_id="session_1",
-                        actor="architect",
-                        active_channel_id="channel-1",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id="call_1",
-                                name="read_file",
-                                arguments_json='{"path":"plan.md"}',
-                            ),
+            pending=(
+                PendingToolContext(
+                    pending_id="pending_1",
+                    session_id="session_1",
+                    actor="architect",
+                    active_channel_id="channel-1",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="call_1",
+                            name="read_file",
+                            arguments_json='{"path":"plan.md"}',
                         ),
-                        tool_results=(
-                            ProxyInputMessage(
-                                role="tool",
-                                content="plan text",
-                                tool_call_id="ergon:3:pending_1:call_1",
-                            ),
+                    ),
+                    tool_results=(
+                        ProxyInputMessage(
+                            role="tool",
+                            content="plan text",
+                            tool_call_id="ergon:3:pending_1:call_1",
                         ),
                     ),
                 ),

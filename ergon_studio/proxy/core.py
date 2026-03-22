@@ -97,13 +97,11 @@ class ProxyOrchestrationCore:
                 else:
                     active_session_id = session_id or f"session_{uuid4().hex}"
                     channels = self._channel_store.get(active_session_id) or {}
-                next_channel_number = _next_channel_number(channels)
                 if pending is not None:
                     async for event in self._resume_pending_groups(
                         request=request,
                         state=state,
                         channels=channels,
-                        next_channel_number=next_channel_number,
                         session_id=active_session_id,
                         pending=pending,
                     ):
@@ -116,7 +114,6 @@ class ProxyOrchestrationCore:
                     request=request,
                     state=state,
                     channels=channels,
-                    next_channel_number=next_channel_number,
                     session_id=active_session_id,
                 ):
                     yield event
@@ -145,7 +142,6 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         channels: dict[str, Channel],
-        next_channel_number: int,
         session_id: str,
         pending_orchestrator: PendingToolContext | None = None,
     ) -> AsyncIterator[ProxyEvent]:
@@ -184,8 +180,7 @@ class ProxyOrchestrationCore:
                             tool_call,
                             registry=self.registry,
                         )
-                        channel_id = f"channel-{next_channel_number}"
-                        next_channel_number += 1
+                        channel_id = f"channel-{_next_channel_number(channels)}"
                         channel = _open_channel(
                             registry=self.registry,
                             channel_id=channel_id,
@@ -374,7 +369,6 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         channels: dict[str, Channel],
-        next_channel_number: int,
         session_id: str,
         pending: PendingContinuation,
     ) -> AsyncIterator[ProxyEvent]:
@@ -408,7 +402,6 @@ class ProxyOrchestrationCore:
             request=request,
             state=state,
             channels=channels,
-            next_channel_number=next_channel_number,
             session_id=session_id,
             pending_orchestrator=(
                 orchestrator_items[0]

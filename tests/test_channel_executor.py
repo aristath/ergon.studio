@@ -4,7 +4,7 @@ import unittest
 
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
-from ergon_studio.proxy.channels import ChannelSnapshot, OpenChannel
+from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot, OpenChannel
 from ergon_studio.proxy.continuation import ContinuationState
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
@@ -52,7 +52,13 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         result = await stream.get_final_response()
 
         self.assertEqual(streamed_agents, ["architect", "reviewer"])
-        self.assertEqual(result, ("architect: Idea", "reviewer: Refine"))
+        self.assertEqual(
+            result,
+            (
+                ChannelMessage("architect", "Idea"),
+                ChannelMessage("reviewer", "Refine"),
+            ),
+        )
         reasoning = "".join(
             event.delta
             for event in events
@@ -96,7 +102,10 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Current staffed instance: reviewer[2]", streamed_prompts[1])
         self.assertEqual(
             result,
-            ("reviewer[1]: Challenge", "reviewer[2]: Challenge"),
+            (
+                ChannelMessage("reviewer[1]", "Challenge"),
+                ChannelMessage("reviewer[2]", "Challenge"),
+            ),
         )
 
     async def test_execute_resumes_same_participant_after_tool_result(self) -> None:
@@ -166,7 +175,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
                 name="ad hoc",
                 participants=("coder",),
                 transcript=[
-                    "orchestrator: Update it.",
+                    ChannelMessage("orchestrator", "Update it."),
                 ],
             ),
             channels={
@@ -174,7 +183,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
                     channel_id="channel-1",
                     name="ad hoc",
                     participants=("coder",),
-                    transcript=["orchestrator: Update it."],
+                    transcript=[ChannelMessage("orchestrator", "Update it.")],
                 )
             },
             channel_message="Update it.",
@@ -186,7 +195,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         result = await resumed_stream.get_final_response()
 
         self.assertEqual(call_count, 2)
-        self.assertEqual(result, ("coder: Updated main.py",))
+        self.assertEqual(result, (ChannelMessage("coder", "Updated main.py"),))
         reasoning = "".join(
             event.delta
             for event in events
@@ -289,9 +298,9 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             name="debate",
             participants=("reviewer",),
             transcript=[
-                "orchestrator: Choose one clear direction.",
-                "architect: Option A",
-                "coder: Option B",
+                ChannelMessage("orchestrator", "Choose one clear direction."),
+                ChannelMessage("architect", "Option A"),
+                ChannelMessage("coder", "Option B"),
             ],
         )
         stream = executor.execute(
@@ -309,9 +318,11 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
                         name="debate",
                         participants=("reviewer",),
                         transcript=(
-                            "orchestrator: Choose one clear direction.",
-                            "architect: Option A",
-                            "coder: Option B",
+                            ChannelMessage(
+                                "orchestrator", "Choose one clear direction."
+                            ),
+                            ChannelMessage("architect", "Option A"),
+                            ChannelMessage("coder", "Option B"),
                         ),
                     ),
                 ),

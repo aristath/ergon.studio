@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import AsyncIterator
 
 from ergon_studio.proxy.agent_runner import AgentInvoker, ProxyAgentRunner
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
 from ergon_studio.proxy.channels import (
+    ChannelMessage,
     ChannelSnapshot,
     OpenChannel,
     describe_open_channels,
@@ -18,7 +21,9 @@ from ergon_studio.proxy.continuation import (
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
+    ProxyInputMessage,
     ProxyReasoningDeltaEvent,
+    ProxyToolCall,
     ProxyToolCallEvent,
     ProxyTurnRequest,
     ProxyTurnResult,
@@ -60,6 +65,7 @@ class ProxyOrchestrationCore:
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
         self._channel_executor = channel_executor
+        self._persisted_channels: dict[str, tuple[ChannelSnapshot, ...]] = {}
 
     def stream_turn(
         self,
@@ -70,12 +76,18 @@ class ProxyOrchestrationCore:
         if created_at is None:
             created_at = int(time.time())
         state = ProxyTurnState()
+        channels: dict[str, OpenChannel] = {}
 
         async def _events() -> AsyncIterator[ProxyEvent]:
+            nonlocal channels
             try:
                 pending = latest_pending_continuation(request.messages)
                 worklog = list(pending.state.worklog if pending is not None else ())
-                channels = _channels_from_pending(pending)
+                channels = (
+                    _channels_from_pending(pending)
+                    if pending is not None
+                    else self._restore_channels_for_request(request)
+                )
                 next_channel_number = _next_channel_number(channels)
                 if pending is not None:
                     if pending.state.active_channel_id is not None:
@@ -92,7 +104,10 @@ class ProxyOrchestrationCore:
                             yield event
                         if state.finish_reason == "tool_calls":
                             return
-                        worklog.extend(await stream.get_final_response())
+                        worklog.extend(
+                            message.render()
+                            for message in await stream.get_final_response()
+                        )
                         async for event in self._run_orchestrator_loop(
                             request=request,
                             state=state,
@@ -133,12 +148,10 @@ class ProxyOrchestrationCore:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda: ProxyTurnResult(
-                finish_reason=state.finish_reason,
-                content=state.content,
-                reasoning=state.reasoning,
-                tool_calls=state.tool_calls,
-                output_items=state.output_items,
+            finalizer=lambda: self._finalize_turn(
+                request=request,
+                state=state,
+                channels=channels,
             ),
         )
 
@@ -174,102 +187,98 @@ class ProxyOrchestrationCore:
                 yield ProxyContentDeltaEvent(delta)
             pending = None
             response = await orchestrator_stream.get_final_response()
-            tool_calls = response.tool_calls
-            internal_tool_calls = tuple(
-                tool_call
-                for tool_call in tool_calls
-                if is_internal_tool_name(tool_call.name)
-            )
-            host_tool_calls = tuple(
-                tool_call
-                for tool_call in tool_calls
-                if not is_internal_tool_name(tool_call.name)
-            )
-            if internal_tool_calls and host_tool_calls:
-                raise ValueError(
-                    "orchestrator cannot mix internal actions with host tool calls"
-                )
-            if len(internal_tool_calls) > 1:
-                raise ValueError(
-                    "orchestrator must use at most one internal action at a time"
-                )
-            if host_tool_calls:
-                for tool_event in self._agent_runner.emit_tool_call_events(
-                    tool_calls=host_tool_calls,
-                    request=request,
-                    continuation=_orchestrator_continuation_state(
-                        worklog=tuple(worklog),
-                        channels=channels,
-                    ),
-                    state=state,
-                ):
+            pending_host_tool_calls: list[ProxyToolCallEvent] = []
+            processed_internal_action = False
+            if response.tool_calls:
+                host_tool_calls: list[ProxyToolCall] = []
+                for tool_call in response.tool_calls:
+                    if not is_internal_tool_name(tool_call.name):
+                        host_tool_calls.append(tool_call)
+                        continue
+                    processed_internal_action = True
+                    if tool_call.name == "open_channel":
+                        open_action = parse_open_channel_action(
+                            tool_call,
+                            registry=self.registry,
+                        )
+                        channel_id = f"channel-{next_channel_number}"
+                        next_channel_number += 1
+                        channel = _open_channel(
+                            registry=self.registry,
+                            channel_id=channel_id,
+                            preset=open_action.preset,
+                            participants=open_action.participants,
+                        )
+                        channels[channel.channel_id] = channel
+                        channel_stream = self._message_channel(
+                            request=request,
+                            channels=channels,
+                            channel_id=channel.channel_id,
+                            message=open_action.message,
+                            state=state,
+                            worklog=tuple(worklog),
+                        )
+                        async for internal_event in channel_stream:
+                            yield internal_event
+                        if state.finish_reason == "tool_calls":
+                            return
+                        result = await channel_stream.get_final_response()
+                        if result:
+                            worklog.extend(message.render() for message in result)
+                        continue
+                    if tool_call.name == "message_channel":
+                        message_action = parse_message_channel_action(tool_call)
+                        channel_stream = self._message_channel(
+                            request=request,
+                            channels=channels,
+                            channel_id=message_action.channel,
+                            message=message_action.message,
+                            state=state,
+                            worklog=tuple(worklog),
+                        )
+                        async for internal_event in channel_stream:
+                            yield internal_event
+                        if state.finish_reason == "tool_calls":
+                            return
+                        result = await channel_stream.get_final_response()
+                        if result:
+                            worklog.extend(message.render() for message in result)
+                        continue
+                    if tool_call.name == "close_channel":
+                        close_action = parse_close_channel_action(tool_call)
+                        closed = channels.pop(close_action.channel, None)
+                        if closed is None:
+                            raise ValueError(f"unknown channel: {close_action.channel}")
+                        notice = (
+                            f"Orchestrator: closing channel {closed.channel_id} "
+                            f"({closed.name}).\n"
+                        )
+                        state.append_reasoning(notice)
+                        yield ProxyReasoningDeltaEvent(notice)
+                        if closed.transcript:
+                            worklog.extend(
+                                message.render() for message in closed.transcript[-6:]
+                            )
+                        continue
+                    raise ValueError(f"unsupported internal action: {tool_call.name}")
+                if host_tool_calls:
+                    pending_host_tool_calls.extend(
+                        self._agent_runner.emit_tool_call_events(
+                            tool_calls=tuple(host_tool_calls),
+                            request=request,
+                            continuation=_orchestrator_continuation_state(
+                                worklog=tuple(worklog),
+                                channels=channels,
+                            ),
+                            state=state,
+                        )
+                    )
+            if pending_host_tool_calls:
+                for tool_event in pending_host_tool_calls:
                     yield tool_event
                 return
-            if internal_tool_calls:
-                tool_call = internal_tool_calls[0]
-                if tool_call.name == "open_channel":
-                    open_action = parse_open_channel_action(
-                        tool_call,
-                        registry=self.registry,
-                    )
-                    channel_id = f"channel-{next_channel_number}"
-                    next_channel_number += 1
-                    channel = _open_channel(
-                        registry=self.registry,
-                        channel_id=channel_id,
-                        preset=open_action.preset,
-                        participants=open_action.participants,
-                    )
-                    channels[channel.channel_id] = channel
-                    channel_stream = self._message_channel(
-                        request=request,
-                        channels=channels,
-                        channel_id=channel.channel_id,
-                        message=open_action.message,
-                        state=state,
-                        worklog=tuple(worklog),
-                    )
-                    async for internal_event in channel_stream:
-                        yield internal_event
-                    if state.finish_reason == "tool_calls":
-                        return
-                    result = await channel_stream.get_final_response()
-                    if result:
-                        worklog.extend(result)
-                    continue
-                if tool_call.name == "message_channel":
-                    message_action = parse_message_channel_action(tool_call)
-                    channel_stream = self._message_channel(
-                        request=request,
-                        channels=channels,
-                        channel_id=message_action.channel,
-                        message=message_action.message,
-                        state=state,
-                        worklog=tuple(worklog),
-                    )
-                    async for internal_event in channel_stream:
-                        yield internal_event
-                    if state.finish_reason == "tool_calls":
-                        return
-                    result = await channel_stream.get_final_response()
-                    if result:
-                        worklog.extend(result)
-                    continue
-                if tool_call.name == "close_channel":
-                    close_action = parse_close_channel_action(tool_call)
-                    closed = channels.pop(close_action.channel, None)
-                    if closed is None:
-                        raise ValueError(f"unknown channel: {close_action.channel}")
-                    notice = (
-                        f"Orchestrator: closing channel {closed.channel_id} "
-                        f"({closed.name}).\n"
-                    )
-                    state.append_reasoning(notice)
-                    yield ProxyReasoningDeltaEvent(notice)
-                    if closed.transcript:
-                        worklog.extend(tuple(closed.transcript[-6:]))
-                    continue
-                raise ValueError(f"unsupported internal action: {tool_call.name}")
+            if processed_internal_action:
+                continue
 
             if _requires_host_tool_result(request):
                 raise ValueError("model ignored required host tool choice")
@@ -286,7 +295,7 @@ class ProxyOrchestrationCore:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
-    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
+    ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         if continuation is not None:
             channel_id = continuation.active_channel_id or channel_id
         channel = channels.get(channel_id)
@@ -316,7 +325,7 @@ class ProxyOrchestrationCore:
             pending=pending,
             worklog=worklog,
         )
-        channel_result: tuple[str, ...] = ()
+        channel_result: tuple[ChannelMessage, ...] = ()
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             nonlocal channel_result
@@ -326,13 +335,65 @@ class ProxyOrchestrationCore:
                 yield event
             channel_result = await channel_stream.get_final_response()
             if message and continuation is None:
-                channel.transcript.append(f"orchestrator: {message}")
+                channel.transcript.append(
+                    ChannelMessage(author="orchestrator", content=message)
+                )
             channel.transcript.extend(channel_result)
 
         return ResponseStream(
             _events(),
             finalizer=lambda: channel_result,
         )
+
+    def _restore_channels_for_request(
+        self,
+        request: ProxyTurnRequest,
+    ) -> dict[str, OpenChannel]:
+        parent_key = _parent_conversation_key(request.messages)
+        if parent_key is None:
+            return {}
+        snapshots = self._persisted_channels.get(parent_key, ())
+        return _channels_from_snapshots(snapshots)
+
+    def _finalize_turn(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        state: ProxyTurnState,
+        channels: dict[str, OpenChannel],
+    ) -> ProxyTurnResult:
+        result = ProxyTurnResult(
+            finish_reason=state.finish_reason,
+            content=state.content,
+            reasoning=state.reasoning,
+            tool_calls=state.tool_calls,
+            output_items=state.output_items,
+        )
+        self._persist_channels_for_result(
+            request=request,
+            result=result,
+            channels=channels,
+        )
+        return result
+
+    def _persist_channels_for_result(
+        self,
+        *,
+        request: ProxyTurnRequest,
+        result: ProxyTurnResult,
+        channels: dict[str, OpenChannel],
+    ) -> None:
+        if result.finish_reason in {"tool_calls", "error"}:
+            return
+        conversation_key = _conversation_key(
+            (*request.messages, _assistant_message_for_result(result))
+        )
+        if channels:
+            self._persisted_channels[conversation_key] = tuple(
+                _snapshot_open_channels(channels)
+            )
+            return
+        self._persisted_channels.pop(conversation_key, None)
 
 
 def _orchestrator_continuation_state(
@@ -429,3 +490,57 @@ def _snapshot_open_channels(
     channels: dict[str, OpenChannel],
 ) -> tuple[ChannelSnapshot, ...]:
     return tuple(channel.snapshot() for channel in channels.values())
+
+
+def _channels_from_snapshots(
+    snapshots: tuple[ChannelSnapshot, ...],
+) -> dict[str, OpenChannel]:
+    return {
+        snapshot.channel_id: OpenChannel(
+            channel_id=snapshot.channel_id,
+            name=snapshot.name,
+            participants=snapshot.participants,
+            transcript=list(snapshot.transcript),
+        )
+        for snapshot in snapshots
+    }
+
+
+def _parent_conversation_key(
+    messages: tuple[ProxyInputMessage, ...],
+) -> str | None:
+    if not messages or messages[-1].role != "user":
+        return None
+    if len(messages) == 1:
+        return None
+    return _conversation_key(messages[:-1])
+
+
+def _conversation_key(messages: tuple[ProxyInputMessage, ...]) -> str:
+    payload = [
+        {
+            "role": message.role,
+            "content": message.content,
+            "name": message.name,
+            "tool_call_id": message.tool_call_id,
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments_json,
+                }
+                for tool_call in message.tool_calls
+            ],
+        }
+        for message in messages
+    ]
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _assistant_message_for_result(result: ProxyTurnResult) -> ProxyInputMessage:
+    return ProxyInputMessage(
+        role="assistant",
+        content=result.content,
+        tool_calls=result.tool_calls,
+    )

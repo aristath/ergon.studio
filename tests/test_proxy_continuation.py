@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ergon_studio.proxy.channels import ChannelSnapshot
+from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     decode_continuation_from_tool_call_id,
@@ -70,8 +70,8 @@ class ProxyContinuationTests(unittest.TestCase):
                         name="best-of-n",
                         participants=("coder", "coder", "reviewer"),
                         transcript=(
-                            "architect: Use main.py",
-                            "coder[2]: Option B",
+                            ChannelMessage("architect", "Use main.py"),
+                            ChannelMessage("coder[2]", "Option B"),
                         ),
                     ),
                 ),
@@ -90,7 +90,10 @@ class ProxyContinuationTests(unittest.TestCase):
                     channel_id="channel-2",
                     name="best-of-n",
                     participants=("coder", "coder", "reviewer"),
-                    transcript=("architect: Use main.py", "coder[2]: Option B"),
+                    transcript=(
+                        ChannelMessage("architect", "Use main.py"),
+                        ChannelMessage("coder[2]", "Option B"),
+                    ),
                 ),
             ),
         )
@@ -109,7 +112,10 @@ class ProxyContinuationTests(unittest.TestCase):
                         channel_id="channel-3",
                         name="ad hoc",
                         participants=("coder",),
-                        transcript=tuple(f"line {index}" for index in range(20)),
+                        transcript=tuple(
+                            ChannelMessage("coder", f"line {index}")
+                            for index in range(20)
+                        ),
                     ),
                 ),
                 worklog=tuple(f"note {index}" for index in range(20)),
@@ -127,7 +133,10 @@ class ProxyContinuationTests(unittest.TestCase):
                     channel_id="channel-3",
                     name="ad hoc",
                     participants=("coder",),
-                    transcript=tuple(f"line {index}" for index in range(8, 20)),
+                    transcript=tuple(
+                        ChannelMessage("coder", f"line {index}")
+                        for index in range(8, 20)
+                    ),
                 ),
             ),
         )

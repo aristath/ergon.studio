@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ergon_studio.proxy.channels import ChannelMessage
 from ergon_studio.proxy.models import ProxyTurnRequest
 from ergon_studio.proxy.transcript import summarize_conversation
 
@@ -50,7 +51,7 @@ def channel_message_prompt(
     role_instance_context: str | None = None,
     user_request: str,
     transcript_summary: str,
-    channel_transcript: tuple[str, ...],
+    channel_transcript: tuple[ChannelMessage, ...],
     prior_work: tuple[str, ...],
 ) -> str:
     lines = [
@@ -89,7 +90,7 @@ def channel_message_prompt(
             [
                 "",
                 "Channel transcript so far:",
-                *channel_transcript[-8:],
+                *(message.render() for message in channel_transcript[-8:]),
             ]
         )
     if prior_work:

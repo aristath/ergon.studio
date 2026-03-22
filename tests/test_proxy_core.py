@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentInvocation, AgentRunResult
-from ergon_studio.proxy.channels import ChannelSnapshot
+from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     decode_continuation_from_tool_call_id,
@@ -503,6 +503,139 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder: Built", reasoning)
         self.assertEqual(resumed_result.content, "Channel final summary")
         self.assertEqual(resumed_result.finish_reason, "stop")
+
+    async def test_stream_turn_persists_open_channels_between_user_turns(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "open_channel",
+                            participants=["coder"],
+                            message="Please inspect the repo.",
+                        ),
+                        "I have the coder on the line.",
+                        _internal_action(
+                            "message_channel",
+                            channel="channel-1",
+                            message="Keep going and make the change.",
+                        ),
+                        "We have what we need.",
+                    ],
+                    "coder": [
+                        "I found the relevant files.",
+                        "I made the change.",
+                    ],
+                }
+            ),
+        )
+        first_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Take a look"),),
+        )
+
+        first_stream = core.stream_turn(first_request, created_at=1)
+        [event async for event in first_stream]
+        first_result = await first_stream.get_final_response()
+
+        self.assertEqual(first_result.content, "I have the coder on the line.")
+
+        second_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Take a look"),
+                ProxyInputMessage(role="assistant", content=first_result.content),
+                ProxyInputMessage(role="user", content="Now keep going"),
+            ),
+        )
+
+        second_stream = core.stream_turn(second_request, created_at=2)
+        second_events = [event async for event in second_stream]
+        second_result = await second_stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in second_events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("coder: I made the change.", reasoning)
+        self.assertEqual(second_result.content, "We have what we need.")
+
+    async def test_stream_turn_allows_channel_actions_before_host_tool_calls(
+        self,
+    ) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "internal_open_channel",
+                                    "name": "open_channel",
+                                    "arguments": json.dumps(
+                                        {
+                                            "participants": ["coder"],
+                                            "message": "Take a look first.",
+                                        }
+                                    ),
+                                },
+                                {
+                                    "id": "call_1",
+                                    "name": "read_file",
+                                    "arguments": '{"path":"README.md"}',
+                                },
+                            ],
+                        },
+                    ],
+                    "coder": ["I checked the current state."],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect it"),),
+            tools=(_host_tool("read_file"),),
+        )
+
+        stream = core.stream_turn(request, created_at=1)
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        reasoning = "".join(
+            event.delta
+            for event in events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        tool_events = [
+            event for event in events if isinstance(event, ProxyToolCallEvent)
+        ]
+        self.assertIn("opening channel channel-1 with coder", reasoning.lower())
+        self.assertIn("coder: I checked the current state.", reasoning)
+        self.assertEqual(len(tool_events), 1)
+        self.assertEqual(tool_events[0].call.name, "read_file")
+        continuation = decode_continuation_from_tool_call_id(tool_events[0].call.id)
+        self.assertIsNotNone(continuation)
+        assert continuation is not None
+        self.assertEqual(continuation.actor, "orchestrator")
+        self.assertEqual(
+            continuation.channels,
+            (
+                ChannelSnapshot(
+                    channel_id="channel-1",
+                    name="ad hoc",
+                    participants=("coder",),
+                    transcript=(
+                        ChannelMessage("orchestrator", "Take a look first."),
+                        ChannelMessage("coder", "I checked the current state."),
+                    ),
+                ),
+            ),
+        )
+        self.assertEqual(result.finish_reason, "tool_calls")
 
     async def test_stream_turn_does_not_resume_stale_tool_loop(self) -> None:
         tool_call = _host_continuation_tool_call(

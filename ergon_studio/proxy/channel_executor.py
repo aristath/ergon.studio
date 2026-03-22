@@ -9,7 +9,7 @@ from ergon_studio.proxy.channel_staffing import (
     expand_staffed_participants,
     participant_context,
 )
-from ergon_studio.proxy.channels import ChannelSnapshot, OpenChannel
+from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot, OpenChannel
 from ergon_studio.proxy.continuation import (
     ContinuationState,
     PendingContinuation,
@@ -50,7 +50,7 @@ class ProxyChannelExecutor:
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
-    ) -> ResponseStream[ProxyEvent, tuple[str, ...]]:
+    ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         channel_participants = channel.participants
         staffed_members = expand_staffed_participants(channel_participants)
         persisted_worklog = (
@@ -58,12 +58,14 @@ class ProxyChannelExecutor:
         )
         persisted_transcript = tuple(channel.transcript)
         user_request = request.latest_user_text() or ""
-        channel_lines: list[str] = []
+        channel_messages: list[ChannelMessage] = []
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             current_transcript = list(persisted_transcript)
             if pending is None and channel_message:
-                current_transcript.append(f"orchestrator: {channel_message}")
+                current_transcript.append(
+                    ChannelMessage(author="orchestrator", content=channel_message)
+                )
             if pending is not None:
                 actor_results = await asyncio.gather(
                     *[
@@ -88,7 +90,7 @@ class ProxyChannelExecutor:
                 emitted = _emit_participant_results(
                     actor_results=actor_results,
                     current_transcript=current_transcript,
-                    channel_lines=channel_lines,
+                    channel_messages=channel_messages,
                     channel=channel,
                     channels=channels,
                     request=request,
@@ -116,7 +118,7 @@ class ProxyChannelExecutor:
             emitted = _emit_participant_results(
                 actor_results=results,
                 current_transcript=current_transcript,
-                channel_lines=channel_lines,
+                channel_messages=channel_messages,
                 channel=channel,
                 channels=channels,
                 request=request,
@@ -129,9 +131,8 @@ class ProxyChannelExecutor:
 
         return ResponseStream(
             _events(),
-            finalizer=lambda: tuple(channel_lines),
+            finalizer=lambda: tuple(channel_messages),
         )
-
 
     async def _run_channel_participant(
         self,
@@ -140,7 +141,7 @@ class ProxyChannelExecutor:
         channel_name: str,
         participant: StaffedParticipant,
         user_request: str,
-        channel_transcript: tuple[str, ...],
+        channel_transcript: tuple[ChannelMessage, ...],
         prior_work: tuple[str, ...],
         pending: PendingContinuation | None = None,
     ) -> _ParticipantResult:
@@ -203,7 +204,7 @@ def _snapshot_channels(
     *,
     channels: dict[str, OpenChannel],
     active_channel: OpenChannel,
-    active_transcript: tuple[str, ...],
+    active_transcript: tuple[ChannelMessage, ...],
 ) -> tuple[ChannelSnapshot, ...]:
     snapshots = []
     for channel_id, channel in channels.items():
@@ -224,8 +225,8 @@ def _snapshot_channels(
 def _emit_participant_results(
     *,
     actor_results: list[_ParticipantResult] | tuple[_ParticipantResult, ...],
-    current_transcript: list[str],
-    channel_lines: list[str],
+    current_transcript: list[ChannelMessage],
+    channel_messages: list[ChannelMessage],
     channel: OpenChannel,
     channels: dict[str, OpenChannel],
     request: ProxyTurnRequest,
@@ -239,10 +240,13 @@ def _emit_participant_results(
         text_summary = result.text.strip()
         if not text_summary:
             continue
-        line = f"{result.participant.label}: {text_summary}"
-        channel_lines.append(line)
-        state.append_reasoning(line)
-        events.append(ProxyReasoningDeltaEvent(line))
+        line = ChannelMessage(
+            author=result.participant.label,
+            content=text_summary,
+        )
+        channel_messages.append(line)
+        state.append_reasoning(line.render())
+        events.append(ProxyReasoningDeltaEvent(line.render()))
         current_transcript.append(line)
     for result in actor_results:
         if not result.response.tool_calls:
@@ -258,7 +262,10 @@ def _emit_participant_results(
                     active_channel=channel,
                     active_transcript=tuple(current_transcript),
                 ),
-                worklog=(*prior_work, *channel_lines),
+                worklog=(
+                    *prior_work,
+                    *(message.render() for message in channel_messages),
+                ),
             ),
             state=state,
         )

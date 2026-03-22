@@ -4,11 +4,20 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class ChannelMessage:
+    author: str
+    content: str
+
+    def render(self) -> str:
+        return f"{self.author}: {self.content}"
+
+
+@dataclass(frozen=True)
 class ChannelSnapshot:
     channel_id: str
     name: str
     participants: tuple[str, ...]
-    transcript: tuple[str, ...] = ()
+    transcript: tuple[ChannelMessage, ...] = ()
 
 
 @dataclass
@@ -16,7 +25,7 @@ class OpenChannel:
     channel_id: str
     name: str
     participants: tuple[str, ...]
-    transcript: list[str] = field(default_factory=list)
+    transcript: list[ChannelMessage] = field(default_factory=list)
 
     def snapshot(self) -> ChannelSnapshot:
         return ChannelSnapshot(
@@ -34,7 +43,9 @@ def describe_open_channels(
     for channel_id, channel in sorted(channels.items()):
         roster = ", ".join(channel.participants) or "(none)"
         if channel.transcript:
-            recent = " | ".join(channel.transcript[-3:])
+            recent = " | ".join(
+                message.render() for message in channel.transcript[-3:]
+            )
             descriptions.append(f"{channel_id}: {channel.name} [{roster}] :: {recent}")
         else:
             descriptions.append(f"{channel_id}: {channel.name} [{roster}]")

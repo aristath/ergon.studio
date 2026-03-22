@@ -5,7 +5,7 @@ import zlib
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 
-from ergon_studio.proxy.channels import ChannelSnapshot
+from ergon_studio.proxy.channels import ChannelMessage, ChannelSnapshot
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
 
 _TOKEN_PREFIX = "ergon:"
@@ -47,7 +47,13 @@ def encode_continuation_tool_call(
                 "i": channel.channel_id,
                 "n": channel.name,
                 "p": list(channel.participants),
-                "t": list(channel.transcript[-_CHANNEL_TRANSCRIPT_TAIL:]),
+                "t": [
+                    {
+                        "a": message.author,
+                        "c": message.content,
+                    }
+                    for message in channel.transcript[-_CHANNEL_TRANSCRIPT_TAIL:]
+                ],
             }
             for channel in state.channels
         ]
@@ -105,16 +111,25 @@ def decode_continuation_from_tool_call_id(
             isinstance(participant, str) for participant in participants
         ):
             return None
-        if not isinstance(transcript, list) or not all(
-            isinstance(line, str) for line in transcript
-        ):
+        if not isinstance(transcript, list):
             return None
+        messages: list[ChannelMessage] = []
+        for transcript_item in transcript:
+            if not isinstance(transcript_item, dict):
+                return None
+            author = transcript_item.get("a")
+            content = transcript_item.get("c")
+            if not isinstance(author, str) or not author:
+                return None
+            if not isinstance(content, str):
+                return None
+            messages.append(ChannelMessage(author=author, content=content))
         channels.append(
             ChannelSnapshot(
                 channel_id=channel_id,
                 name=name,
                 participants=tuple(participants),
-                transcript=tuple(transcript),
+                transcript=tuple(messages),
             )
         )
     return ContinuationState(

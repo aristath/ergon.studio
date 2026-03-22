@@ -17,7 +17,6 @@ from ergon_studio.proxy.continuation import (
     PendingToolContext,
 )
 from ergon_studio.proxy.models import (
-    ProxyFunctionTool,
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
@@ -65,7 +64,6 @@ class ProxyChannelExecutor:
         pending: PendingContinuation | None = None,
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         all_staffed_members = expand_staffed_participants(channel.participants)
-        participant_tools = build_participant_internal_tools()
         channel_messages: list[ChannelMessage] = []
 
         async def _events() -> AsyncIterator[ProxyEvent]:
@@ -109,7 +107,6 @@ class ProxyChannelExecutor:
                         channel_name=channel.name,
                         participant=participant,
                         channel_transcript=tuple(current_transcript),
-                        participant_tools=participant_tools,
                         pending=actor_pending,
                     )
                     emitted, new_deliveries, new_tool_events = (
@@ -152,7 +149,6 @@ class ProxyChannelExecutor:
                         channel_name=channel.name,
                         participant=participant,
                         channel_transcript=tuple(current_transcript),
-                        participant_tools=participant_tools,
                     )
                     emitted, new_deliveries, new_tool_events = (
                         _process_participant_results(
@@ -193,7 +189,6 @@ class ProxyChannelExecutor:
         channel_name: str,
         participant: StaffedParticipant,
         channel_transcript: tuple[ChannelMessage, ...],
-        participant_tools: tuple[ProxyFunctionTool, ...],
         pending: PendingToolContext | None = None,
     ) -> _ParticipantResult:
         prompt = channel_message_prompt(
@@ -204,7 +199,6 @@ class ProxyChannelExecutor:
             ),
             role_instance_context=participant_context(participant),
         )
-        text = ""
         stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,
@@ -215,25 +209,22 @@ class ProxyChannelExecutor:
                 participant_label=participant.label,
             ),
             host_tools=request.tools,
-            extra_tools=participant_tools,
+            extra_tools=build_participant_internal_tools(),
             tool_choice=request.tool_choice,
             parallel_tool_calls=request.parallel_tool_calls,
             pending_continuation=pending,
         )
-        async for delta in stream:
-            text += delta
-        return _ParticipantResult(
-            participant=participant,
-            text=text,
-            response=await stream.get_final_response(),
-        )
+        async for _ in stream:
+            pass
+        response = await stream.get_final_response()
+        return _ParticipantResult(participant=participant, response=response)
 
 
 @dataclass(frozen=True)
 class _ParticipantResult:
     participant: StaffedParticipant
-    text: str
     response: AgentRunResult
+
 
 def _channel_conversation_messages(
     *,
@@ -305,7 +296,7 @@ def _process_participant_results(
     if internal_actions:
         deliveries.extend(internal_actions)
     else:
-        text = actor_result.text.strip()
+        text = actor_result.response.text.strip()
         if text:
             line = ChannelMessage(
                 author=actor_result.participant.label,

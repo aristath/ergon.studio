@@ -99,18 +99,7 @@ def build_orchestrator_internal_tools(
 
 
 def build_participant_internal_tools() -> tuple[ProxyFunctionTool, ...]:
-    return (
-        ProxyFunctionTool(
-            name="message_channel",
-            description=(
-                "Send another message into the current channel and explicitly "
-                "target the teammates you want to answer next."
-            ),
-            parameters=_message_channel_parameters(
-                include_channel=False,
-            ),
-        ),
-    )
+    return PARTICIPANT_INTERNAL_TOOLS
 
 
 def parse_open_channel_action(
@@ -278,3 +267,17 @@ def _required_recipient_list(
             )
         recipients.append(candidate)
     return tuple(recipients)
+
+
+PARTICIPANT_INTERNAL_TOOLS = (
+    ProxyFunctionTool(
+        name="message_channel",
+        description=(
+            "Send another message into the current channel and explicitly "
+            "target the teammates you want to answer next."
+        ),
+        parameters=_message_channel_parameters(
+            include_channel=False,
+        ),
+    ),
+)

@@ -13,7 +13,7 @@ from ergon_studio.proxy.continuation import (
     pending_for_actor,
 )
 from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
-from ergon_studio.proxy.pending_store import PendingSeed, PendingStore
+from ergon_studio.proxy.pending_store import PendingStore
 
 
 class ProxyContinuationTests(unittest.TestCase):
@@ -35,11 +35,9 @@ class ProxyContinuationTests(unittest.TestCase):
     ) -> None:
         store = PendingStore()
         record = store.create(
-            seed=PendingSeed(
-                session_id="session_1",
-                actor="coder",
-                active_channel_id="channel-1",
-            ),
+            session_id="session_1",
+            actor="coder",
+            active_channel_id="channel-1",
             tool_calls=(
                 ProxyToolCall(
                     id="call_1",
@@ -89,21 +87,17 @@ class ProxyContinuationTests(unittest.TestCase):
     ) -> None:
         store = PendingStore()
         architect = store.create(
-            seed=PendingSeed(
-                session_id="session_2",
-                actor="architect",
-                active_channel_id="channel-2",
-            ),
+            session_id="session_2",
+            actor="architect",
+            active_channel_id="channel-2",
             tool_calls=(
                 ProxyToolCall(id="call_a", name="read_file", arguments_json="{}"),
             ),
         )
         coder = store.create(
-            seed=PendingSeed(
-                session_id="session_2",
-                actor="coder",
-                active_channel_id="channel-2",
-            ),
+            session_id="session_2",
+            actor="coder",
+            active_channel_id="channel-2",
             tool_calls=(
                 ProxyToolCall(id="call_b", name="glob", arguments_json="{}"),
             ),
@@ -145,7 +139,8 @@ class ProxyContinuationTests(unittest.TestCase):
     def test_latest_pending_continuation_rejects_mixed_sessions(self) -> None:
         store = PendingStore()
         first = store.create(
-            seed=PendingSeed(session_id="session_a", actor="coder"),
+            session_id="session_a",
+            actor="coder",
             tool_calls=(
                 ProxyToolCall(
                     id="call_a",
@@ -155,7 +150,8 @@ class ProxyContinuationTests(unittest.TestCase):
             ),
         )
         second = store.create(
-            seed=PendingSeed(session_id="session_b", actor="reviewer"),
+            session_id="session_b",
+            actor="reviewer",
             tool_calls=(
                 ProxyToolCall(
                     id="call_b",

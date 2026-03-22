@@ -7,13 +7,6 @@ from ergon_studio.proxy.models import ProxyToolCall
 
 
 @dataclass(frozen=True)
-class PendingSeed:
-    session_id: str
-    actor: str
-    active_channel_id: str | None = None
-
-
-@dataclass(frozen=True)
 class PendingCallRecord:
     pending_id: str
     session_id: str
@@ -29,14 +22,16 @@ class PendingStore:
     def create(
         self,
         *,
-        seed: PendingSeed,
+        session_id: str,
+        actor: str,
+        active_channel_id: str | None = None,
         tool_calls: tuple[ProxyToolCall, ...],
     ) -> PendingCallRecord:
         record = PendingCallRecord(
             pending_id=f"pending_{uuid4().hex}",
-            session_id=seed.session_id,
-            actor=seed.actor,
-            active_channel_id=seed.active_channel_id,
+            session_id=session_id,
+            actor=actor,
+            active_channel_id=active_channel_id,
             tool_calls=tool_calls,
         )
         self._records[record.pending_id] = record

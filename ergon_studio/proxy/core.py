@@ -36,7 +36,7 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_message_channel_action,
     parse_open_channel_action,
 )
-from ergon_studio.proxy.pending_store import PendingSeed, PendingStore
+from ergon_studio.proxy.pending_store import PendingStore
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
@@ -256,10 +256,8 @@ class ProxyOrchestrationCore:
                         self._agent_runner.emit_tool_call_events(
                             tool_calls=tuple(host_tool_calls),
                             request=request,
-                            continuation=PendingSeed(
-                                session_id=session_id,
-                                actor="orchestrator",
-                            ),
+                            session_id=session_id,
+                            actor="orchestrator",
                             state=state,
                         )
                     )

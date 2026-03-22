@@ -16,7 +16,6 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.pending_store import PendingSeed
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
@@ -359,7 +358,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             [event async for event in stream]
 
     async def test_execute_resumes_same_participant_after_tool_result(self) -> None:
-        captured_seeds: list[PendingSeed] = []
+        captured_pending_args: list[tuple[str, str, str | None]] = []
         call_count = 0
 
         def _stream_text_agent(**kwargs):
@@ -382,9 +381,13 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             return _response_stream("Updated main.py")
 
         def _emit_tool_calls(**kwargs):
-            continuation = kwargs["continuation"]
-            assert isinstance(continuation, PendingSeed)
-            captured_seeds.append(continuation)
+            captured_pending_args.append(
+                (
+                    kwargs["session_id"],
+                    kwargs["actor"],
+                    kwargs.get("active_channel_id"),
+                )
+            )
             tool_calls = kwargs["tool_calls"]
             return [ProxyToolCallEvent(call=tool_calls[0], index=0)]
 
@@ -414,8 +417,10 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             state=state,
         )
         [event async for event in first_stream]
-        self.assertEqual(captured_seeds[0].actor, "coder")
-        self.assertEqual(captured_seeds[0].active_channel_id, "channel-1")
+        self.assertEqual(
+            captured_pending_args[0],
+            ("session_1", "coder", "channel-1"),
+        )
 
         resumed_stream = executor.execute(
             request=request,

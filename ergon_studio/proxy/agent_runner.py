@@ -22,7 +22,7 @@ from ergon_studio.proxy.models import (
     ProxyToolCallEvent,
     ProxyTurnRequest,
 )
-from ergon_studio.proxy.pending_store import PendingSeed, PendingStore
+from ergon_studio.proxy.pending_store import PendingStore
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
@@ -103,7 +103,9 @@ class ProxyAgentRunner:
         response: AgentRunResult | None = None,
         tool_calls: tuple[ProxyToolCall, ...] | None = None,
         request: ProxyTurnRequest,
-        continuation: PendingSeed,
+        session_id: str,
+        actor: str,
+        active_channel_id: str | None = None,
         state: ProxyTurnState,
     ) -> list[ProxyToolCallEvent]:
         if tool_calls is None:
@@ -121,7 +123,9 @@ class ProxyAgentRunner:
                 request=request,
             )
         pending_record = self._pending_store.create(
-            seed=continuation,
+            session_id=session_id,
+            actor=actor,
+            active_channel_id=active_channel_id,
             tool_calls=validated_tool_calls,
         )
         encoded_calls = tuple(

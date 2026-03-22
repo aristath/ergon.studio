@@ -31,7 +31,6 @@ from ergon_studio.proxy.orchestrator_tools import (
     is_internal_tool_name,
     parse_message_channel_action,
 )
-from ergon_studio.proxy.pending_store import PendingSeed
 from ergon_studio.proxy.prompts import channel_message_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
@@ -336,11 +335,9 @@ def _process_participant_results(
                 emit_tool_calls(
                     tool_calls=tuple(host_tool_calls),
                     request=request,
-                    continuation=PendingSeed(
-                        session_id=session_id,
-                        actor=result.participant.label,
-                        active_channel_id=channel.channel_id,
-                    ),
+                    session_id=session_id,
+                    actor=result.participant.label,
+                    active_channel_id=channel.channel_id,
                     state=state,
                 )
             )

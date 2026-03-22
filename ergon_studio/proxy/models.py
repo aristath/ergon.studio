@@ -102,12 +102,6 @@ class ProxyTurnRequest:
         ):
             raise TypeError("parallel_tool_calls must be a bool or None")
 
-    def latest_user_text(self) -> str | None:
-        for message in reversed(self.messages):
-            if message.role == "user":
-                return message.content
-        return None
-
 
 @dataclass(frozen=True)
 class ProxyReasoningDeltaEvent:

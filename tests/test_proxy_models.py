@@ -15,7 +15,7 @@ from ergon_studio.proxy.models import (
 
 
 class ProxyModelsTests(unittest.TestCase):
-    def test_turn_request_returns_latest_user_text(self) -> None:
+    def test_turn_request_preserves_message_history(self) -> None:
         request = ProxyTurnRequest(
             model="ergon",
             messages=(
@@ -26,7 +26,15 @@ class ProxyModelsTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(request.latest_user_text(), "latest")
+        self.assertEqual(
+            tuple((message.role, message.content) for message in request.messages),
+            (
+                ("system", "rules"),
+                ("user", "first"),
+                ("assistant", "reply"),
+                ("user", "latest"),
+            ),
+        )
 
     def test_assistant_message_accepts_tool_calls(self) -> None:
         message = ProxyInputMessage(

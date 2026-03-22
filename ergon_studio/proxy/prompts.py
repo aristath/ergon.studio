@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from ergon_studio.proxy.models import ProxyTurnRequest
-from ergon_studio.proxy.transcript import summarize_conversation
-
 
 def orchestrator_turn_prompt(
-    request: ProxyTurnRequest,
     *,
     open_channels: tuple[str, ...] = (),
 ) -> str:
@@ -30,11 +26,7 @@ def orchestrator_turn_prompt(
         ),
         ("When you need a channel or a host tool, use the tool call directly."),
         "",
-        "Conversation summary:",
-        summarize_conversation(request.messages, limit=12) or "(none)",
-        "",
-        "Latest user request:",
-        request.latest_user_text() or "(none)",
+        "The product-manager conversation is provided separately as message history.",
     ]
     if open_channels:
         lines.extend(["", "Open channels:", *open_channels])

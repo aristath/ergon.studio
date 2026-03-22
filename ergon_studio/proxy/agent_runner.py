@@ -11,6 +11,7 @@ from ergon_studio.proxy.continuation import (
     PendingToolContext,
     continuation_result_map,
     continuation_tool_calls,
+    decode_pending_id_from_tool_call_id,
     encode_continuation_tool_call,
     original_tool_call_id,
 )
@@ -327,8 +328,12 @@ def build_agent_messages(
     )
     if prompt:
         messages.append({"role": prompt_role, "content": prompt})
+    sanitized_conversation = _strip_pending_messages(
+        conversation_messages,
+        pending_continuation=pending_continuation,
+    )
     messages.extend(
-        _openai_message_from_proxy(message) for message in conversation_messages
+        _openai_message_from_proxy(message) for message in sanitized_conversation
     )
 
     assistant_message = _pending_assistant_message(pending_continuation)
@@ -336,6 +341,40 @@ def build_agent_messages(
         messages.append(assistant_message)
     messages.extend(_pending_tool_messages(pending_continuation))
     return messages
+
+
+def _strip_pending_messages(
+    conversation_messages: tuple[ProxyInputMessage, ...],
+    *,
+    pending_continuation: PendingToolContext | None,
+) -> tuple[ProxyInputMessage, ...]:
+    if pending_continuation is None or not conversation_messages:
+        return conversation_messages
+
+    trimmed = list(conversation_messages)
+    pending_id = pending_continuation.pending_id
+    while trimmed and trimmed[-1].role == "tool":
+        message = trimmed[-1]
+        if (
+            decode_pending_id_from_tool_call_id(message.tool_call_id or "")
+            != pending_id
+        ):
+            break
+        trimmed.pop()
+
+    if trimmed:
+        message = trimmed[-1]
+        tool_pending_ids = {
+            decode_pending_id_from_tool_call_id(tool_call.id)
+            for tool_call in message.tool_calls
+        }
+        if (
+            message.role == "assistant"
+            and message.tool_calls
+            and tool_pending_ids == {pending_id}
+        ):
+            trimmed.pop()
+    return tuple(trimmed)
 
 
 def _pending_assistant_message(

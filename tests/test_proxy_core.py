@@ -47,6 +47,39 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.content, "Hello world")
 
+    async def test_stream_turn_passes_real_pm_history_to_orchestrator(self) -> None:
+        captured_invocations: list[AgentInvocation] = []
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            captured_invocations.append(invocation)
+            return _response_stream("Done")
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_capturing_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="First request"),
+                ProxyInputMessage(role="assistant", content="First reply"),
+                ProxyInputMessage(role="user", content="Second request"),
+            ),
+        )
+
+        stream = core.stream_turn(request, session_id="session_1")
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        invocation = captured_invocations[0]
+        self.assertEqual(
+            [message["role"] for message in invocation.messages[:5]],
+            ["system", "system", "user", "assistant", "user"],
+        )
+        self.assertEqual(invocation.messages[2]["content"], "First request")
+        self.assertEqual(invocation.messages[3]["content"], "First reply")
+        self.assertEqual(invocation.messages[4]["content"], "Second request")
+
     async def test_stream_turn_opens_channel_and_returns_participant_reply(
         self,
     ) -> None:

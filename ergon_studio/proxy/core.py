@@ -150,10 +150,11 @@ class ProxyOrchestrationCore:
             orchestrator_stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
                 prompt=orchestrator_turn_prompt(
-                    request,
                     open_channels=describe_open_channels(channels),
                 ),
+                prompt_role="system",
                 model_id_override=request.model,
+                conversation_messages=request.messages,
                 host_tools=request.tools,
                 extra_tools=internal_tools,
                 tool_choice=request.tool_choice,

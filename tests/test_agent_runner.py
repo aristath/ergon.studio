@@ -85,6 +85,69 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
         self.assertEqual(messages[3]["tool_call_id"], "call_1")
 
+    def test_build_agent_messages_replaces_encoded_pending_tail(self) -> None:
+        registry = _registry()
+        instructions = compose_instructions(
+            registry.agent_definitions["orchestrator"],
+            registry=registry,
+        )
+        encoded_tool_call = encode_continuation_tool_call(
+            ProxyToolCall(
+                id="call_1",
+                name="read_file",
+                arguments_json='{"path":"main.py"}',
+            ),
+            pending_id="pending_1",
+        )
+        pending = PendingToolContext(
+            pending_id="pending_1",
+            session_id="session_1",
+            actor="orchestrator",
+            active_channel_id=None,
+            tool_calls=(
+                ProxyToolCall(
+                    id="call_1",
+                    name="read_file",
+                    arguments_json='{"path":"main.py"}',
+                ),
+            ),
+            tool_results=(
+                ProxyInputMessage(
+                    role="tool",
+                    content="print('current main')",
+                    tool_call_id=encoded_tool_call.id,
+                ),
+            ),
+        )
+
+        messages = build_agent_messages(
+            registry=registry,
+            instructions=instructions,
+            prompt="Use the result.",
+            prompt_role="system",
+            conversation_messages=(
+                ProxyInputMessage(role="user", content="Inspect it"),
+                ProxyInputMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=(encoded_tool_call,),
+                ),
+                ProxyInputMessage(
+                    role="tool",
+                    content="print('current main')",
+                    tool_call_id=encoded_tool_call.id,
+                ),
+            ),
+            pending_continuation=pending,
+        )
+
+        self.assertEqual(
+            [message["role"] for message in messages],
+            ["system", "system", "user", "assistant", "tool"],
+        )
+        self.assertEqual(messages[3]["tool_calls"][0]["id"], "call_1")
+        self.assertEqual(messages[4]["tool_call_id"], "call_1")
+
     def test_build_agent_messages_supports_system_framed_channel_calls(self) -> None:
         registry = _registry()
         instructions = compose_instructions(

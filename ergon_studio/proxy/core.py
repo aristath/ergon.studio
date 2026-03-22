@@ -11,10 +11,10 @@ from ergon_studio.proxy.channel_staffing import (
     resolve_staffed_recipients,
 )
 from ergon_studio.proxy.channels import (
+    Channel,
     ChannelMessage,
     ChannelSession,
     ChannelStore,
-    OpenChannel,
     describe_open_channels,
 )
 from ergon_studio.proxy.continuation import (
@@ -86,7 +86,7 @@ class ProxyOrchestrationCore:
             created_at = int(time.time())
         state = ProxyTurnState()
         session: ChannelSession | None = None
-        channels: dict[str, OpenChannel] = {}
+        channels: dict[str, Channel] = {}
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             nonlocal session
@@ -154,7 +154,7 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
-        channels: dict[str, OpenChannel],
+        channels: dict[str, Channel],
         next_channel_number: int,
         session_id: str,
         pending_orchestrator: PendingToolContext | None = None,
@@ -278,7 +278,7 @@ class ProxyOrchestrationCore:
         self,
         *,
         request: ProxyTurnRequest,
-        channels: dict[str, OpenChannel],
+        channels: dict[str, Channel],
         channel_id: str,
         message: str | None = None,
         recipients: tuple[str, ...] = (),
@@ -355,7 +355,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         state: ProxyTurnState,
         session: ChannelSession | None,
-        channels: dict[str, OpenChannel],
+        channels: dict[str, Channel],
     ) -> ProxyTurnResult:
         result = ProxyTurnResult(
             finish_reason=state.finish_reason,
@@ -378,7 +378,7 @@ class ProxyOrchestrationCore:
         request: ProxyTurnRequest,
         result: ProxyTurnResult,
         session: ChannelSession | None,
-        channels: dict[str, OpenChannel],
+        channels: dict[str, Channel],
     ) -> None:
         if session is None or result.finish_reason in {"error"}:
             return
@@ -418,7 +418,7 @@ class ProxyOrchestrationCore:
         *,
         request: ProxyTurnRequest,
         state: ProxyTurnState,
-        channels: dict[str, OpenChannel],
+        channels: dict[str, Channel],
         next_channel_number: int,
         session_id: str,
         pending: PendingContinuation,
@@ -481,18 +481,18 @@ def _open_channel(
     channel_id: str,
     preset: str | None,
     participants: tuple[str, ...],
-) -> OpenChannel:
+) -> Channel:
     if preset is not None:
         resolved_participants = registry.channel_presets.get(preset)
         if resolved_participants is None:
             raise ValueError(f"unknown channel preset: {preset}")
-        return OpenChannel(
+        return Channel(
             channel_id=channel_id,
             name=preset,
             participants=participants or resolved_participants,
         )
     if participants:
-        return OpenChannel(
+        return Channel(
             channel_id=channel_id,
             name="ad hoc",
             participants=participants,
@@ -504,7 +504,7 @@ def _channel_notice(base: str) -> str:
     return base + "\n"
 
 
-def _channel_intro(channel: OpenChannel) -> str:
+def _channel_intro(channel: Channel) -> str:
     roster = ", ".join(channel.participants)
     if channel.name == "ad hoc":
         return f"Orchestrator: opening channel {channel.channel_id} with {roster}."
@@ -514,7 +514,7 @@ def _channel_intro(channel: OpenChannel) -> str:
     )
 
 
-def _next_channel_number(channels: dict[str, OpenChannel]) -> int:
+def _next_channel_number(channels: dict[str, Channel]) -> int:
     highest = 0
     for channel_id in channels:
         if not channel_id.startswith("channel-"):
@@ -527,7 +527,7 @@ def _next_channel_number(channels: dict[str, OpenChannel]) -> int:
 
 
 def _validate_channel_recipients(
-    channel: OpenChannel,
+    channel: Channel,
     recipients: tuple[str, ...],
 ) -> None:
     staffed_members = expand_staffed_participants(channel.participants)

@@ -11,7 +11,7 @@ from ergon_studio.proxy.channel_staffing import (
     participant_context,
     resolve_staffed_recipients,
 )
-from ergon_studio.proxy.channels import ChannelMessage, OpenChannel
+from ergon_studio.proxy.channels import Channel, ChannelMessage
 from ergon_studio.proxy.continuation import (
     PendingContinuation,
     PendingToolContext,
@@ -64,7 +64,7 @@ class ProxyChannelExecutor:
         *,
         request: ProxyTurnRequest,
         session_id: str,
-        channel: OpenChannel,
+        channel: Channel,
         channel_message: str | None = None,
         recipients: tuple[str, ...] = (),
         state: ProxyTurnState,
@@ -290,7 +290,7 @@ def _process_participant_results(
     *,
     actor_results: list[_ParticipantResult] | tuple[_ParticipantResult, ...],
     request: ProxyTurnRequest,
-    channel: OpenChannel,
+    channel: Channel,
     current_transcript: list[ChannelMessage],
     channel_messages: list[ChannelMessage],
     state: ProxyTurnState,

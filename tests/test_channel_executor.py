@@ -7,7 +7,7 @@ from pathlib import Path
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
-from ergon_studio.proxy.channels import ChannelMessage, OpenChannel
+from ergon_studio.proxy.channels import Channel, ChannelMessage
 from ergon_studio.proxy.continuation import PendingContinuation, PendingToolContext
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
@@ -41,7 +41,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Discuss it"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("architect", "reviewer"),
@@ -84,7 +84,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Debate it"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("reviewer", "reviewer"),
@@ -130,7 +130,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Discuss it"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("architect", "reviewer"),
@@ -182,7 +182,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Challenge it"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("reviewer", "reviewer"),
@@ -243,7 +243,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Build it"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("architect", "coder"),
@@ -317,7 +317,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             tools=(_host_tool("read_file"),),
         )
         state = ProxyTurnState()
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="ad hoc",
             participants=("coder",),
@@ -338,7 +338,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         resumed_stream = executor.execute(
             request=request,
             session_id="session_1",
-            channel=OpenChannel(
+            channel=Channel(
                 channel_id="channel-1",
                 name="ad hoc",
                 participants=("coder",),
@@ -402,7 +402,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             messages=(ProxyInputMessage(role="user", content="Continue"),),
             tools=(_host_tool("read_file"),),
         )
-        channel = OpenChannel(
+        channel = Channel(
             channel_id="channel-1",
             name="debate",
             participants=("architect", "coder"),

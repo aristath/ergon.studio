@@ -13,7 +13,7 @@ class ChannelMessage:
 
 
 @dataclass
-class OpenChannel:
+class Channel:
     channel_id: str
     name: str
     participants: tuple[str, ...]
@@ -23,7 +23,7 @@ class OpenChannel:
 @dataclass
 class ChannelSession:
     session_id: str
-    channels: dict[str, OpenChannel] = field(default_factory=dict)
+    channels: dict[str, Channel] = field(default_factory=dict)
 
 
 class ChannelStore:
@@ -48,7 +48,7 @@ class ChannelStore:
 
 
 def describe_open_channels(
-    channels: dict[str, OpenChannel],
+    channels: dict[str, Channel],
 ) -> tuple[str, ...]:
     descriptions: list[str] = []
     for channel_id, channel in sorted(channels.items()):

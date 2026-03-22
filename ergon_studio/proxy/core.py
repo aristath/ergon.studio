@@ -278,25 +278,27 @@ class ProxyOrchestrationCore:
             state.finish_reason = "error"
             error_text = f"unknown channel: {channel_id}"
             state.content = error_text
+            async def _error_events() -> AsyncIterator[ProxyEvent]:
+                yield ProxyContentDeltaEvent(error_text)
             return ResponseStream(
-                _single_event_stream(ProxyContentDeltaEvent(error_text)),
+                _error_events(),
                 finalizer=lambda: (),
             )
         if pending is None:
             _validate_channel_recipients(channel, recipients)
         if pending is not None:
-            intro = _channel_notice(
+            intro = (
                 f"Orchestrator: continuing channel {channel.channel_id} "
                 f"({channel.name}) with "
                 f"{', '.join(pending_actors(pending))}."
             )
         elif channel.transcript:
-            intro = _channel_notice(
+            intro = (
                 f"Orchestrator: continuing channel {channel.channel_id} "
                 f"({channel.name})."
             )
         else:
-            intro = _channel_notice(_channel_intro(channel))
+            intro = _channel_intro(channel)
         channel_stream = self._channel_executor.execute(
             request=request,
             session_id=session_id,
@@ -310,8 +312,9 @@ class ProxyOrchestrationCore:
 
         async def _events() -> AsyncIterator[ProxyEvent]:
             nonlocal channel_result
-            state.append_reasoning(intro)
-            yield ProxyReasoningDeltaEvent(intro)
+            intro_line = intro + "\n"
+            state.append_reasoning(intro_line)
+            yield ProxyReasoningDeltaEvent(intro_line)
             async for event in channel_stream:
                 yield event
             channel_result = await channel_stream.get_final_response()
@@ -419,10 +422,6 @@ def _requires_host_tool_result(request: ProxyTurnRequest) -> bool:
     return isinstance(tool_choice, dict)
 
 
-async def _single_event_stream(event: ProxyEvent) -> AsyncIterator[ProxyEvent]:
-    yield event
-
-
 def _open_channel(
     *,
     registry: RuntimeRegistry,
@@ -446,10 +445,6 @@ def _open_channel(
             participants=participants,
         )
     raise ValueError("open_channel needs a preset or participants target")
-
-
-def _channel_notice(base: str) -> str:
-    return base + "\n"
 
 
 def _channel_intro(channel: Channel) -> str:

@@ -46,13 +46,18 @@ class ProxyChannelExecutor:
         channel: OpenChannel,
         channels: dict[str, OpenChannel],
         channel_message: str | None = None,
+        recipients: tuple[str, ...] = (),
         state: ProxyTurnState,
         continuation: ContinuationState | None = None,
         pending: PendingContinuation | None = None,
         worklog: tuple[str, ...] = (),
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         channel_participants = channel.participants
-        staffed_members = expand_staffed_participants(channel_participants)
+        all_staffed_members = expand_staffed_participants(channel_participants)
+        staffed_members = _targeted_participants(
+            staffed_members=all_staffed_members,
+            recipients=recipients,
+        )
         persisted_worklog = (
             continuation.worklog if continuation is not None else worklog
         )
@@ -73,7 +78,7 @@ class ProxyChannelExecutor:
                             request=request,
                             channel_name=channel.name,
                             participant=_continuation_participant(
-                                staffed_members=staffed_members,
+                                staffed_members=all_staffed_members,
                                 actor=actor,
                             ),
                             user_request=user_request,
@@ -100,6 +105,8 @@ class ProxyChannelExecutor:
                 )
                 for event in emitted:
                     yield event
+                return
+            if not staffed_members:
                 return
 
             results = await asyncio.gather(
@@ -198,6 +205,26 @@ def _continuation_participant(
         if participant.label == actor:
             return participant
     return staffed_members[0]
+
+
+def _targeted_participants(
+    *,
+    staffed_members: tuple[StaffedParticipant, ...],
+    recipients: tuple[str, ...],
+) -> tuple[StaffedParticipant, ...]:
+    if not recipients:
+        return ()
+    remaining: dict[str, int] = {}
+    for recipient in recipients:
+        remaining[recipient] = remaining.get(recipient, 0) + 1
+    selected: list[StaffedParticipant] = []
+    for participant in staffed_members:
+        remaining_count = remaining.get(participant.agent_id, 0)
+        if remaining_count <= 0:
+            continue
+        selected.append(participant)
+        remaining[participant.agent_id] = remaining_count - 1
+    return tuple(selected)
 
 
 def _snapshot_channels(

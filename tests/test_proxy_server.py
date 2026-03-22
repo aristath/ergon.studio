@@ -607,11 +607,13 @@ class ProxyServerTests(unittest.TestCase):
                             "open_channel",
                             preset="standard-build",
                             message="Build calculator",
+                            recipients=["architect"],
                         ),
                         _internal_action(
                             "open_channel",
                             participants=["coder"],
                             message="Continue the build from the plan",
+                            recipients=["coder"],
                         ),
                         "Channel final summary",
                     ],

@@ -14,12 +14,14 @@ class OpenChannelAction:
     preset: str | None
     participants: tuple[str, ...]
     message: str
+    recipients: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class MessageChannelAction:
     channel: str
     message: str
+    recipients: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -59,22 +61,37 @@ def build_orchestrator_internal_tools(
                         },
                     },
                     "message": {"type": "string"},
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": list(specialist_ids),
+                        },
+                    },
                 },
-                "required": ["message"],
+                "required": ["message", "recipients"],
             },
         ),
         ProxyFunctionTool(
             name="message_channel",
             description=(
-                "Send another message into an already-open channel by channel id."
+                "Send another message into an already-open channel by channel id. "
+                "Recipients decides who you are actively addressing."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "channel": {"type": "string"},
                     "message": {"type": "string"},
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": list(specialist_ids),
+                        },
+                    },
                 },
-                "required": ["channel", "message"],
+                "required": ["channel", "message", "recipients"],
             },
         ),
         ProxyFunctionTool(
@@ -106,16 +123,30 @@ def parse_open_channel_action(
             registry=registry,
         ),
         message=_required_text(payload.get("message"), field="message"),
+        recipients=_required_staffing_list(
+            payload.get("recipients"),
+            registry=registry,
+            field="recipients",
+        ),
     )
 
 
-def parse_message_channel_action(tool_call: ProxyToolCall) -> MessageChannelAction:
+def parse_message_channel_action(
+    tool_call: ProxyToolCall,
+    *,
+    registry: RuntimeRegistry,
+) -> MessageChannelAction:
     if tool_call.name != "message_channel":
         raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
     return MessageChannelAction(
         channel=_required_text(payload.get("channel"), field="channel"),
         message=_required_text(payload.get("message"), field="message"),
+        recipients=_required_staffing_list(
+            payload.get("recipients"),
+            registry=registry,
+            field="recipients",
+        ),
     )
 
 
@@ -187,3 +218,15 @@ def _normalize_staffing_list(
             continue
         participants.append(candidate)
     return tuple(participants)
+
+
+def _required_staffing_list(
+    value: object,
+    *,
+    registry: RuntimeRegistry,
+    field: str,
+) -> tuple[str, ...]:
+    participants = _normalize_staffing_list(value, registry=registry)
+    if not participants:
+        raise ValueError(f"{field} must name at least one specialist")
+    return participants

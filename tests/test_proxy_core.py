@@ -177,6 +177,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                                         {
                                             "participants": ["coder"],
                                             "message": "Implement it",
+                                            "recipients": ["coder"],
                                         }
                                     ),
                                 }
@@ -198,9 +199,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         result = await stream.get_final_response()
 
         content = "".join(
-            event.delta
-            for event in events
-            if isinstance(event, ProxyContentDeltaEvent)
+            event.delta for event in events if isinstance(event, ProxyContentDeltaEvent)
         )
         self.assertIn("Starting now", content)
         self.assertNotEqual(result.finish_reason, "error")
@@ -217,6 +216,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             participants=["coder"],
                             message="Implement it",
+                            recipients=["coder"],
                         ),
                         "Final summary",
                     ],
@@ -259,6 +259,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             participants=["coder"],
                             message="Update the README.",
+                            recipients=["coder"],
                         ),
                         "Final summary",
                     ],
@@ -300,11 +301,13 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             preset="standard-build",
                             message="Build calculator",
+                            recipients=["architect"],
                         ),
                         _internal_action(
                             "open_channel",
                             participants=["coder"],
                             message="Implement the approved plan",
+                            recipients=["coder"],
                         ),
                         "Channel final summary",
                     ],
@@ -343,6 +346,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             preset="standard-build",
                             participants=["coder"],
                             message="Build calculator",
+                            recipients=["coder"],
                         ),
                         "Channel final summary",
                     ],
@@ -421,6 +425,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             preset="standard-build",
                             message="Build calculator",
+                            recipients=["architect"],
                         ),
                     ],
                     "architect": [
@@ -463,6 +468,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             participants=["coder"],
                             message="Continue from the architecture plan",
+                            recipients=["coder"],
                         ),
                         "Channel final summary",
                     ],
@@ -514,12 +520,14 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             participants=["coder"],
                             message="Please inspect the repo.",
+                            recipients=["coder"],
                         ),
                         "I have the coder on the line.",
                         _internal_action(
                             "message_channel",
                             channel="channel-1",
                             message="Keep going and make the change.",
+                            recipients=["coder"],
                         ),
                         "We have what we need.",
                     ],
@@ -562,6 +570,84 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coder: I made the change.", reasoning)
         self.assertEqual(second_result.content, "We have what we need.")
 
+    async def test_close_channel_ends_server_side_channel_lifecycle(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "open_channel",
+                            participants=["coder"],
+                            message="Inspect the repo.",
+                            recipients=["coder"],
+                        ),
+                        "Channel is open.",
+                        _internal_action(
+                            "close_channel",
+                            channel="channel-1",
+                        ),
+                        "Wrapped up.",
+                        "Fresh reply.",
+                    ],
+                    "coder": ["I found the relevant files."],
+                }
+            ),
+        )
+        first_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Inspect it"),),
+        )
+
+        first_stream = core.stream_turn(first_request, created_at=1)
+        [event async for event in first_stream]
+        first_result = await first_stream.get_final_response()
+        self.assertEqual(first_result.content, "Channel is open.")
+
+        second_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Inspect it"),
+                ProxyInputMessage(role="assistant", content=first_result.content),
+                ProxyInputMessage(role="user", content="Close it out"),
+            ),
+        )
+
+        second_stream = core.stream_turn(second_request, created_at=2)
+        second_events = [event async for event in second_stream]
+        second_result = await second_stream.get_final_response()
+
+        second_reasoning = "".join(
+            event.delta
+            for event in second_events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertIn("closing channel channel-1", second_reasoning.lower())
+        self.assertEqual(second_result.content, "Wrapped up.")
+
+        third_request = ProxyTurnRequest(
+            model="ergon",
+            messages=(
+                ProxyInputMessage(role="user", content="Inspect it"),
+                ProxyInputMessage(role="assistant", content=first_result.content),
+                ProxyInputMessage(role="user", content="Close it out"),
+                ProxyInputMessage(role="assistant", content=second_result.content),
+                ProxyInputMessage(role="user", content="What channels are open now?"),
+            ),
+        )
+
+        third_stream = core.stream_turn(third_request, created_at=3)
+        third_events = [event async for event in third_stream]
+        third_result = await third_stream.get_final_response()
+
+        third_reasoning = "".join(
+            event.delta
+            for event in third_events
+            if isinstance(event, ProxyReasoningDeltaEvent)
+        )
+        self.assertEqual(third_reasoning, "")
+        self.assertEqual(third_result.content, "Fresh reply.")
+
     async def test_stream_turn_allows_channel_actions_before_host_tool_calls(
         self,
     ) -> None:
@@ -580,6 +666,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                                         {
                                             "participants": ["coder"],
                                             "message": "Take a look first.",
+                                            "recipients": ["coder"],
                                         }
                                     ),
                                 },
@@ -701,6 +788,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             preset="build-room",
                             message="Build calculator",
+                            recipients=["architect", "coder", "reviewer"],
                         ),
                     ],
                     "architect": [
@@ -781,6 +869,12 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             preset="debate",
                             message="Choose an approach",
+                            recipients=[
+                                "architect",
+                                "brainstormer",
+                                "architect",
+                                "reviewer",
+                            ],
                         ),
                         "Debate final summary",
                     ],
@@ -823,11 +917,18 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
                             "open_channel",
                             preset="debate",
                             message="Build it",
+                            recipients=[
+                                "architect",
+                                "brainstormer",
+                                "architect",
+                                "reviewer",
+                            ],
                         ),
                         _internal_action(
                             "open_channel",
                             participants=["reviewer"],
                             message="Reviewer, give the final verdict.",
+                            recipients=["reviewer"],
                         ),
                         "Done",
                     ],
@@ -859,7 +960,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_turn_respects_host_tool_policy(self) -> None:
         captured: dict[str, object] = {}
-        
+
         def _capture(invocation: AgentInvocation) -> None:
             captured["tools"] = invocation.tools
             captured["tool_choice"] = invocation.tool_choice
@@ -900,7 +1001,7 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         captured: dict[str, object] = {}
-        
+
         def _capture(invocation: AgentInvocation) -> None:
             captured["tools"] = invocation.tools
             captured["tool_choice"] = invocation.tool_choice
@@ -1191,9 +1292,7 @@ def _fake_agent_invoker(
             capture(invocation)
         queue = remaining[invocation.agent_id]
         if not queue:
-            raise AssertionError(
-                f"no fake responses left for {invocation.agent_id}"
-            )
+            raise AssertionError(f"no fake responses left for {invocation.agent_id}")
         raw = queue.pop(0)
         if isinstance(raw, str):
             payload = {"text": raw, "tool_calls": []}
@@ -1302,7 +1401,6 @@ def _advanced_channel_registry() -> RuntimeRegistry:
             "debate": ("architect", "brainstormer", "architect", "reviewer"),
         },
     )
-
 
 
 def _host_tool(name: str):

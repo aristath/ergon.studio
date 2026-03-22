@@ -23,6 +23,10 @@ def orchestrator_turn_prompt(
             "people instead of describing a plan in JSON."
         ),
         (
+            "When you message a channel, explicitly target the people you want "
+            "to answer. Do not rely on the runtime to decide who should respond."
+        ),
+        (
             "Do not send a product-manager-facing answer while you are still "
             "gathering internal help."
         ),

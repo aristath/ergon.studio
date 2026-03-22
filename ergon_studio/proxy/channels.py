@@ -36,6 +36,12 @@ class OpenChannel:
         )
 
 
+@dataclass
+class ChannelSession:
+    session_id: str
+    channels: dict[str, OpenChannel] = field(default_factory=dict)
+
+
 def describe_open_channels(
     channels: dict[str, OpenChannel],
 ) -> tuple[str, ...]:

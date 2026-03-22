@@ -45,6 +45,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             request=request,
             channel=channel,
             channels={"channel-1": channel},
+            recipients=("architect", "reviewer"),
             state=state,
         )
 
@@ -92,6 +93,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             request=request,
             channel=channel,
             channels={"channel-1": channel},
+            recipients=("reviewer", "reviewer"),
             state=state,
         )
 
@@ -159,6 +161,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             channel=channel,
             channels={"channel-1": channel},
             channel_message="Update it.",
+            recipients=("coder",),
             state=state,
         )
         [event async for event in first_stream]
@@ -254,6 +257,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             channel=channel,
             channels={"channel-2": channel},
             channel_message="Inspect the current state.",
+            recipients=("architect", "coder"),
             state=state,
         )
         events = [event async for event in stream]
@@ -308,6 +312,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             channel=channel,
             channels={"channel-7": channel},
             channel_message="Choose one clear direction.",
+            recipients=("reviewer",),
             state=state,
             continuation=ContinuationState(
                 actor="reviewer",

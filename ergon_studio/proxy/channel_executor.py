@@ -246,7 +246,7 @@ def _continuation_participant(
     for participant in staffed_members:
         if participant.label == actor:
             return participant
-    return staffed_members[0]
+    raise ValueError(f"pending actor is not staffed in this channel: {actor}")
 
 
 def _targeted_participants(

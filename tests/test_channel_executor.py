@@ -480,6 +480,62 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             ["orchestrator", "architect"],
         )
 
+    async def test_pending_resume_fails_when_actor_is_not_staffed(self) -> None:
+        executor = ProxyChannelExecutor(
+            registry=_registry(),
+            stream_text_agent=lambda **kwargs: _response_stream("unused"),
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Continue"),),
+            tools=(_host_tool("read_file"),),
+        )
+        channel = Channel(
+            channel_id="channel-1",
+            name="ad hoc",
+            participants=("coder",),
+            transcript=[ChannelMessage("orchestrator", "Continue.")],
+        )
+
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            state=ProxyTurnState(),
+            pending=PendingContinuation(
+                session_id="session_1",
+                items=(
+                    PendingToolContext(
+                        pending_id="pending_1",
+                        session_id="session_1",
+                        actor="architect",
+                        active_channel_id="channel-1",
+                        tool_calls=(
+                            ProxyToolCall(
+                                id="call_1",
+                                name="read_file",
+                                arguments_json='{"path":"plan.md"}',
+                            ),
+                        ),
+                        tool_results=(
+                            ProxyInputMessage(
+                                role="tool",
+                                content="plan text",
+                                tool_call_id="ergon:3:pending_1:call_1",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pending actor is not staffed in this channel: architect",
+        ):
+            [event async for event in stream]
+
 
 def _registry() -> RuntimeRegistry:
     return RuntimeRegistry(

@@ -63,11 +63,10 @@ class ProxyOrchestrationCore:
             invoker=agent_invoker,
             pending_store=self._pending_store,
         )
-        channel_executor = ProxyChannelExecutor(
+        self._channel_executor = ProxyChannelExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
         )
-        self._channel_executor = channel_executor
         self._channel_sessions: dict[str, dict[str, Channel]] = {}
 
     def stream_turn(
@@ -164,7 +163,6 @@ class ProxyOrchestrationCore:
                 yield ProxyContentDeltaEvent(delta)
             pending = None
             response = await orchestrator_stream.get_final_response()
-            pending_host_tool_calls: list[ProxyToolCallEvent] = []
             processed_internal_action = False
             if response.tool_calls:
                 host_tool_calls: list[ProxyToolCall] = []
@@ -249,19 +247,15 @@ class ProxyOrchestrationCore:
                         f"unsupported internal action: {tool_call.name}"
                     )
                 if host_tool_calls:
-                    pending_host_tool_calls.extend(
-                        self._agent_runner.emit_tool_call_events(
-                            tool_calls=tuple(host_tool_calls),
-                            request=request,
-                            session_id=session_id,
-                            actor="orchestrator",
-                            state=state,
-                        )
-                    )
-            if pending_host_tool_calls:
-                for tool_event in pending_host_tool_calls:
-                    yield tool_event
-                return
+                    for tool_event in self._agent_runner.emit_tool_call_events(
+                        tool_calls=tuple(host_tool_calls),
+                        request=request,
+                        session_id=session_id,
+                        actor="orchestrator",
+                        state=state,
+                    ):
+                        yield tool_event
+                    return
             if processed_internal_action:
                 continue
 

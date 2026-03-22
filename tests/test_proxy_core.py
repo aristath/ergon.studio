@@ -966,10 +966,10 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         messages = captured["messages"]
         self.assertEqual(
             [message["role"] for message in messages],
-            ["system", "assistant", "tool", "user"],
+            ["system", "user", "assistant", "tool"],
         )
-        self.assertEqual(messages[1]["tool_calls"][0]["function"]["name"], "read_file")
-        self.assertEqual(messages[2]["tool_call_id"], tool_call.id)
+        self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(messages[3]["tool_call_id"], tool_call.id)
 
     async def test_stream_turn_rebuilds_tool_result_without_assistant_call_history(
         self,
@@ -1011,11 +1011,11 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         messages = captured["messages"]
         self.assertEqual(
             [message["role"] for message in messages],
-            ["system", "assistant", "tool", "user"],
+            ["system", "user", "assistant", "tool"],
         )
-        self.assertEqual(messages[1]["tool_calls"][0]["id"], tool_call.id)
-        self.assertEqual(messages[1]["tool_calls"][0]["function"]["name"], "read_file")
-        self.assertEqual(messages[2]["tool_call_id"], "call_1")
+        self.assertEqual(messages[2]["tool_calls"][0]["id"], tool_call.id)
+        self.assertEqual(messages[2]["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(messages[3]["tool_call_id"], "call_1")
 
 
 class _FakeRegistry:

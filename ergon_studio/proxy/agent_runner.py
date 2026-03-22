@@ -306,12 +306,12 @@ def build_agent_messages(
             "content": instructions,
         }
     )
+    messages.append({"role": "user", "content": prompt})
 
     assistant_message = _pending_assistant_message(pending_continuation)
     if assistant_message is not None:
         messages.append(assistant_message)
     messages.extend(_pending_tool_messages(pending_continuation))
-    messages.append({"role": "user", "content": prompt})
     return messages
 
 

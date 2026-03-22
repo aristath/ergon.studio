@@ -89,13 +89,14 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertEqual(
             [message["role"] for message in messages],
-            ["system", "assistant", "tool", "user"],
+            ["system", "user", "assistant", "tool"],
         )
+        self.assertEqual(messages[1]["content"], "Use the result.")
         self.assertEqual(
-            messages[1]["tool_calls"][0]["function"]["name"],
+            messages[2]["tool_calls"][0]["function"]["name"],
             "read_file",
         )
-        self.assertEqual(messages[2]["tool_call_id"], encoded_tool_call.id)
+        self.assertEqual(messages[3]["tool_call_id"], encoded_tool_call.id)
 
     def test_build_agent_messages_synthesizes_missing_assistant_tool_call(
         self,
@@ -134,10 +135,10 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertEqual(
             [message["role"] for message in messages],
-            ["system", "assistant", "tool", "user"],
+            ["system", "user", "assistant", "tool"],
         )
-        self.assertEqual(messages[1]["tool_calls"][0]["id"], encoded_tool_call.id)
-        self.assertEqual(messages[2]["tool_call_id"], "call_1")
+        self.assertEqual(messages[2]["tool_calls"][0]["id"], encoded_tool_call.id)
+        self.assertEqual(messages[3]["tool_call_id"], "call_1")
 
     def test_stream_accumulator_rebuilds_incremental_tool_call_arguments(
         self,

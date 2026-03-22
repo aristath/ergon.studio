@@ -10,6 +10,18 @@ _VALID_OUTPUT_ITEM_KINDS = {"reasoning", "content", "tool_call"}
 
 @dataclass(frozen=True)
 class ProxyToolCall:
+    """Represents a tool call made by the model.
+
+    Attributes:
+        id: Unique identifier for this tool call. Must be non-empty.
+        name: Name of the tool/function being called. Must be non-empty.
+        arguments_json: JSON string containing the tool arguments. Must be a string.
+
+    Raises:
+        ValueError: If id or name is empty.
+        TypeError: If arguments_json is not a string.
+    """
+
     id: str
     name: str
     arguments_json: str
@@ -90,11 +102,17 @@ class ProxyTurnRequest:
         ):
             raise TypeError("parallel_tool_calls must be a bool or None")
 
-    def latest_user_text(self) -> str | None:
+    def latest_user_message(self) -> ProxyInputMessage | None:
         for message in reversed(self.messages):
             if message.role == "user":
-                return message.content
+                return message
         return None
+
+    def latest_user_text(self) -> str | None:
+        message = self.latest_user_message()
+        if message is None:
+            return None
+        return message.content
 
 
 @dataclass(frozen=True)

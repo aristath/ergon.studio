@@ -12,7 +12,6 @@ from ergon_studio.proxy.channel_staffing import (
 from ergon_studio.proxy.channels import (
     Channel,
     ChannelMessage,
-    ChannelSession,
     ChannelStore,
     describe_open_channels,
 )
@@ -81,27 +80,23 @@ class ProxyOrchestrationCore:
         session_id: str | None = None,
     ) -> ResponseStream[ProxyEvent, ProxyTurnResult]:
         state = ProxyTurnState()
-        session: ChannelSession | None = None
+        active_session_id: str | None = None
         channels: dict[str, Channel] = {}
 
         async def _events() -> AsyncIterator[ProxyEvent]:
-            nonlocal session
+            nonlocal active_session_id
             nonlocal channels
             try:
                 pending = latest_pending_continuation(
                     request.messages,
                     pending_store=self._pending_store,
                 )
-                session = self._restore_channel_session(session_id)
                 if pending is not None:
-                    session = self._session_for_pending(
-                        session=session,
-                        pending=pending,
-                    )
-                    channels = session.channels
+                    active_session_id = pending.session_id
+                    channels = self._channel_store.get(active_session_id) or {}
                 else:
-                    session = session or self._new_channel_session(session_id)
-                    channels = session.channels
+                    active_session_id = session_id or f"session_{uuid4().hex}"
+                    channels = self._channel_store.get(active_session_id) or {}
                 next_channel_number = _next_channel_number(channels)
                 if pending is not None:
                     async for event in self._resume_pending_groups(
@@ -109,7 +104,7 @@ class ProxyOrchestrationCore:
                         state=state,
                         channels=channels,
                         next_channel_number=next_channel_number,
-                        session_id=session.session_id,
+                        session_id=active_session_id,
                         pending=pending,
                     ):
                         yield event
@@ -122,7 +117,7 @@ class ProxyOrchestrationCore:
                     state=state,
                     channels=channels,
                     next_channel_number=next_channel_number,
-                    session_id=session.session_id,
+                    session_id=active_session_id,
                 ):
                     yield event
             except ValueError as exc:
@@ -139,7 +134,7 @@ class ProxyOrchestrationCore:
             _events(),
             finalizer=lambda: self._finalize_turn(
                 state=state,
-                session=session,
+                session_id=active_session_id,
                 channels=channels,
             ),
         )
@@ -336,19 +331,11 @@ class ProxyOrchestrationCore:
             finalizer=lambda: channel_result,
         )
 
-    def _restore_channel_session(
-        self,
-        session_id: str | None,
-    ) -> ChannelSession | None:
-        if session_id is None:
-            return None
-        return self._channel_store.get(session_id)
-
     def _finalize_turn(
         self,
         *,
         state: ProxyTurnState,
-        session: ChannelSession | None,
+        session_id: str | None,
         channels: dict[str, Channel],
     ) -> ProxyTurnResult:
         result = ProxyTurnResult(
@@ -360,7 +347,7 @@ class ProxyOrchestrationCore:
         )
         self._persist_channels_for_result(
             result=result,
-            session=session,
+            session_id=session_id,
             channels=channels,
         )
         return result
@@ -369,41 +356,17 @@ class ProxyOrchestrationCore:
         self,
         *,
         result: ProxyTurnResult,
-        session: ChannelSession | None,
+        session_id: str | None,
         channels: dict[str, Channel],
     ) -> None:
-        if session is None or result.finish_reason in {"error"}:
+        if session_id is None or result.finish_reason in {"error"}:
             return
-        session.channels = channels
         if result.finish_reason == "tool_calls":
             return
         if channels:
-            self._channel_store.put(session)
+            self._channel_store.put(session_id, channels)
         else:
-            self._channel_store.discard(session.session_id)
-
-    def _new_channel_session(self, session_id: str | None = None) -> ChannelSession:
-        session = ChannelSession(session_id=session_id or f"session_{uuid4().hex}")
-        self._channel_store.put(session)
-        return session
-
-    def _session_for_pending(
-        self,
-        *,
-        session: ChannelSession | None,
-        pending: PendingContinuation,
-    ) -> ChannelSession:
-        active_session: ChannelSession
-        if session is not None and session.session_id == pending.session_id:
-            active_session = session
-        else:
-            stored_session = self._channel_store.get(pending.session_id)
-            if stored_session is None:
-                active_session = self._channel_store.ensure(pending.session_id)
-            else:
-                active_session = stored_session
-        self._channel_store.put(active_session)
-        return active_session
+            self._channel_store.discard(session_id)
 
     async def _resume_pending_groups(
         self,

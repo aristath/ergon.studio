@@ -20,28 +20,15 @@ class Channel:
     transcript: list[ChannelMessage] = field(default_factory=list)
 
 
-@dataclass
-class ChannelSession:
-    session_id: str
-    channels: dict[str, Channel] = field(default_factory=dict)
-
-
 class ChannelStore:
     def __init__(self) -> None:
-        self._sessions: dict[str, ChannelSession] = {}
+        self._sessions: dict[str, dict[str, Channel]] = {}
 
-    def get(self, session_id: str) -> ChannelSession | None:
+    def get(self, session_id: str) -> dict[str, Channel] | None:
         return self._sessions.get(session_id)
 
-    def ensure(self, session_id: str) -> ChannelSession:
-        session = self._sessions.get(session_id)
-        if session is None:
-            session = ChannelSession(session_id=session_id)
-            self._sessions[session_id] = session
-        return session
-
-    def put(self, session: ChannelSession) -> None:
-        self._sessions[session.session_id] = session
+    def put(self, session_id: str, channels: dict[str, Channel]) -> None:
+        self._sessions[session_id] = channels
 
     def discard(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)

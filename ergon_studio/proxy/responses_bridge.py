@@ -7,8 +7,10 @@ from ergon_studio.proxy.parse_utils import (
     normalize_message_content,
     normalize_message_role,
     optional_non_empty_text,
-    parse_function_tool,
     parse_function_tool_call,
+    parse_function_tools,
+    parse_parallel_tool_calls,
+    parse_stream_flag,
 )
 from ergon_studio.proxy.tool_policy import validate_tool_choice
 
@@ -18,21 +20,13 @@ def parse_responses_request(payload: dict[str, Any]) -> ProxyTurnRequest:
     if not isinstance(model, str) or not model.strip():
         raise ValueError("responses request must include a non-empty model")
 
-    stream = payload.get("stream", False)
-    if type(stream) is not bool:
-        raise ValueError("stream must be a bool")
+    stream = parse_stream_flag(payload.get("stream", False))
 
     tool_choice = payload.get("tool_choice")
-    parallel_tool_calls = payload.get("parallel_tool_calls")
-    if parallel_tool_calls is not None and type(parallel_tool_calls) is not bool:
-        raise ValueError("parallel_tool_calls must be a bool or null")
-
-    raw_tools = payload.get("tools")
-    if raw_tools is None:
-        raw_tools = []
-    if not isinstance(raw_tools, list):
-        raise ValueError("tools must be a list or null")
-    tools = tuple(parse_function_tool(item) for item in raw_tools)
+    parallel_tool_calls = parse_parallel_tool_calls(
+        payload.get("parallel_tool_calls")
+    )
+    tools = parse_function_tools(payload.get("tools"))
     tool_choice = validate_tool_choice(tool_choice, tools=tools)
     messages: list[ProxyInputMessage] = []
     instructions = (

@@ -35,6 +35,14 @@ def parse_function_tool(payload: Any) -> ProxyFunctionTool:
     )
 
 
+def parse_function_tools(payload: Any) -> tuple[ProxyFunctionTool, ...]:
+    if payload is None:
+        return ()
+    if not isinstance(payload, list):
+        raise ValueError("tools must be a list or null")
+    return tuple(parse_function_tool(item) for item in payload)
+
+
 def parse_function_tool_call(payload: Any) -> ProxyToolCall:
     if not isinstance(payload, dict):
         raise ValueError("tool_calls must contain objects")
@@ -97,3 +105,15 @@ def optional_non_empty_text(value: Any) -> str | None:
     if not stripped:
         raise ValueError("optional text fields must be non-empty when provided")
     return stripped
+
+
+def parse_stream_flag(value: Any) -> bool:
+    if type(value) is not bool:
+        raise ValueError("stream must be a bool")
+    return value
+
+
+def parse_parallel_tool_calls(value: Any) -> bool | None:
+    if value is not None and type(value) is not bool:
+        raise ValueError("parallel_tool_calls must be a bool or null")
+    return value

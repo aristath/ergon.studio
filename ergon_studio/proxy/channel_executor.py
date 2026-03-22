@@ -68,7 +68,7 @@ class ProxyChannelExecutor:
         pending: PendingContinuation | None = None,
     ) -> ResponseStream[ProxyEvent, tuple[ChannelMessage, ...]]:
         all_staffed_members = expand_staffed_participants(channel.participants)
-        participant_tools = build_participant_internal_tools(self._registry)
+        participant_tools = build_participant_internal_tools()
         channel_messages: list[ChannelMessage] = []
 
         async def _events() -> AsyncIterator[ProxyEvent]:

@@ -98,9 +98,7 @@ def build_orchestrator_internal_tools(
     )
 
 
-def build_participant_internal_tools(
-    registry: RuntimeRegistry,
-) -> tuple[ProxyFunctionTool, ...]:
+def build_participant_internal_tools() -> tuple[ProxyFunctionTool, ...]:
     return (
         ProxyFunctionTool(
             name="message_channel",

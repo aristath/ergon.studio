@@ -27,10 +27,12 @@ def describe_open_channels(
     for channel_id, channel in sorted(channels.items()):
         roster = ", ".join(channel.participants) or "(none)"
         if channel.transcript:
+            skipped = max(0, len(channel.transcript) - 3)
+            prefix = f"[{skipped} earlier] " if skipped else ""
             recent = " | ".join(
                 message.render() for message in channel.transcript[-3:]
             )
-            descriptions.append(f"{channel_id}: {channel.name} [{roster}] :: {recent}")
+            descriptions.append(f"{channel_id}: {channel.name} [{roster}] :: {prefix}{recent}")
         else:
             descriptions.append(f"{channel_id}: {channel.name} [{roster}]")
     return tuple(descriptions)

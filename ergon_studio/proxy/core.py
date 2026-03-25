@@ -23,6 +23,7 @@ from ergon_studio.proxy.continuation import (
 from ergon_studio.proxy.models import (
     ProxyContentDeltaEvent,
     ProxyFinishEvent,
+    ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
     ProxyToolCallEvent,
@@ -171,6 +172,7 @@ class ProxyOrchestrationCore:
         pending_orchestrator: PendingToolContext | None = None,
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
+        loop_history: list[ProxyInputMessage] = []
         while True:
             log_event(
                 "orchestrator_run_start",
@@ -186,21 +188,21 @@ class ProxyOrchestrationCore:
                 ),
                 prompt_role="system",
                 model_id_override=request.model,
-                conversation_messages=request.messages,
+                conversation_messages=(*request.messages, *loop_history),
                 host_tools=request.tools,
                 extra_tools=internal_tools,
                 tool_choice=request.tool_choice,
                 parallel_tool_calls=request.parallel_tool_calls,
                 pending_continuation=pending,
             )
+            buffered_deltas: list[str] = []
             async for delta in orchestrator_stream:
                 log_event(
                     "orchestrator_delta",
                     session_id=session_id,
                     delta=delta,
                 )
-                state.append_content(delta)
-                yield ProxyContentDeltaEvent(delta)
+                buffered_deltas.append(delta)
             pending = None
             response = await orchestrator_stream.get_final_response()
             log_event(
@@ -209,8 +211,9 @@ class ProxyOrchestrationCore:
                 response=response,
             )
             processed_internal_action = False
+            host_tool_calls: list[ProxyToolCall] = []
+            channel_results: list[tuple[str, str, tuple[ChannelMessage, ...]]] = []
             if response.tool_calls:
-                host_tool_calls: list[ProxyToolCall] = []
                 for tool_call in response.tool_calls:
                     if not is_internal_tool_name(tool_call.name):
                         host_tool_calls.append(tool_call)
@@ -273,8 +276,18 @@ class ProxyOrchestrationCore:
                         async for internal_event in channel_stream:
                             yield internal_event
                         if state.finish_reason == "tool_calls":
+                            if buffered_deltas:
+                                text = "".join(buffered_deltas)
+                                state.append_reasoning(text)
+                                yield ProxyReasoningDeltaEvent(text)
                             return
-                        await channel_stream.get_final_response()
+                        channel_results.append(
+                            (
+                                channel.channel_id,
+                                channel.name,
+                                await channel_stream.get_final_response(),
+                            )
+                        )
                         continue
                     if tool_call.name == "message_channel":
                         message_action = parse_message_channel_action(
@@ -299,8 +312,19 @@ class ProxyOrchestrationCore:
                         async for internal_event in channel_stream:
                             yield internal_event
                         if state.finish_reason == "tool_calls":
+                            if buffered_deltas:
+                                text = "".join(buffered_deltas)
+                                state.append_reasoning(text)
+                                yield ProxyReasoningDeltaEvent(text)
                             return
-                        await channel_stream.get_final_response()
+                        ch = channels.get(message_action.channel)
+                        channel_results.append(
+                            (
+                                message_action.channel,
+                                ch.name if ch else "?",
+                                await channel_stream.get_final_response(),
+                            )
+                        )
                         continue
                     if tool_call.name == "close_channel":
                         close_action = parse_close_channel_action(tool_call)
@@ -324,6 +348,14 @@ class ProxyOrchestrationCore:
                         f"unsupported internal action: {tool_call.name}"
                     )
                 if host_tool_calls:
+                    if buffered_deltas:
+                        text = "".join(buffered_deltas)
+                        if processed_internal_action:
+                            state.append_reasoning(text)
+                            yield ProxyReasoningDeltaEvent(text)
+                        else:
+                            state.append_content(text)
+                            yield ProxyContentDeltaEvent(text)
                     for tool_event in self._agent_runner.emit_tool_call_events(
                         tool_calls=tuple(host_tool_calls),
                         request=request,
@@ -333,7 +365,33 @@ class ProxyOrchestrationCore:
                     ):
                         yield tool_event
                     return
+
+            if buffered_deltas:
+                text = "".join(buffered_deltas)
+                if processed_internal_action:
+                    state.append_reasoning(text)
+                    yield ProxyReasoningDeltaEvent(text)
+                else:
+                    state.append_content(text)
+                    yield ProxyContentDeltaEvent(text)
+
             if processed_internal_action:
+                text_this_iteration = "".join(buffered_deltas)
+                if text_this_iteration:
+                    loop_history.append(
+                        ProxyInputMessage(role="assistant", content=text_this_iteration)
+                    )
+                for cid, cname, cresult in channel_results:
+                    if cresult:
+                        lines = "\n".join(
+                            f"  {m.author}: {m.content}" for m in cresult
+                        )
+                        loop_history.append(
+                            ProxyInputMessage(
+                                role="user",
+                                content=f"Channel {cid} ({cname}) completed:\n{lines}",
+                            )
+                        )
                 continue
 
             if request.tool_choice == "required" or isinstance(

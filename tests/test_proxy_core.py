@@ -431,6 +431,164 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_final_pass_orchestrator_text_emitted_as_content(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker({"orchestrator": ["Final answer"]}),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="What?"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        events = [event async for event in stream]
+        await stream.get_final_response()
+
+        content_text = "".join(
+            e.delta for e in events if isinstance(e, ProxyContentDeltaEvent)
+        )
+        self.assertIn("Final answer", content_text)
+
+    async def test_pre_channel_orchestrator_text_emitted_as_reasoning(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {
+                            "text": "Let me check...",
+                            "tool_calls": [
+                                {
+                                    "id": "internal_open",
+                                    "name": "open_channel",
+                                    "arguments": json.dumps(
+                                        {
+                                            "participants": ["coder"],
+                                            "message": "Implement it",
+                                            "recipients": ["coder"],
+                                        }
+                                    ),
+                                }
+                            ],
+                        },
+                        "Done",
+                    ],
+                    "coder": ["Patch applied"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Do it"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        events = [event async for event in stream]
+        await stream.get_final_response()
+
+        reasoning_text = "".join(
+            e.delta for e in events if isinstance(e, ProxyReasoningDeltaEvent)
+        )
+        content_text = "".join(
+            e.delta for e in events if isinstance(e, ProxyContentDeltaEvent)
+        )
+        self.assertIn("Let me check...", reasoning_text)
+        self.assertNotIn("Let me check...", content_text)
+
+    async def test_orchestrator_receives_prior_text_in_loop_history(self) -> None:
+        captured_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    {
+                        "text": "Checking...",
+                        "tool_calls": [
+                            {
+                                "id": "internal_open",
+                                "name": "open_channel",
+                                "arguments": json.dumps(
+                                    {
+                                        "participants": ["coder"],
+                                        "message": "Check it",
+                                        "recipients": ["coder"],
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                    "Done",
+                ],
+                "coder": ["Patch applied"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                captured_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_capturing_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Do it"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertEqual(len(captured_invocations), 2)
+        second_messages = captured_invocations[1].messages
+        assistant_msgs = [
+            m for m in second_messages
+            if m["role"] == "assistant" and m.get("content") == "Checking..."
+        ]
+        self.assertTrue(
+            len(assistant_msgs) >= 1,
+            f"Expected assistant 'Checking...' in second invocation. Messages: {second_messages}",
+        )
+
+    async def test_orchestrator_receives_channel_results_in_loop_history(self) -> None:
+        captured_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    _internal_action(
+                        "open_channel",
+                        participants=["coder"],
+                        message="Build it",
+                        recipients=["coder"],
+                    ),
+                    "Done",
+                ],
+                "coder": ["Solution X"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                captured_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_capturing_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertEqual(len(captured_invocations), 2)
+        second_messages = captured_invocations[1].messages
+        user_msgs_with_solution = [
+            m for m in second_messages
+            if m["role"] == "user" and "Solution X" in str(m.get("content", ""))
+        ]
+        self.assertTrue(
+            len(user_msgs_with_solution) >= 1,
+            f"Expected user message with 'Solution X' in second invocation. Messages: {second_messages}",
+        )
+
+
 def _fake_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),

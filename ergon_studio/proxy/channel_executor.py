@@ -35,6 +35,8 @@ from ergon_studio.response_stream import ResponseStream
 
 ProxyEvent = ProxyReasoningDeltaEvent | ProxyToolCallEvent
 
+MAX_CHANNEL_TRANSCRIPT_MESSAGES = 50
+
 
 @dataclass(frozen=True)
 class _ChannelDelivery:
@@ -270,7 +272,8 @@ def _channel_conversation_messages(
     participant_label: str,
 ) -> tuple[ProxyInputMessage, ...]:
     messages: list[ProxyInputMessage] = []
-    for message in channel_transcript:
+    capped = channel_transcript[-MAX_CHANNEL_TRANSCRIPT_MESSAGES:]
+    for message in capped:
         if message.author == participant_label:
             messages.append(
                 ProxyInputMessage(

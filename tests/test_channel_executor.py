@@ -6,7 +6,11 @@ from pathlib import Path
 
 from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
-from ergon_studio.proxy.channel_executor import ProxyChannelExecutor
+from ergon_studio.proxy.channel_executor import (
+    MAX_CHANNEL_TRANSCRIPT_MESSAGES,
+    ProxyChannelExecutor,
+    _channel_conversation_messages,
+)
 from ergon_studio.proxy.channels import Channel, ChannelMessage
 from ergon_studio.proxy.continuation import PendingToolContext
 from ergon_studio.proxy.models import (
@@ -699,6 +703,33 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
             "pending actor is not staffed in this channel: architect",
         ):
             [event async for event in stream]
+
+
+class ChannelConversationMessagesTests(unittest.TestCase):
+    def test_channel_conversation_messages_caps_transcript(self) -> None:
+        transcript = tuple(
+            ChannelMessage(author="orchestrator", content=f"msg {i}")
+            for i in range(60)
+        )
+        result = _channel_conversation_messages(
+            channel_transcript=transcript,
+            participant_label="coder",
+        )
+        self.assertLessEqual(len(result), MAX_CHANNEL_TRANSCRIPT_MESSAGES)
+
+    def test_channel_conversation_messages_keeps_latest(self) -> None:
+        transcript = tuple(
+            ChannelMessage(author="orchestrator", content=f"msg {i}")
+            for i in range(60)
+        )
+        result = _channel_conversation_messages(
+            channel_transcript=transcript,
+            participant_label="coder",
+        )
+        # The last message in the transcript must appear in the result
+        self.assertEqual(result[-1].content, "msg 59")
+        # The very first message should not appear (it's beyond the window)
+        self.assertFalse(any(m.content == "msg 0" for m in result))
 
 
 def _registry() -> RuntimeRegistry:

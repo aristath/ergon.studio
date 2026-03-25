@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Callable
+
+from ergon_studio.proxy.agent_runner import AgentRunResult
+from ergon_studio.proxy.models import (
+    ProxyInputMessage,
+    ProxyReasoningDeltaEvent,
+    ProxyToolCall,
+)
+from ergon_studio.proxy.session_overlay import SessionOverlay
+from ergon_studio.proxy.workspace_tools import (
+    build_workspace_tools,
+    parse_list_files_action,
+    parse_read_file_action,
+    parse_write_file_action,
+)
+from ergon_studio.response_stream import ResponseStream
+
+
+class SubSessionExecutor:
+    """Run an agent in an isolated sub-session with a workspace file overlay.
+
+    The agent may call ``read_file``, ``write_file``, and ``list_files`` tools;
+    these are handled internally against the overlay.  No host tools are passed
+    to the agent.  Each agent text chunk is yielded as a
+    ``ProxyReasoningDeltaEvent``.  The final response text is the stream's
+    terminal value.
+    """
+
+    def __init__(
+        self,
+        *,
+        stream_text_agent: Callable[..., ResponseStream[str, AgentRunResult]],
+    ) -> None:
+        self._stream_text_agent = stream_text_agent
+
+    def execute(
+        self,
+        *,
+        agent_id: str,
+        task: str,
+        session_id: str,
+        overlay: SessionOverlay,
+        model_id: str,
+    ) -> ResponseStream[ProxyReasoningDeltaEvent, str]:
+        final_text: list[str] = []
+        workspace_tools = build_workspace_tools()
+
+        async def _events() -> AsyncIterator[ProxyReasoningDeltaEvent]:
+            conversation: list[ProxyInputMessage] = []
+            while True:
+                stream = self._stream_text_agent(
+                    agent_id=agent_id,
+                    prompt=task,
+                    prompt_role="user",
+                    model_id_override=model_id,
+                    conversation_messages=tuple(conversation),
+                    host_tools=(),
+                    extra_tools=workspace_tools,
+                )
+                async for delta in stream:
+                    if delta:
+                        yield ProxyReasoningDeltaEvent(delta)
+                result = await stream.get_final_response()
+
+                # Record this assistant turn (with tool_calls if present)
+                conversation.append(
+                    ProxyInputMessage(
+                        role="assistant",
+                        content=result.text,
+                        tool_calls=result.tool_calls,
+                    )
+                )
+
+                if not result.tool_calls:
+                    final_text.append(result.text)
+                    break
+
+                # Execute each workspace tool call and feed results back
+                for tool_call in result.tool_calls:
+                    tool_result = _execute_workspace_tool(tool_call, overlay)
+                    conversation.append(
+                        ProxyInputMessage(
+                            role="tool",
+                            content=tool_result,
+                            tool_call_id=tool_call.id,
+                        )
+                    )
+
+        return ResponseStream(
+            _events(),
+            finalizer=lambda: final_text[0] if final_text else "",
+        )
+
+
+def _execute_workspace_tool(
+    tool_call: ProxyToolCall, overlay: SessionOverlay
+) -> str:
+    if tool_call.name == "read_file":
+        action = parse_read_file_action(tool_call)
+        try:
+            return overlay.read_file(action.path)
+        except FileNotFoundError:
+            return f"Error: file not found: {action.path}"
+    if tool_call.name == "write_file":
+        action = parse_write_file_action(tool_call)
+        overlay.write_file(action.path, action.content)
+        return f"Written: {action.path}"
+    if tool_call.name == "list_files":
+        action = parse_list_files_action(tool_call)
+        files = overlay.list_files(action.directory)
+        return "\n".join(files) if files else "(empty directory)"
+    return f"Error: unknown workspace tool: {tool_call.name}"

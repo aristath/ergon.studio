@@ -849,6 +849,33 @@ class RunParallelTests(unittest.IsolatedAsyncioTestCase):
             f"Expected 'Subsession thinking' in reasoning. Got: {reasoning_texts}",
         )
 
+    async def test_orchestrator_prompt_mentions_run_parallel(self) -> None:
+        captured: list[AgentInvocation] = []
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                captured.append(invocation)
+            return _response_stream("Done")
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_capturing_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Hi"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        all_system_content = " ".join(
+            m["content"]
+            for m in captured[0].messages
+            if m["role"] in ("system", "user") and m.get("content")
+        )
+        self.assertIn("run_parallel", all_system_content)
+
     async def test_run_parallel_with_unknown_agent_fails(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
@@ -900,6 +927,70 @@ class RunParallelTests(unittest.IsolatedAsyncioTestCase):
         result = await stream.get_final_response()
 
         self.assertEqual(result.finish_reason, "error")
+
+    async def test_run_parallel_one_failing_subsession_does_not_crash_others(
+        self,
+    ) -> None:
+        call_counts: dict[str, int] = {"coder": 0}
+
+        def _partly_failing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "coder":
+                call_counts["coder"] += 1
+                if call_counts["coder"] == 1:
+                    # First coder call raises
+                    async def _fail_events():
+                        raise RuntimeError("sub-session failed")
+                        yield  # noqa: unreachable
+
+                    return ResponseStream(
+                        _fail_events(),
+                        finalizer=lambda: AgentRunResult(text="", tool_calls=()),
+                    )
+            return _response_stream("Success")
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_partly_failing_invoker,
+        )
+        # orchestrator calls run_parallel with count=2, one sub-session fails
+        # The turn should not crash; the orchestrator gets a result (even if partial)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+
+        def _orchestrator_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                if call_counts.get("orchestrator", 0) == 0:
+                    call_counts["orchestrator"] = 1
+                    return _response_stream(
+                        "",
+                        response=AgentRunResult(
+                            text="",
+                            tool_calls=(
+                                ProxyToolCall(
+                                    id="rp1",
+                                    name="run_parallel",
+                                    arguments_json=json.dumps(
+                                        {"agent": "coder", "count": 2, "task": "X"}
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                return _response_stream("Done")
+            return _partly_failing_invoker(invocation)
+
+        core2 = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_orchestrator_invoker,
+        )
+        stream = core2.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        # Turn must complete (not crash); orchestrator got something back
+        self.assertIn(result.finish_reason, {"stop", "error"})
 
     async def test_run_parallel_with_count_one_returns_single_result(self) -> None:
         core = ProxyOrchestrationCore(

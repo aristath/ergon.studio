@@ -355,6 +355,89 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
         extra_tool_names = {t.name for t in invocations[0]["extra_tools"]}
         self.assertEqual(extra_tool_names, WORKSPACE_TOOL_NAMES)
 
+    # --- prompt framing ---
+
+    async def test_sub_session_uses_system_prompt_framing(self) -> None:
+        invocations: list[dict[str, Any]] = []
+        executor = SubSessionExecutor(
+            stream_text_agent=_capturing_stream_text_agent(
+                invocations,
+                [AgentRunResult(text="Done", tool_calls=())],
+            )
+        )
+        stream = executor.execute(
+            agent_id="coder",
+            task="My specific task",
+            session_id="s-framing",
+            overlay=self._overlay(),
+            model_id="test-model",
+        )
+        async for _ in stream:
+            pass
+        await stream.get_final_response()
+        # prompt must be the framing, not the task text
+        self.assertEqual(invocations[0]["prompt_role"], "system")
+        self.assertNotIn("My specific task", invocations[0]["prompt"])
+
+    async def test_sub_session_task_injected_as_first_user_message(self) -> None:
+        invocations: list[dict[str, Any]] = []
+        executor = SubSessionExecutor(
+            stream_text_agent=_capturing_stream_text_agent(
+                invocations,
+                [AgentRunResult(text="Done", tool_calls=())],
+            )
+        )
+        stream = executor.execute(
+            agent_id="coder",
+            task="My specific task",
+            session_id="s-task",
+            overlay=self._overlay(),
+            model_id="test-model",
+        )
+        async for _ in stream:
+            pass
+        await stream.get_final_response()
+        conv = invocations[0]["conversation_messages"]
+        self.assertGreater(len(conv), 0)
+        self.assertEqual(conv[0].role, "user")
+        self.assertEqual(conv[0].content, "My specific task")
+
+    # --- loop limit ---
+
+    async def test_loop_limit_raises_after_max_iterations(self) -> None:
+        def _always_tool(**kwargs: Any) -> ResponseStream[str, AgentRunResult]:
+            async def _events():  # type: ignore[return]
+                return
+                yield  # noqa: unreachable
+
+            return ResponseStream(
+                _events(),
+                finalizer=lambda: AgentRunResult(
+                    text="",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="tc1",
+                            name="write_file",
+                            arguments_json=(
+                                f'{{"path": "{self.tmp}/f.py", "content": "x"}}'
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+        executor = SubSessionExecutor(stream_text_agent=_always_tool)
+        stream = executor.execute(
+            agent_id="coder",
+            task="Task",
+            session_id="s-limit",
+            overlay=self._overlay(),
+            model_id="test-model",
+        )
+        with self.assertRaises(ValueError):
+            async for _ in stream:
+                pass
+
     # --- reasoning events ---
 
     async def test_reasoning_events_emitted_for_agent_text(self) -> None:

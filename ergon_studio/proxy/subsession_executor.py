@@ -8,6 +8,7 @@ from ergon_studio.proxy.models import (
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
 )
+from ergon_studio.proxy.prompts import subsession_prompt
 from ergon_studio.proxy.session_overlay import SessionOverlay
 from ergon_studio.proxy.workspace_tools import (
     build_workspace_tools,
@@ -16,6 +17,8 @@ from ergon_studio.proxy.workspace_tools import (
     parse_write_file_action,
 )
 from ergon_studio.response_stream import ResponseStream
+
+MAX_SUBSESSION_ITERATIONS = 50
 
 
 class SubSessionExecutor:
@@ -46,14 +49,27 @@ class SubSessionExecutor:
     ) -> ResponseStream[ProxyReasoningDeltaEvent, str]:
         final_text: list[str] = []
         workspace_tools = build_workspace_tools()
+        framing = subsession_prompt(agent_id=agent_id)
 
         async def _events() -> AsyncIterator[ProxyReasoningDeltaEvent]:
-            conversation: list[ProxyInputMessage] = []
+            # Start the conversation with the task as the first user message so
+            # the framing prompt stays as a separate system injection.
+            conversation: list[ProxyInputMessage] = [
+                ProxyInputMessage(role="user", content=task)
+            ]
+            iteration = 0
             while True:
+                if iteration >= MAX_SUBSESSION_ITERATIONS:
+                    raise ValueError(
+                        f"sub-session for {agent_id!r} exceeded "
+                        f"{MAX_SUBSESSION_ITERATIONS} iterations without "
+                        "producing a final text response"
+                    )
+                iteration += 1
                 stream = self._stream_text_agent(
                     agent_id=agent_id,
-                    prompt=task,
-                    prompt_role="user",
+                    prompt=framing,
+                    prompt_role="system",
                     model_id_override=model_id,
                     conversation_messages=tuple(conversation),
                     host_tools=(),

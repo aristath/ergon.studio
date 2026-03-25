@@ -593,7 +593,12 @@ class ProxyOrchestrationCore:
                 all_events.append(event)
             return await stream.get_final_response()
 
-        results: list[str] = list(await asyncio.gather(*(_drain(s) for s in streams)))
+        raw = await asyncio.gather(
+            *(_drain(s) for s in streams), return_exceptions=True
+        )
+        results: list[str] = [
+            f"Error: {r}" if isinstance(r, BaseException) else r for r in raw
+        ]
         return results, all_events
 
     def _finalize_turn(

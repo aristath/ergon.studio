@@ -24,7 +24,6 @@ from ergon_studio.proxy.models import (
     ProxyOutputItemRef,
     ProxyReasoningDeltaEvent,
     ProxyToolCallEvent,
-    ProxyTurnRequest,
     ProxyTurnResult,
 )
 from ergon_studio.proxy.responses_adapter import (

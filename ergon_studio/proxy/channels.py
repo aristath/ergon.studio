@@ -32,7 +32,9 @@ def describe_open_channels(
             recent = " | ".join(
                 message.render() for message in channel.transcript[-3:]
             )
-            descriptions.append(f"{channel_id}: {channel.name} [{roster}] :: {prefix}{recent}")
+            descriptions.append(
+                f"{channel_id}: {channel.name} [{roster}] :: {prefix}{recent}"
+            )
         else:
             descriptions.append(f"{channel_id}: {channel.name} [{roster}]")
     return tuple(descriptions)

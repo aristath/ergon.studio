@@ -29,6 +29,7 @@ classifiers = [
 ]
 
 dependencies = [
+  "aiohttp",
   "openai",
   "PyYAML",
 ]
@@ -42,6 +43,7 @@ tui = [
   "textual",
 ]
 dev = [
+  "aiohttp",
   "mypy",
   "pytest",
   "pytest-cov",

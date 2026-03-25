@@ -5,10 +5,10 @@ import json
 import threading
 import time
 from http import HTTPStatus
-from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
+
+from aiohttp import web
 
 from ergon_studio.debug_log import log_event
 from ergon_studio.proxy.chat_adapter import (
@@ -46,319 +46,215 @@ class RequestBodyTooLargeError(ValueError):
     """Raised when a request exceeds the accepted body size."""
 
 
-class ProxyHTTPServer(ThreadingHTTPServer):
-    def __init__(
-        self,
-        server_address: tuple[str, int],
-        RequestHandlerClass: type[BaseHTTPRequestHandler],
-        *,
-        core: ProxyOrchestrationCore,
-    ) -> None:
-        super().__init__(server_address, RequestHandlerClass)
-        self.core = core
-        self._models_cache: list[dict[str, Any]] | None = None
-        self._models_cache_expires_at = 0.0
-        self._models_cache_lock = threading.Lock()
+class _ModelState:
+    def __init__(self) -> None:
+        self._cache: list[dict[str, Any]] | None = None
+        self._expires_at = 0.0
+        self._lock = threading.Lock()
 
-    def available_models(self) -> list[dict[str, Any]]:
+    def available_models(self, registry: RuntimeRegistry) -> list[dict[str, Any]]:
         now = time.monotonic()
-        with self._models_cache_lock:
-            if self._models_cache is not None and now < self._models_cache_expires_at:
-                return [dict(item) for item in self._models_cache]
+        with self._lock:
+            if self._cache is not None and now < self._expires_at:
+                return [dict(item) for item in self._cache]
             try:
-                models = _available_models(self.core.registry)
+                models = _available_models(registry)
             except Exception:
-                if self._models_cache is not None:
-                    return [dict(item) for item in self._models_cache]
+                if self._cache is not None:
+                    return [dict(item) for item in self._cache]
                 raise
-            self._models_cache = [dict(item) for item in models]
-            self._models_cache_expires_at = now + MODEL_CACHE_TTL_SECONDS
+            self._cache = [dict(item) for item in models]
+            self._expires_at = now + MODEL_CACHE_TTL_SECONDS
             return [dict(item) for item in models]
 
 
-class ProxyRequestHandler(BaseHTTPRequestHandler):
-    server_version = "ergon-studio-proxy/0.1"
-    protocol_version = "HTTP/1.1"
-
-    @property
-    def proxy_server(self) -> ProxyHTTPServer:
-        return cast(ProxyHTTPServer, self.server)
-
-    def do_GET(self) -> None:
-        if self.path == "/v1/models":
-            try:
-                data = self.proxy_server.available_models()
-            except Exception as exc:
-                self._send_error_json(
-                    HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}"
-                )
-                return
-            self._send_json(HTTPStatus.OK, {"object": "list", "data": data})
-            return
-        self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown route: {self.path}")
-
-    def do_POST(self) -> None:
-        if self.path == "/v1/chat/completions":
-            self._handle_chat_completions()
-            return
-        if self.path == "/v1/responses":
-            self._handle_responses()
-            return
-        self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown route: {self.path}")
-
-    def log_message(self, format: str, *args: object) -> None:
-        return
-
-    def _handle_chat_completions(self) -> None:
-        try:
-            payload = self._read_json_body()
-            request = parse_chat_completion_request(payload)
-        except RequestBodyTooLargeError as exc:
-            log_event("http_request_rejected", route=self.path, error=str(exc))
-            self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
-            return
-        except ValueError as exc:
-            log_event("http_request_rejected", route=self.path, error=str(exc))
-            self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
-            return
-
-        completion_id = f"chatcmpl_{uuid4().hex}"
-        created_at = int(time.time())
-        session_id = self._request_session_id()
-        log_event(
-            "http_request",
-            route=self.path,
-            session_id=session_id,
-            stream=request.stream,
-            request=request,
+async def _handle_models(request: web.Request) -> web.Response:
+    core: ProxyOrchestrationCore = request.app["core"]
+    model_state: _ModelState = request.app["model_state"]
+    try:
+        data = model_state.available_models(core.registry)
+    except Exception as exc:
+        return _error_response(
+            HTTPStatus.BAD_GATEWAY, f"failed to load upstream models: {exc}"
         )
-        if request.stream:
-            self._send_sse_headers(session_id=session_id)
-            try:
-                asyncio.run(
-                    self._stream_chat_completion(
-                        request=request,
+    return web.Response(
+        status=200,
+        content_type="application/json",
+        text=json.dumps({"object": "list", "data": data}),
+    )
+
+
+async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
+    core: ProxyOrchestrationCore = request.app["core"]
+    try:
+        payload = await _read_json_body(request)
+        turn_request = parse_chat_completion_request(payload)
+    except RequestBodyTooLargeError as exc:
+        log_event("http_request_rejected", route=request.path, error=str(exc))
+        return _error_response(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+    except ValueError as exc:
+        log_event("http_request_rejected", route=request.path, error=str(exc))
+        return _error_response(HTTPStatus.BAD_REQUEST, str(exc))
+
+    completion_id = f"chatcmpl_{uuid4().hex}"
+    created_at = int(time.time())
+    session_id = _parse_session_id(request)
+    log_event(
+        "http_request",
+        route=request.path,
+        session_id=session_id,
+        stream=turn_request.stream,
+        request=turn_request,
+    )
+
+    if turn_request.stream:
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache",
+                "Connection": "close",
+                SESSION_HEADER_NAME: session_id,
+            },
+        )
+        _apply_session_cookie(resp, session_id)
+        resp.force_close()
+        await resp.prepare(request)
+        try:
+            turn_stream = core.stream_turn(turn_request, session_id=session_id)
+            async for event in turn_stream:
+                await resp.write(
+                    encode_chat_stream_sse(
+                        event,
                         completion_id=completion_id,
+                        model=turn_request.model,
                         created_at=created_at,
-                        session_id=session_id,
                     )
                 )
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                log_event(
-                    "http_stream_disconnected",
-                    route=self.path,
-                    session_id=session_id,
-                )
-                return
-            except Exception as exc:
-                log_event(
-                    "http_stream_failure",
-                    route=self.path,
-                    session_id=session_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                self._stream_chat_failure(
-                    completion_id=completion_id,
-                    model=request.model,
-                    created_at=created_at,
-                    error_text=f"{type(exc).__name__}: {exc}",
-                )
-            return
-
-        try:
-            result = asyncio.run(
-                self._run_chat_completion(request, session_id=session_id)
+            await resp.write(encode_chat_stream_done())
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            log_event(
+                "http_stream_disconnected",
+                route=request.path,
+                session_id=session_id,
             )
         except Exception as exc:
             log_event(
-                "http_request_failure",
-                route=self.path,
+                "http_stream_failure",
+                route=request.path,
                 session_id=session_id,
                 error=f"{type(exc).__name__}: {exc}",
             )
-            self._send_error_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
-            )
-            return
-        if result.finish_reason == "error":
-            log_event(
-                "http_request_failure",
-                route=self.path,
-                session_id=session_id,
-                result=result,
-            )
-            self._send_error_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
-            )
-            return
+            try:
+                await resp.write(
+                    encode_chat_stream_sse(
+                        ProxyContentDeltaEvent(f"{type(exc).__name__}: {exc}"),
+                        completion_id=completion_id,
+                        model=turn_request.model,
+                        created_at=created_at,
+                    )
+                )
+                await resp.write(
+                    encode_chat_stream_sse(
+                        ProxyFinishEvent("error"),
+                        completion_id=completion_id,
+                        model=turn_request.model,
+                        created_at=created_at,
+                    )
+                )
+                await resp.write(encode_chat_stream_done())
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+        return resp
+
+    try:
+        turn_stream = core.stream_turn(turn_request, session_id=session_id)
+        async for _ in turn_stream:
+            pass
+        result: ProxyTurnResult = await turn_stream.get_final_response()
+    except Exception as exc:
         log_event(
-            "http_request_complete",
-            route=self.path,
+            "http_request_failure",
+            route=request.path,
+            session_id=session_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return _error_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
+        )
+    if result.finish_reason == "error":
+        log_event(
+            "http_request_failure",
+            route=request.path,
             session_id=session_id,
             result=result,
         )
-        self._send_json(
-            HTTPStatus.OK,
+        return _error_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
+        )
+    log_event(
+        "http_request_complete",
+        route=request.path,
+        session_id=session_id,
+        result=result,
+    )
+    json_resp = web.Response(
+        status=200,
+        content_type="application/json",
+        text=json.dumps(
             build_chat_completion_response(
                 completion_id=completion_id,
-                model=request.model,
+                model=turn_request.model,
                 created_at=created_at,
                 content=result.content,
                 reasoning=result.reasoning,
                 finish_reason=result.finish_reason,
                 tool_calls=result.tool_calls,
-            ),
-            session_id=session_id,
-        )
-
-    async def _run_chat_completion(
-        self,
-        request: ProxyTurnRequest,
-        *,
-        session_id: str,
-    ) -> ProxyTurnResult:
-        stream = self.proxy_server.core.stream_turn(
-            request,
-            session_id=session_id,
-        )
-        async for _event in stream:
-            pass
-        return await stream.get_final_response()
-
-    async def _stream_chat_completion(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        completion_id: str,
-        created_at: int,
-        session_id: str,
-    ) -> None:
-        stream = self.proxy_server.core.stream_turn(
-            request,
-            session_id=session_id,
-        )
-        async for event in stream:
-            chunk = encode_chat_stream_sse(
-                event,
-                completion_id=completion_id,
-                model=request.model,
-                created_at=created_at,
             )
-            self.wfile.write(chunk)
-            self.wfile.flush()
-        self.wfile.write(encode_chat_stream_done())
-        self.wfile.flush()
+        ),
+        headers={SESSION_HEADER_NAME: session_id},
+    )
+    _apply_session_cookie(json_resp, session_id)
+    return json_resp
 
-    def _handle_responses(self) -> None:
-        try:
-            payload = self._read_json_body()
-            request = parse_responses_request(payload)
-        except RequestBodyTooLargeError as exc:
-            log_event("http_request_rejected", route=self.path, error=str(exc))
-            self._send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
-            return
-        except ValueError as exc:
-            log_event("http_request_rejected", route=self.path, error=str(exc))
-            self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
-            return
 
-        response_id = f"resp_{uuid4().hex}"
-        created_at = int(time.time())
-        session_id = self._request_session_id()
-        log_event(
-            "http_request",
-            route=self.path,
-            session_id=session_id,
-            stream=request.stream,
-            request=request,
+async def _handle_responses(request: web.Request) -> web.StreamResponse:
+    core: ProxyOrchestrationCore = request.app["core"]
+    try:
+        payload = await _read_json_body(request)
+        turn_request = parse_responses_request(payload)
+    except RequestBodyTooLargeError as exc:
+        log_event("http_request_rejected", route=request.path, error=str(exc))
+        return _error_response(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+    except ValueError as exc:
+        log_event("http_request_rejected", route=request.path, error=str(exc))
+        return _error_response(HTTPStatus.BAD_REQUEST, str(exc))
+
+    response_id = f"resp_{uuid4().hex}"
+    created_at = int(time.time())
+    session_id = _parse_session_id(request)
+    log_event(
+        "http_request",
+        route=request.path,
+        session_id=session_id,
+        stream=turn_request.stream,
+        request=turn_request,
+    )
+
+    if turn_request.stream:
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache",
+                "Connection": "close",
+                SESSION_HEADER_NAME: session_id,
+            },
         )
-        if request.stream:
-            self._send_sse_headers(session_id=session_id)
-            try:
-                asyncio.run(
-                    self._stream_responses(
-                        request=request,
-                        response_id=response_id,
-                        created_at=created_at,
-                        session_id=session_id,
-                    )
-                )
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                log_event(
-                    "http_stream_disconnected",
-                    route=self.path,
-                    session_id=session_id,
-                )
-                return
-            except Exception as exc:
-                log_event(
-                    "http_stream_failure",
-                    route=self.path,
-                    session_id=session_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                self._stream_responses_failure(
-                    response_id=response_id,
-                    model=request.model,
-                    created_at=created_at,
-                    error_text=f"{type(exc).__name__}: {exc}",
-                )
-            return
+        _apply_session_cookie(resp, session_id)
+        resp.force_close()
+        await resp.prepare(request)
 
-        try:
-            result = asyncio.run(
-                self._run_chat_completion(request, session_id=session_id)
-            )
-        except Exception as exc:
-            log_event(
-                "http_request_failure",
-                route=self.path,
-                session_id=session_id,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            self._send_error_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
-            )
-            return
-        if result.finish_reason == "error":
-            log_event(
-                "http_request_failure",
-                route=self.path,
-                session_id=session_id,
-                result=result,
-            )
-            self._send_error_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
-            )
-            return
-        log_event(
-            "http_request_complete",
-            route=self.path,
-            session_id=session_id,
-            result=result,
-        )
-        self._send_json(
-            HTTPStatus.OK,
-            build_responses_response(
-                response_id=response_id,
-                model=request.model,
-                created_at=created_at,
-                content=result.content,
-                reasoning=result.reasoning,
-                tool_calls=result.tool_calls,
-                output_items=result.output_items,
-            ),
-            session_id=session_id,
-        )
-
-    async def _stream_responses(
-        self,
-        *,
-        request: ProxyTurnRequest,
-        response_id: str,
-        created_at: int,
-        session_id: str,
-    ) -> None:
         reasoning_item_id = f"rs_{uuid4().hex}"
         message_item_id = f"msg_{uuid4().hex}"
         content_emitted = False
@@ -366,27 +262,23 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         message_text = ""
         output_items: list[ProxyOutputItemRef] = []
         tool_item_ids: dict[str, str] = {}
-        created_payload = {
+        created_payload: dict[str, Any] = {
             "type": "response.created",
             "event_id": f"event_{uuid4().hex}",
             "response": {
                 "id": response_id,
                 "object": "response",
                 "created_at": created_at,
-                "model": request.model,
+                "model": turn_request.model,
                 "status": "in_progress",
             },
             "sequence_number": 1,
         }
-        self.wfile.write(encode_responses_stream_sse(created_payload))
-        self.wfile.flush()
+        await resp.write(encode_responses_stream_sse(created_payload))
         sequence_number = 2
-        stream = self.proxy_server.core.stream_turn(
-            request,
-            session_id=session_id,
-        )
+        turn_stream = core.stream_turn(turn_request, session_id=session_id)
         try:
-            async for event in stream:
+            async for event in turn_stream:
                 if isinstance(event, ProxyContentDeltaEvent) and event.delta:
                     content_emitted = True
                     message_text += event.delta
@@ -421,10 +313,10 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                         ProxyOutputItemRef(kind="tool_call", call_id=event.call.id),
                     )
                     tool_item_ids.setdefault(event.call.id, f"fc_{uuid4().hex}")
-                for payload in encode_responses_stream_events(
+                for sse_payload in encode_responses_stream_events(
                     event=event,
                     response_id=response_id,
-                    model=request.model,
+                    model=turn_request.model,
                     created_at=created_at,
                     sequence_number=sequence_number,
                     reasoning_item_id=reasoning_item_id,
@@ -439,187 +331,142 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                     message_text=message_text,
                     include_output_done=content_emitted,
                 ):
-                    self.wfile.write(encode_responses_stream_sse(payload))
-                    self.wfile.flush()
+                    await resp.write(encode_responses_stream_sse(sse_payload))
                     sequence_number += 1
         except Exception as exc:
-            self._stream_responses_failure(
-                response_id=response_id,
-                model=request.model,
-                created_at=created_at,
-                error_text=f"{type(exc).__name__}: {exc}",
-                sequence_number=sequence_number,
-            )
-
-    def _read_json_body(self) -> dict[str, Any]:
-        content_length = self.headers.get("Content-Length")
-        if content_length is None:
-            raise ValueError("missing Content-Length header")
-        try:
-            length = int(content_length)
-        except ValueError as exc:
-            raise ValueError("invalid Content-Length header") from exc
-        if length > MAX_REQUEST_BODY_BYTES:
-            raise RequestBodyTooLargeError(
-                f"request body exceeds {MAX_REQUEST_BODY_BYTES} bytes"
-            )
-        raw = self.rfile.read(length)
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON body: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("request body must be a JSON object")
-        return payload
-
-    def _send_sse_headers(self, *, session_id: str | None = None) -> None:
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self._send_session_headers(session_id)
-        self.end_headers()
-
-    def _send_json(
-        self,
-        status: HTTPStatus,
-        payload: dict[str, Any],
-        *,
-        session_id: str | None = None,
-    ) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
-        self._send_session_headers(session_id)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            {
-                "error": {
-                    "message": message,
-                    "type": "invalid_request_error"
-                    if status < HTTPStatus.INTERNAL_SERVER_ERROR
-                    else "server_error",
-                }
-            },
-        )
-
-    def _send_session_headers(self, session_id: str | None) -> None:
-        if not session_id:
-            return
-        self.send_header(
-            "Set-Cookie",
-            f"{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax",
-        )
-        self.send_header(SESSION_HEADER_NAME, session_id)
-
-    def _request_session_id(self) -> str:
-        header_value = self.headers.get(SESSION_HEADER_NAME)
-        if isinstance(header_value, str) and header_value.strip():
-            return header_value.strip()
-        cookie_header = self.headers.get("Cookie")
-        if isinstance(cookie_header, str) and cookie_header.strip():
-            cookie = SimpleCookie()
-            cookie.load(cookie_header)
-            morsel = cookie.get(SESSION_COOKIE_NAME)
-            if morsel is not None and morsel.value:
-                return morsel.value
-        return f"session_{uuid4().hex}"
-
-    def _stream_chat_failure(
-        self,
-        *,
-        completion_id: str,
-        model: str,
-        created_at: int,
-        error_text: str,
-    ) -> None:
-        try:
-            self.wfile.write(
-                encode_chat_stream_sse(
-                    ProxyContentDeltaEvent(error_text),
-                    completion_id=completion_id,
-                    model=model,
-                    created_at=created_at,
-                )
-            )
-            self.wfile.write(
-                encode_chat_stream_sse(
-                    ProxyFinishEvent("error"),
-                    completion_id=completion_id,
-                    model=model,
-                    created_at=created_at,
-                )
-            )
-            self.wfile.write(encode_chat_stream_done())
-            self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            return
-
-    def _stream_responses_failure(
-        self,
-        *,
-        response_id: str,
-        model: str,
-        created_at: int,
-        error_text: str,
-        sequence_number: int = 1,
-    ) -> None:
-        payload = {
-            "type": "response.failed",
-            "event_id": f"event_{uuid4().hex}",
-            "response": {
-                "id": response_id,
-                "object": "response",
-                "created_at": created_at,
-                "model": model,
-                "status": "failed",
-                "error": {
-                    "message": error_text,
-                    "type": "server_error",
+            failure_payload: dict[str, Any] = {
+                "type": "response.failed",
+                "event_id": f"event_{uuid4().hex}",
+                "response": {
+                    "id": response_id,
+                    "object": "response",
+                    "created_at": created_at,
+                    "model": turn_request.model,
+                    "status": "failed",
+                    "error": {
+                        "message": f"{type(exc).__name__}: {exc}",
+                        "type": "server_error",
+                    },
                 },
-            },
-            "sequence_number": sequence_number,
-        }
-        try:
-            self.wfile.write(encode_responses_stream_sse(payload))
-            self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            return
+                "sequence_number": sequence_number,
+            }
+            try:
+                await resp.write(encode_responses_stream_sse(failure_payload))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+        return resp
+
+    try:
+        turn_stream = core.stream_turn(turn_request, session_id=session_id)
+        async for _ in turn_stream:
+            pass
+        result = await turn_stream.get_final_response()
+    except Exception as exc:
+        log_event(
+            "http_request_failure",
+            route=request.path,
+            session_id=session_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return _error_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
+        )
+    if result.finish_reason == "error":
+        log_event(
+            "http_request_failure",
+            route=request.path,
+            session_id=session_id,
+            result=result,
+        )
+        return _error_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
+        )
+    log_event(
+        "http_request_complete",
+        route=request.path,
+        session_id=session_id,
+        result=result,
+    )
+    json_resp = web.Response(
+        status=200,
+        content_type="application/json",
+        text=json.dumps(
+            build_responses_response(
+                response_id=response_id,
+                model=turn_request.model,
+                created_at=created_at,
+                content=result.content,
+                reasoning=result.reasoning,
+                tool_calls=result.tool_calls,
+                output_items=result.output_items,
+            )
+        ),
+        headers={SESSION_HEADER_NAME: session_id},
+    )
+    _apply_session_cookie(json_resp, session_id)
+    return json_resp
+
+
+def _create_app(core: ProxyOrchestrationCore) -> web.Application:
+    app = web.Application()
+    app["core"] = core
+    app["model_state"] = _ModelState()
+    app.router.add_get("/v1/models", _handle_models)
+    app.router.add_post("/v1/chat/completions", _handle_chat_completions)
+    app.router.add_post("/v1/responses", _handle_responses)
+    return app
 
 
 def serve_proxy(*, host: str, port: int, core: ProxyOrchestrationCore) -> None:
-    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
-    log_event("proxy_server_start", host=host, port=port)
-    try:
+    app = _create_app(core)
+
+    async def _run() -> None:
+        runner = web.AppRunner(app)
+        log_event("proxy_server_start", host=host, port=port)
         try:
-            server.serve_forever()
-        except KeyboardInterrupt:
+            await runner.setup()
+            site = web.TCPSite(runner, host, port)
+            await site.start()
+            event = asyncio.Event()
+            await event.wait()
+        except (KeyboardInterrupt, asyncio.CancelledError):
             log_event("proxy_server_interrupt", host=host, port=port)
-            return
-    finally:
-        log_event("proxy_server_stop", host=host, port=port)
-        server.server_close()
+        finally:
+            log_event("proxy_server_stop", host=host, port=port)
+            await runner.cleanup()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        pass
 
 
 class ProxyServerHandle:
-    def __init__(self, server: ProxyHTTPServer, thread: threading.Thread) -> None:
-        self.server = server
-        self.thread = thread
+    def __init__(
+        self,
+        *,
+        runner: web.AppRunner,
+        loop: asyncio.AbstractEventLoop,
+        thread: threading.Thread,
+    ) -> None:
+        self._runner = runner
+        self._loop = loop
+        self._thread = thread
 
     @property
     def port(self) -> int:
-        return int(self.server.server_address[1])
+        return int(self._runner.addresses[0][1])
 
     def close(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=5)
+        future = asyncio.run_coroutine_threadsafe(
+            self._runner.cleanup(), self._loop
+        )
+        try:
+            future.result(timeout=5)
+        except Exception:
+            pass
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
 
 
 def start_proxy_server_in_thread(
@@ -628,11 +475,79 @@ def start_proxy_server_in_thread(
     port: int,
     core: ProxyOrchestrationCore,
 ) -> ProxyServerHandle:
-    server = ProxyHTTPServer((host, port), ProxyRequestHandler, core=core)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    app = _create_app(core)
+    loop = asyncio.new_event_loop()
+    runner = web.AppRunner(app)
+
+    async def _setup() -> None:
+        await runner.setup()
+        site = web.TCPSite(runner, host, port)
+        await site.start()
+
+    loop.run_until_complete(_setup())
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
     log_event("proxy_server_thread_start", host=host, port=port)
-    return ProxyServerHandle(server, thread)
+    return ProxyServerHandle(runner=runner, loop=loop, thread=thread)
+
+
+def _parse_session_id(request: web.Request) -> str:
+    header_value = request.headers.get(SESSION_HEADER_NAME, "")
+    if header_value.strip():
+        return header_value.strip()
+    cookie_value = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if cookie_value.strip():
+        return cookie_value.strip()
+    return f"session_{uuid4().hex}"
+
+
+def _apply_session_cookie(response: web.StreamResponse, session_id: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_id,
+        path="/",
+        httponly=True,
+        samesite="Lax",
+    )
+
+
+def _error_response(status: HTTPStatus, message: str) -> web.Response:
+    return web.Response(
+        status=status.value,
+        content_type="application/json",
+        text=json.dumps(
+            {
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error"
+                    if status < HTTPStatus.INTERNAL_SERVER_ERROR
+                    else "server_error",
+                }
+            }
+        ),
+    )
+
+
+async def _read_json_body(request: web.Request) -> dict[str, Any]:
+    content_length_str = request.headers.get("Content-Length")
+    if content_length_str is None:
+        raise ValueError("missing Content-Length header")
+    try:
+        length = int(content_length_str)
+    except ValueError as exc:
+        raise ValueError("invalid Content-Length header") from exc
+    if length > MAX_REQUEST_BODY_BYTES:
+        raise RequestBodyTooLargeError(
+            f"request body exceeds {MAX_REQUEST_BODY_BYTES} bytes"
+        )
+    raw = await request.read()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON body: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("request body must be a JSON object")
+    return payload
 
 
 def _available_models(registry: RuntimeRegistry) -> list[dict[str, Any]]:

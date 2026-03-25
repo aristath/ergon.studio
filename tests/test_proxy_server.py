@@ -31,23 +31,26 @@ from ergon_studio.upstream import UpstreamSettings
 
 class ProxyServerTests(unittest.TestCase):
     def test_serve_proxy_exits_cleanly_on_keyboard_interrupt(self) -> None:
-        closed = False
+        cleaned_up = [False]
 
-        class _FakeServer:
-            def serve_forever(self) -> None:
+        class _MockRunner:
+            async def setup(self) -> None:
                 raise KeyboardInterrupt
 
-            def server_close(self) -> None:
-                nonlocal closed
-                closed = True
+            async def cleanup(self) -> None:
+                cleaned_up[0] = True
+
+            @property
+            def addresses(self) -> list[tuple[str, int]]:
+                return [("127.0.0.1", 0)]
 
         with patch(
-            "ergon_studio.proxy.server.ProxyHTTPServer",
-            return_value=_FakeServer(),
+            "ergon_studio.proxy.server.web.AppRunner",
+            return_value=_MockRunner(),
         ):
             serve_proxy(host="127.0.0.1", port=0, core=_FakeCore([]))
 
-        self.assertTrue(closed)
+        self.assertTrue(cleaned_up[0])
 
     def test_models_endpoint_proxies_upstream_models(self) -> None:
         with patch(

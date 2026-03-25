@@ -42,10 +42,10 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_open_channel_action,
     parse_run_parallel_action,
 )
-from ergon_studio.proxy.session_overlay import SessionOverlay, make_session_overlay
-from ergon_studio.proxy.subsession_executor import SubSessionExecutor
 from ergon_studio.proxy.pending_store import PendingStore
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
+from ergon_studio.proxy.session_overlay import SessionOverlay
+from ergon_studio.proxy.subsession_executor import SubSessionExecutor
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
@@ -231,13 +231,17 @@ class ProxyOrchestrationCore:
                     # Validation pre-pass: verify channel references before side effects
                     for tool_call in response.tool_calls:
                         if tool_call.name == "message_channel":
-                            action = parse_message_channel_action(tool_call)
-                            if channels.get(action.channel) is None:
-                                raise ValueError(f"unknown channel: {action.channel}")
+                            msg_action = parse_message_channel_action(tool_call)
+                            if channels.get(msg_action.channel) is None:
+                                raise ValueError(
+                                    f"unknown channel: {msg_action.channel}"
+                                )
                         elif tool_call.name == "close_channel":
-                            action = parse_close_channel_action(tool_call)
-                            if channels.get(action.channel) is None:
-                                raise ValueError(f"unknown channel: {action.channel}")
+                            close_action = parse_close_channel_action(tool_call)
+                            if channels.get(close_action.channel) is None:
+                                raise ValueError(
+                                    f"unknown channel: {close_action.channel}"
+                                )
                     for tool_call in response.tool_calls:
                         if not is_internal_tool_name(tool_call.name):
                             host_tool_calls.append(tool_call)

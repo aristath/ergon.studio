@@ -98,17 +98,17 @@ def _execute_workspace_tool(
     tool_call: ProxyToolCall, overlay: SessionOverlay
 ) -> str:
     if tool_call.name == "read_file":
-        action = parse_read_file_action(tool_call)
+        read_action = parse_read_file_action(tool_call)
         try:
-            return overlay.read_file(action.path)
+            return overlay.read_file(read_action.path)
         except FileNotFoundError:
-            return f"Error: file not found: {action.path}"
+            return f"Error: file not found: {read_action.path}"
     if tool_call.name == "write_file":
-        action = parse_write_file_action(tool_call)
-        overlay.write_file(action.path, action.content)
-        return f"Written: {action.path}"
+        write_action = parse_write_file_action(tool_call)
+        overlay.write_file(write_action.path, write_action.content)
+        return f"Written: {write_action.path}"
     if tool_call.name == "list_files":
-        action = parse_list_files_action(tool_call)
-        files = overlay.list_files(action.directory)
+        list_action = parse_list_files_action(tool_call)
+        files = overlay.list_files(list_action.directory)
         return "\n".join(files) if files else "(empty directory)"
     return f"Error: unknown workspace tool: {tool_call.name}"

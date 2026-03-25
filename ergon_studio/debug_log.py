@@ -52,6 +52,11 @@ def debug_logging_enabled() -> bool:
     return _HANDLER is not None
 
 
+_MAX_DEPTH = 8
+_MAX_LIST_ITEMS = 20
+_MAX_STRING_CHARS = 500
+
+
 def log_event(event: str, **fields: Any) -> None:
     if _HANDLER is None:
         return
@@ -60,20 +65,34 @@ def log_event(event: str, **fields: Any) -> None:
     _LOGGER.info("%s", json.dumps(payload, ensure_ascii=True, sort_keys=True))
 
 
-def _to_jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, float, str)):
+def _to_jsonable(value: Any, _depth: int = 0) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
         return value
+    if isinstance(value, str):
+        if len(value) > _MAX_STRING_CHARS:
+            return value[:_MAX_STRING_CHARS] + "...[truncated]"
+        return value
+    if _depth >= _MAX_DEPTH:
+        return str(value)[:200]
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if is_dataclass(value):
         return {
-            field.name: _to_jsonable(getattr(value, field.name))
+            field.name: _to_jsonable(getattr(value, field.name), _depth + 1)
             for field in fields(value)
         }
     if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
+        return {str(key): _to_jsonable(item, _depth + 1) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_to_jsonable(item) for item in value]
+        items = list(value)
+        if len(items) > _MAX_LIST_ITEMS:
+            overflow = len(items) - _MAX_LIST_ITEMS
+            truncated: list[Any] = [
+                _to_jsonable(item, _depth + 1) for item in items[:_MAX_LIST_ITEMS]
+            ]
+            truncated.append(f"[{overflow} more]")
+            return truncated
+        return [_to_jsonable(item, _depth + 1) for item in items]
     return str(value)

@@ -1,15 +1,24 @@
 """
-Comprehensive end-to-end tests for agentic orchestration flows.
+End-to-end tests for agentic orchestration flows.
 
-Each test scripts realistic orchestrator + specialist behaviour using
-deterministic fake invokers, then validates the full pipeline:
-  - event stream ordering (reasoning vs. content)
-  - session persistence across HTTP turns
-  - channel lifecycle (open / message / close)
-  - run_parallel isolation and result injection
-  - workspace tool I/O in sub-sessions
-  - SSE streaming through the HTTP server
-  - error recovery without crashing the turn
+The overarching question every test asks is:
+  given a real goal, does the system actually orchestrate?
+
+That means:
+  - does the orchestrator route correctly (delegate vs. answer directly)?
+  - does each agent receive the right context (brief, design, prior transcript)?
+  - does the orchestrator's synthesis incorporate what agents actually produced?
+  - are events ordered correctly (reasoning before content)?
+  - do channels and sessions persist across HTTP turns?
+  - does run_parallel inject all results into the synthesis?
+  - do workspace tool calls produce real files in isolated overlays?
+  - does the system recover from errors without crashing the turn?
+
+Tests 1-4 and 7 use REACTIVE invokers: each agent reads its input and echoes
+unique tokens, so assertions can trace whether the right content reached the
+right agent at every step in the pipeline.  Pre-scripted responses (returning
+fixed strings regardless of input) are avoided for any test that claims to
+validate orchestration logic.
 """
 from __future__ import annotations
 
@@ -45,15 +54,15 @@ from ergon_studio.upstream import UpstreamSettings
 class AgenticLoopHTTPTests(unittest.TestCase):
     """
     Full-stack tests that start a real aiohttp server, send HTTP requests,
-    and validate responses.  The LLM layer is replaced by scripted fake
+    and validate responses.  The LLM layer is replaced by reactive fake
     invokers so the tests run deterministically without an upstream.
     """
 
-    def _start(self, invoker_map: dict) -> tuple:
-        """Return (handle, port) for a server backed by the given invoker map."""
+    def _start(self, invoker) -> tuple:
+        """Return (handle, port) for a server backed by the given invoker."""
         core = ProxyOrchestrationCore(
             _fake_registry(),
-            agent_invoker=_fake_agent_invoker(invoker_map),
+            agent_invoker=invoker,
         )
         handle = start_proxy_server_in_thread(
             host="127.0.0.1",
@@ -84,161 +93,335 @@ class AgenticLoopHTTPTests(unittest.TestCase):
             return _parse_sse_body(body), session_out
         return json.loads(body), session_out
 
-    # --- 1. Orchestrator answers directly ---
+    # --- 1. Direct answer — orchestrator handles the task alone ---
 
-    def test_direct_answer_produces_content_and_session_id(self) -> None:
-        """Orchestrator replies without delegation — baseline flow."""
-        _, port = self._start(
-            {"orchestrator": ["The answer is 42."]}
-        )
+    def test_orchestrator_answers_directly_without_delegation(self) -> None:
+        """
+        For a task the orchestrator can handle itself, it must answer in a
+        single invocation and never call any specialist.  This validates
+        that the absence of delegation is deliberate, not accidental.
+        """
+        invocations: list[AgentInvocation] = []
+
+        def _invoker(inv: AgentInvocation) -> ResponseStream:
+            invocations.append(inv)
+            return _response_stream("The capital of France is Paris.")
+
+        _, port = self._start(_invoker)
         payload, session_id = self._post(
-            port, [{"role": "user", "content": "What is the answer?"}]
+            port,
+            [{"role": "user", "content": "What is the capital of France?"}],
         )
+
+        orch = [i for i in invocations if i.agent_id == "orchestrator"]
+        specialists = [i for i in invocations if i.agent_id != "orchestrator"]
+
+        self.assertEqual(len(orch), 1,
+                         "orchestrator must be invoked exactly once for a direct answer")
+        self.assertEqual(len(specialists), 0,
+                         "no specialist must be invoked when the orchestrator answers directly")
         self.assertEqual(
-            payload["choices"][0]["message"]["content"], "The answer is 42."
+            payload["choices"][0]["message"]["content"],
+            "The capital of France is Paris.",
         )
         self.assertEqual(payload["choices"][0]["finish_reason"], "stop")
         self.assertIsNotNone(session_id)
         self.assertTrue(session_id.startswith("session_"))  # type: ignore[union-attr]
 
-    # --- 2. Orchestrator opens a channel, specialist delivers, synthesis ---
+    # --- 2. Delegation: brief reaches specialist; specialist output reaches synthesis ---
 
-    def test_channel_open_specialist_delivers_orchestrator_synthesizes(self) -> None:
+    def test_orchestrator_delegates_and_synthesizes_from_actual_specialist_output(
+        self,
+    ) -> None:
         """
-        Orchestrator opens a channel → coder delivers a solution →
-        orchestrator synthesises and returns a final answer.
+        For a task that needs a specialist, the orchestrator must:
+          1. Open a channel and forward the brief to the coder.
+          2. After the coder responds, synthesize using the coder's ACTUAL output.
+
+        The coder echoes the brief it received.  Assertions trace the data at
+        every step so a silent routing failure cannot hide behind a scripted string.
         """
-        _, port = self._start(
-            {
-                "orchestrator": [
-                    _channel_action(
-                        "open_channel",
-                        participants=["coder"],
-                        message="Implement a hello-world script.",
-                        recipients=["coder"],
+        invocations: list[AgentInvocation] = []
+
+        def _invoker(inv: AgentInvocation) -> ResponseStream:
+            invocations.append(inv)
+            msgs = list(inv.messages)
+
+            if inv.agent_id == "orchestrator":
+                # Has the channel already completed and injected its results?
+                channel_result = next(
+                    (
+                        m["content"] for m in msgs
+                        if m.get("role") == "user"
+                        and "Channel channel-1" in m.get("content", "")
                     ),
-                    "Delivered: hello.py prints 'Hello, World!'",
-                ],
-                "coder": ["print('Hello, World!')  # hello.py implementation"],
-            }
-        )
+                    None,
+                )
+                if channel_result:
+                    return _response_stream(f"Synthesis: {channel_result}")
+                # First call: delegate to coder
+                brief = next(
+                    (m["content"] for m in msgs if m.get("role") == "user"), ""
+                )
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(ProxyToolCall(
+                            id="oc1",
+                            name="open_channel",
+                            arguments_json=json.dumps({
+                                "participants": ["coder"],
+                                "message": brief,
+                                "recipients": ["coder"],
+                            }),
+                        ),),
+                    ),
+                )
+
+            if inv.agent_id == "coder":
+                # Echo what was received so we can verify data flow end-to-end
+                received = next(
+                    (
+                        m["content"] for m in reversed(msgs)
+                        if m.get("role") == "user"
+                    ),
+                    "",
+                )
+                return _response_stream(f"CODER_IMPL: built from ({received[:60]})")
+
+            return _response_stream("ok")
+
+        _, port = self._start(_invoker)
         payload, _ = self._post(
             port,
-            [{"role": "user", "content": "Write a hello-world script."}],
+            [{"role": "user", "content": "implement an inventory tracker"}],
         )
+
+        orch = [i for i in invocations if i.agent_id == "orchestrator"]
+        coders = [i for i in invocations if i.agent_id == "coder"]
+
+        # Structural: delegate then synthesize
+        self.assertEqual(len(orch), 2,
+                         "orchestrator must be invoked twice: once to delegate, once to synthesize")
+        self.assertGreater(len(coders), 0, "coder must be invoked")
+
+        # The original brief reached the coder
+        coder_ctx = " ".join(m.get("content", "") for m in coders[0].messages)
+        self.assertIn("inventory tracker", coder_ctx,
+                      "coder must receive the original brief in its messages")
+
+        # The coder's output reached the orchestrator's synthesis invocation
+        second_orch_ctx = " ".join(m.get("content", "") for m in orch[1].messages)
+        self.assertIn("CODER_IMPL:", second_orch_ctx,
+                      "coder output must appear in orchestrator synthesis messages (loop_history)")
+
+        # The final answer incorporates the coder's actual work
         content = payload["choices"][0]["message"]["content"]
-        self.assertIn("hello.py", content)
+        self.assertIn("CODER_IMPL:", content,
+                      "final answer must reference what the coder actually produced")
         self.assertEqual(payload["choices"][0]["finish_reason"], "stop")
 
-    # --- 3. Two-specialist channel ---
+    # --- 3. Context propagation: architect design reaches coder ---
 
-    def test_two_specialist_channel_both_contribute(self) -> None:
+    def test_architect_design_reaches_coder_via_message_channel(self) -> None:
         """
-        Architect designs, coder implements. Orchestrator receives both
-        contributions and produces a final answer.
+        In a standard-build channel the architect designs first and hands off
+        to the coder via message_channel.  The coder must receive the ARCHITECT's
+        design — proving participant-to-participant routing works and that the
+        coder is not just seeing the raw orchestrator brief.
         """
-        _, port = self._start(
-            {
-                "orchestrator": [
-                    _channel_action(
-                        "open_channel",
-                        preset="standard-build",
-                        message="Design and implement a stack data structure.",
-                        recipients=["architect"],
+        invocations: list[AgentInvocation] = []
+        ARCH_TOKEN = "ARCH_DESIGN_v7f2"  # unique marker to trace through the pipeline
+
+        def _invoker(inv: AgentInvocation) -> ResponseStream:
+            invocations.append(inv)
+            msgs = list(inv.messages)
+
+            if inv.agent_id == "orchestrator":
+                channel_result = next(
+                    (
+                        m["content"] for m in msgs
+                        if m.get("role") == "user"
+                        and "Channel channel-1" in m.get("content", "")
                     ),
-                    "Done — stack implementation complete.",
-                ],
-                "architect": [
-                    _channel_message_action(
-                        message="Stack API: push(x), pop() -> x, peek() -> x, is_empty() -> bool",
-                        recipients=["coder"],
+                    None,
+                )
+                if channel_result:
+                    return _response_stream(f"Done: {channel_result[:120]}")
+                brief = next(
+                    (m["content"] for m in msgs if m.get("role") == "user"), ""
+                )
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(ProxyToolCall(
+                            id="oc1",
+                            name="open_channel",
+                            arguments_json=json.dumps({
+                                "preset": "standard-build",
+                                "message": brief,
+                                "recipients": ["architect"],
+                            }),
+                        ),),
+                    ),
+                )
+
+            if inv.agent_id == "architect":
+                # Produce a design tagged with the unique token and hand off to coder
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(ProxyToolCall(
+                            id="mc1",
+                            name="message_channel",
+                            arguments_json=json.dumps({
+                                "message": f"{ARCH_TOKEN}: routes POST /items, GET /items",
+                                "recipients": ["coder"],
+                            }),
+                        ),),
+                    ),
+                )
+
+            if inv.agent_id == "coder":
+                # Echo received context so we can verify what arrived
+                received = " ".join(
+                    m.get("content", "") for m in msgs if m.get("role") == "user"
+                )
+                return _response_stream(
+                    f"CODER_IMPL: implemented from ({received[:80]})"
+                )
+
+            return _response_stream("ok")
+
+        _, port = self._start(_invoker)
+        self._post(port, [{"role": "user", "content": "build an item catalogue"}])
+
+        coder_calls = [i for i in invocations if i.agent_id == "coder"]
+        self.assertGreater(len(coder_calls), 0, "coder must be invoked")
+
+        coder_ctx = " ".join(m.get("content", "") for m in coder_calls[0].messages)
+        self.assertIn(
+            ARCH_TOKEN, coder_ctx,
+            "the architect's unique design token must reach the coder via message_channel",
+        )
+
+    # --- 4. Multi-turn: channel persists and coder sees the full transcript ---
+
+    def test_channel_persists_across_turns_coder_sees_prior_transcript(self) -> None:
+        """
+        Turn 1: orchestrator opens channel-1, coder delivers CODER_TURN1.
+        Turn 2: orchestrator messages channel-1 again.  The coder's second
+        invocation must contain CODER_TURN1 in its conversation — proving
+        the channel transcript survives across HTTP requests.
+        """
+        invocations: list[AgentInvocation] = []
+        opened = [False]  # tracks whether channel-1 has been opened this session
+
+        def _invoker(inv: AgentInvocation) -> ResponseStream:
+            invocations.append(inv)
+            msgs = list(inv.messages)
+
+            if inv.agent_id == "orchestrator":
+                channel_result = next(
+                    (
+                        m["content"] for m in msgs
+                        if m.get("role") == "user"
+                        and "Channel channel-1" in m.get("content", "")
+                    ),
+                    None,
+                )
+                if channel_result:
+                    return _response_stream(f"Done: {channel_result[:120]}")
+                brief = next(
+                    (m["content"] for m in msgs if m.get("role") == "user"), ""
+                )
+                if not opened[0]:
+                    opened[0] = True
+                    return _response_stream(
+                        "",
+                        response=AgentRunResult(
+                            text="",
+                            tool_calls=(ProxyToolCall(
+                                id="oc1",
+                                name="open_channel",
+                                arguments_json=json.dumps({
+                                    "participants": ["coder"],
+                                    "message": brief,
+                                    "recipients": ["coder"],
+                                }),
+                            ),),
+                        ),
                     )
-                ],
-                "coder": ["class Stack: push/pop/peek/is_empty implemented."],
-            }
-        )
-        payload, _ = self._post(
-            port,
-            [{"role": "user", "content": "Build a stack data structure."}],
-        )
-        content = payload["choices"][0]["message"]["content"]
-        self.assertIn("stack", content.lower())
-        self.assertEqual(payload["choices"][0]["finish_reason"], "stop")
+                # Subsequent turns: re-use the existing channel
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(ProxyToolCall(
+                            id="mc1",
+                            name="message_channel",
+                            arguments_json=json.dumps({
+                                "channel": "channel-1",
+                                "message": brief,
+                                "recipients": ["coder"],
+                            }),
+                        ),),
+                    ),
+                )
 
-    # --- 4. Multi-turn session with channel persistence ---
+            if inv.agent_id == "coder":
+                # Count how many coder calls have happened so far (including this one)
+                coder_n = len([i for i in invocations if i.agent_id == "coder"])
+                received = " ".join(m.get("content", "") for m in msgs)
+                return _response_stream(
+                    f"CODER_TURN{coder_n}: result for ({received[:40]})"
+                )
 
-    def test_multi_turn_session_channel_persists_across_requests(self) -> None:
-        """
-        Turn 1: brief → orchestrator opens channel → coder provides first draft.
-        Turn 2: follow-up → orchestrator messages same channel → coder refines.
-        Session cookie carries the session across both HTTP requests.
-        """
-        core = ProxyOrchestrationCore(
-            _fake_registry(),
-            agent_invoker=_fake_agent_invoker(
-                {
-                    "orchestrator": [
-                        _channel_action(
-                            "open_channel",
-                            participants=["coder"],
-                            message="Start the implementation.",
-                            recipients=["coder"],
-                        ),
-                        "First draft ready.",
-                        _channel_action(
-                            "message_channel",
-                            channel="channel-1",
-                            message="Add error handling.",
-                            recipients=["coder"],
-                        ),
-                        "Final version with error handling delivered.",
-                    ],
-                    "coder": [
-                        "Initial implementation done.",
-                        "Added try/except blocks throughout.",
-                    ],
-                }
-            ),
-        )
-        handle = start_proxy_server_in_thread(
-            host="127.0.0.1", port=0, core=core
-        )
+            return _response_stream("ok")
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
+        handle = start_proxy_server_in_thread(host="127.0.0.1", port=0, core=core)
         self.addCleanup(handle.close)
 
         jar = http.cookiejar.CookieJar()
         opener = build_opener(HTTPCookieProcessor(jar))
 
-        r1 = Request(
-            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
-            data=json.dumps({
-                "model": "ergon",
-                "messages": [{"role": "user", "content": "Start the project."}],
-            }).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with opener.open(r1) as resp:
-            first = json.loads(resp.read())
+        def _make_request(content: str) -> dict:
+            req = Request(
+                f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+                data=json.dumps({
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": content}],
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with opener.open(req) as resp:
+                return json.loads(resp.read())
 
-        r2 = Request(
-            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
-            data=json.dumps({
-                "model": "ergon",
-                "messages": [{"role": "user", "content": "Add error handling."}],
-            }).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with opener.open(r2) as resp:
-            second = json.loads(resp.read())
+        first = _make_request("start the build")
+        second = _make_request("add error handling")
 
-        self.assertEqual(
-            first["choices"][0]["message"]["content"], "First draft ready."
+        coders = [i for i in invocations if i.agent_id == "coder"]
+        self.assertGreaterEqual(len(coders), 2, "coder must be called in both turns")
+
+        # Turn 1 final answer references the coder's turn-1 output
+        self.assertIn("CODER_TURN1:", first["choices"][0]["message"]["content"],
+                      "turn-1 answer must contain the coder's turn-1 output")
+
+        # Turn 2 coder invocation must contain the turn-1 response in its transcript
+        turn2_coder_ctx = " ".join(m.get("content", "") for m in coders[1].messages)
+        self.assertIn(
+            "CODER_TURN1:", turn2_coder_ctx,
+            "turn-2 coder invocation must see the turn-1 coder response in the channel transcript",
         )
-        self.assertEqual(
-            second["choices"][0]["message"]["content"],
-            "Final version with error handling delivered.",
-        )
+
+        # Turn 2 answer reflects the new coder response
+        self.assertIn("CODER_TURN2:", second["choices"][0]["message"]["content"],
+                      "turn-2 answer must contain the coder's turn-2 output")
 
     # --- 5. Orchestrator pre-channel thinking is reasoning, final is content ---
 
@@ -248,7 +431,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
         appear in SSE reasoning chunks, not in the final content field.
         """
         _, port = self._start(
-            {
+            _fake_agent_invoker({
                 "orchestrator": [
                     _channel_action(
                         "open_channel",
@@ -260,7 +443,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                     "Delegation complete.",
                 ],
                 "coder": ["Implementation done."],
-            }
+            })
         )
         parsed, _ = self._post(
             port,
@@ -281,7 +464,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
         before the final assistant content arrives.
         """
         _, port = self._start(
-            {
+            _fake_agent_invoker({
                 "orchestrator": [
                     _channel_action(
                         "open_channel",
@@ -292,7 +475,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                     "Sort function delivered.",
                 ],
                 "coder": ["def sort(lst): return sorted(lst)"],
-            }
+            })
         )
         parsed, _ = self._post(
             port,
@@ -302,46 +485,89 @@ class AgenticLoopHTTPTests(unittest.TestCase):
         self.assertIn("def sort(lst)", parsed.get("reasoning", ""))
         self.assertEqual(parsed.get("content", ""), "Sort function delivered.")
 
-    # --- 7. run_parallel best-of-N via HTTP ---
+    # --- 7. run_parallel: every unique sub-session result reaches synthesis ---
 
-    def test_run_parallel_all_results_in_final_answer(self) -> None:
+    def test_run_parallel_unique_results_all_reach_orchestrator_synthesis(
+        self,
+    ) -> None:
         """
-        Orchestrator calls run_parallel(count=3). All three coder results
-        must reach the orchestrator (shown in the second invocation's messages)
-        and the final answer must reference the synthesis.
+        Orchestrator spawns N parallel sub-sessions.  Each returns a DIFFERENT,
+        uniquely tagged result.  The orchestrator's synthesis invocation must
+        contain ALL N results in its messages, and the final answer must
+        incorporate them — proving that run_parallel fully injects every result
+        into loop_history before the synthesis call.
         """
-        _, port = self._start(
-            {
-                "orchestrator": [
-                    _channel_action(
-                        "run_parallel",
-                        agent="coder",
-                        count=3,
-                        task="Write a fibonacci function.",
+        invocations: list[AgentInvocation] = []
+        coder_calls = [0]
+
+        def _invoker(inv: AgentInvocation) -> ResponseStream:
+            invocations.append(inv)
+            msgs = list(inv.messages)
+
+            if inv.agent_id == "orchestrator":
+                parallel_result = next(
+                    (
+                        m["content"] for m in msgs
+                        if m.get("role") == "user"
+                        and "run_parallel" in m.get("content", "")
                     ),
-                    "Best implementation selected: recursive memoization.",
-                ],
-                "coder": [
-                    "def fib_iterative(n): ...",
-                    "def fib_recursive(n): ...",
-                    "def fib_memoized(n): ...",
-                ],
-            }
-        )
+                    None,
+                )
+                if parallel_result:
+                    return _response_stream(f"Aggregated: {parallel_result}")
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(ProxyToolCall(
+                            id="rp1",
+                            name="run_parallel",
+                            arguments_json=json.dumps({
+                                "agent": "coder",
+                                "count": 3,
+                                "task": "write a sort function",
+                            }),
+                        ),),
+                    ),
+                )
+
+            if inv.agent_id == "coder":
+                coder_calls[0] += 1
+                n = coder_calls[0]
+                return _response_stream(f"SORT_VARIANT_{n}: def sort_{n}(lst): ...")
+
+            return _response_stream("ok")
+
+        _, port = self._start(_invoker)
         payload, _ = self._post(
             port,
-            [{"role": "user", "content": "Give me the best fibonacci implementation."}],
+            [{"role": "user", "content": "give me three sort implementations"}],
         )
+
+        orch = [i for i in invocations if i.agent_id == "orchestrator"]
+        self.assertEqual(len(orch), 2,
+                         "orchestrator must be called twice: once to launch, once to synthesize")
+
+        # All three unique coder results must appear in the synthesis invocation's messages
+        second_orch_ctx = " ".join(m.get("content", "") for m in orch[1].messages)
+        for n in range(1, 4):
+            self.assertIn(
+                f"SORT_VARIANT_{n}:", second_orch_ctx,
+                f"SORT_VARIANT_{n} must appear in orchestrator synthesis messages",
+            )
+
+        # Final answer incorporates the parallel results
         content = payload["choices"][0]["message"]["content"]
-        self.assertIn("memoization", content.lower())
+        self.assertIn("SORT_VARIANT_", content,
+                      "final answer must reference at least one parallel coder result")
         self.assertEqual(payload["choices"][0]["finish_reason"], "stop")
 
     # --- 8. run_parallel results visible in orchestrator second invocation ---
 
     def test_run_parallel_results_reach_orchestrator_loop_history(self) -> None:
         """
-        The orchestrator's second invocation must contain all three coder
-        outputs in its message history so it can reason over them.
+        The orchestrator's second invocation must contain all coder outputs
+        in its message history so it can reason over them.
         """
         invocations: list[AgentInvocation] = []
         base = _fake_agent_invoker(
@@ -385,7 +611,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
         in the same session must produce a finish_reason='error' turn.
         """
         _, port = self._start(
-            {
+            _fake_agent_invoker({
                 "orchestrator": [
                     _channel_action(
                         "open_channel",
@@ -403,36 +629,28 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                     ),
                 ],
                 "coder": ["First pass."],
-            }
+            })
         )
         jar = http.cookiejar.CookieJar()
         opener = build_opener(HTTPCookieProcessor(jar))
-        r1 = Request(
-            f"http://127.0.0.1:{port}/v1/chat/completions",
-            data=json.dumps({
-                "model": "ergon",
-                "messages": [{"role": "user", "content": "Go."}],
-            }).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with opener.open(r1) as resp:
-            first = json.loads(resp.read())
-        # Turn 1 completes normally
+
+        def _req(content: str) -> dict:
+            r = Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions",
+                data=json.dumps({
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": content}],
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with opener.open(r) as resp:
+                return json.loads(resp.read())
+
+        first = _req("Go.")
         self.assertEqual(first["choices"][0]["finish_reason"], "stop")
 
-        r2 = Request(
-            f"http://127.0.0.1:{port}/v1/chat/completions",
-            data=json.dumps({
-                "model": "ergon",
-                "messages": [{"role": "user", "content": "Continue."}],
-            }).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with opener.open(r2) as resp:
-            second = json.loads(resp.read())
-        # Turn 2 tries to message closed channel → error
+        second = _req("Continue.")
         self.assertEqual(second["choices"][0]["finish_reason"], "error")
 
     # --- 10. Malformed tool call retried, turn still succeeds ---
@@ -506,7 +724,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                    content stream contains the final synthesis.
         """
         _, port = self._start(
-            {
+            _fake_agent_invoker({
                 "orchestrator": [
                     _channel_action(
                         "open_channel",
@@ -529,7 +747,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                 "coder": [
                     "Implemented todo_api.py with all three routes using Flask."
                 ],
-            }
+            })
         )
         parsed, session_id = self._post(
             port,
@@ -898,58 +1116,6 @@ class AgenticLoopCoreTests(unittest.IsolatedAsyncioTestCase):
         real_file = Path(tmp.name) / "spec.txt"
         real_file.write_text("spec content", encoding="utf-8")
 
-        coder_calls = [0]
-
-        def _invoker(inv: AgentInvocation):
-            if inv.agent_id == "coder":
-                coder_calls[0] += 1
-                call_num = coder_calls[0]
-
-                async def _events():  # type: ignore[return]
-                    return
-                    yield  # noqa: unreachable
-
-                # Each coder reads the spec, then writes a result
-                return ResponseStream(
-                    _events(),
-                    finalizer=lambda n=call_num: AgentRunResult(
-                        text="",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id=f"rf_{n}",
-                                name="read_file",
-                                arguments_json=json.dumps(
-                                    {"path": str(real_file)}
-                                ),
-                            ),
-                        ),
-                    ),
-                )
-
-            # Orchestrator
-            orch_invs = [i for i in _all_invs if i.agent_id == "orchestrator"]
-            if len(orch_invs) <= 1:
-                return _response_stream(
-                    "",
-                    response=AgentRunResult(
-                        text="",
-                        tool_calls=(
-                            ProxyToolCall(
-                                id="rp1",
-                                name="run_parallel",
-                                arguments_json=json.dumps({
-                                    "agent": "coder",
-                                    "count": 2,
-                                    "task": "Read the spec and confirm.",
-                                }),
-                            ),
-                        ),
-                    ),
-                )
-            return _response_stream("Both coders read the spec.")
-
-        # But wait — after the coder reads, it needs a second turn to reply.
-        # Let's use a stateful fake that returns the read result and then text.
         _all_invs: list[AgentInvocation] = []
         coder_round: dict[int, int] = {}
 
@@ -1075,6 +1241,11 @@ def _fake_registry() -> RuntimeRegistry:
 def _fake_agent_invoker(
     responses_by_agent: dict[str, list[str | dict[str, object]]],
 ):
+    """Scripted invoker: each agent returns the next item from its list.
+
+    Used for tests that care about SSE encoding or error handling, not
+    about whether the right context reached the right agent.
+    """
     counters: dict[str, int] = {a: 0 for a in responses_by_agent}
 
     def _invoker(invocation: AgentInvocation):

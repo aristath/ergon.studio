@@ -69,8 +69,8 @@ class _ModelState:
 
 
 async def _handle_models(request: web.Request) -> web.Response:
-    core: ProxyOrchestrationCore = request.app["core"]
-    model_state: _ModelState = request.app["model_state"]
+    core = request.app[_CORE_KEY]
+    model_state = request.app[_MODEL_STATE_KEY]
     try:
         data = model_state.available_models(core.registry)
     except Exception as exc:
@@ -85,7 +85,7 @@ async def _handle_models(request: web.Request) -> web.Response:
 
 
 async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
-    core: ProxyOrchestrationCore = request.app["core"]
+    core = request.app[_CORE_KEY]
     try:
         payload = await _read_json_body(request)
         turn_request = parse_chat_completion_request(payload)
@@ -219,7 +219,7 @@ async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
 
 
 async def _handle_responses(request: web.Request) -> web.StreamResponse:
-    core: ProxyOrchestrationCore = request.app["core"]
+    core = request.app[_CORE_KEY]
     try:
         payload = await _read_json_body(request)
         turn_request = parse_responses_request(payload)
@@ -407,10 +407,14 @@ async def _handle_responses(request: web.Request) -> web.StreamResponse:
     return json_resp
 
 
+_CORE_KEY: web.AppKey[ProxyOrchestrationCore] = web.AppKey("core")
+_MODEL_STATE_KEY: web.AppKey[_ModelState] = web.AppKey("model_state")
+
+
 def _create_app(core: ProxyOrchestrationCore) -> web.Application:
     app = web.Application()
-    app["core"] = core
-    app["model_state"] = _ModelState()
+    app[_CORE_KEY] = core
+    app[_MODEL_STATE_KEY] = _ModelState()
     app.router.add_get("/v1/models", _handle_models)
     app.router.add_post("/v1/chat/completions", _handle_chat_completions)
     app.router.add_post("/v1/responses", _handle_responses)

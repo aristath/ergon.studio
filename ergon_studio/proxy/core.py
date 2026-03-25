@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 from ergon_studio.debug_log import log_event
@@ -32,12 +34,16 @@ from ergon_studio.proxy.models import (
 )
 from ergon_studio.proxy.orchestrator_tools import (
     MalformedToolCallError,
+    RunParallelAction,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
     parse_close_channel_action,
     parse_message_channel_action,
     parse_open_channel_action,
+    parse_run_parallel_action,
 )
+from ergon_studio.proxy.session_overlay import SessionOverlay, make_session_overlay
+from ergon_studio.proxy.subsession_executor import SubSessionExecutor
 from ergon_studio.proxy.pending_store import PendingStore
 from ergon_studio.proxy.prompts import orchestrator_turn_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
@@ -58,8 +64,10 @@ class ProxyOrchestrationCore:
         registry: RuntimeRegistry,
         *,
         agent_invoker: AgentInvoker | None = None,
+        overlay_root: Path | None = None,
     ) -> None:
         self.registry = registry
+        self._overlay_root = overlay_root or (Path.home() / ".ergon-workspace")
         self._pending_store = PendingStore()
         self._agent_runner = ProxyAgentRunner(
             registry,
@@ -69,6 +77,9 @@ class ProxyOrchestrationCore:
         self._channel_executor = ProxyChannelExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
             emit_tool_calls=self._agent_runner.emit_tool_call_events,
+        )
+        self._subsession_executor = SubSessionExecutor(
+            stream_text_agent=self._agent_runner.stream_text_agent,
         )
         self._channel_sessions: dict[str, dict[str, Channel]] = {}
 
@@ -361,6 +372,36 @@ class ProxyOrchestrationCore:
                             state.append_reasoning(notice)
                             yield ProxyReasoningDeltaEvent(notice)
                             continue
+                        if tool_call.name == "run_parallel":
+                            parallel_action = parse_run_parallel_action(
+                                tool_call,
+                                registry=self.registry,
+                            )
+                            log_event(
+                                "run_parallel_action",
+                                session_id=session_id,
+                                agent=parallel_action.agent,
+                                count=parallel_action.count,
+                            )
+                            results, parallel_events = (
+                                await self._run_parallel_subsessions(
+                                    action=parallel_action,
+                                    session_id=session_id,
+                                    model_id=request.model,
+                                )
+                            )
+                            for event in parallel_events:
+                                state.append_reasoning(event.delta)
+                                yield event
+                            loop_history.append(
+                                ProxyInputMessage(
+                                    role="user",
+                                    content=_format_parallel_results(
+                                        parallel_action, results
+                                    ),
+                                )
+                            )
+                            continue
                         raise ValueError(
                             f"unsupported internal action: {tool_call.name}"
                         )
@@ -520,6 +561,37 @@ class ProxyOrchestrationCore:
             finalizer=lambda: channel_result,
         )
 
+    async def _run_parallel_subsessions(
+        self,
+        *,
+        action: RunParallelAction,
+        session_id: str,
+        model_id: str,
+    ) -> tuple[list[str], list[ProxyReasoningDeltaEvent]]:
+        all_events: list[ProxyReasoningDeltaEvent] = []
+        streams = [
+            self._subsession_executor.execute(
+                agent_id=action.agent,
+                task=action.task,
+                session_id=f"{session_id}-parallel-{i}",
+                overlay=SessionOverlay(
+                    root=self._overlay_root / f"{session_id}-parallel-{i}"
+                ),
+                model_id=model_id,
+            )
+            for i in range(action.count)
+        ]
+
+        async def _drain(
+            stream: ResponseStream[ProxyReasoningDeltaEvent, str],
+        ) -> str:
+            async for event in stream:
+                all_events.append(event)
+            return await stream.get_final_response()
+
+        results: list[str] = list(await asyncio.gather(*(_drain(s) for s in streams)))
+        return results, all_events
+
     def _finalize_turn(
         self,
         *,
@@ -603,3 +675,13 @@ class ProxyOrchestrationCore:
             ),
         ):
             yield event
+
+
+def _format_parallel_results(
+    action: RunParallelAction, results: list[str]
+) -> str:
+    header = f"run_parallel({action.agent!r}, count={action.count}) results:"
+    body = "\n".join(
+        f"\n[Sub-session {i + 1}]\n{result}" for i, result in enumerate(results)
+    )
+    return header + body

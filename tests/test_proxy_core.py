@@ -736,6 +736,200 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class RunParallelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_parallel_invokes_agent_n_times(self) -> None:
+        coder_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    _internal_action(
+                        "run_parallel",
+                        agent="coder",
+                        count=2,
+                        task="Build X",
+                    ),
+                    "Done",
+                ],
+                "coder": ["Result A", "Result B"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "coder":
+                coder_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_capturing_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.content, "Done")
+        self.assertEqual(len(coder_invocations), 2)
+
+    async def test_run_parallel_results_injected_into_loop_history(self) -> None:
+        orchestrator_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    _internal_action(
+                        "run_parallel",
+                        agent="coder",
+                        count=1,
+                        task="Build X",
+                    ),
+                    "Done",
+                ],
+                "coder": ["My unique result"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                orchestrator_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_capturing_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertEqual(len(orchestrator_invocations), 2)
+        second_messages = orchestrator_invocations[1].messages
+        all_content = " ".join(
+            str(m.get("content", "")) for m in second_messages
+        )
+        self.assertIn("My unique result", all_content)
+
+    async def test_run_parallel_surfaced_as_reasoning_events(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "run_parallel",
+                            agent="coder",
+                            count=1,
+                            task="Task",
+                        ),
+                        "Done",
+                    ],
+                    "coder": ["Subsession thinking"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        events = [event async for event in stream]
+        await stream.get_final_response()
+
+        reasoning_texts = [
+            e.delta for e in events if isinstance(e, ProxyReasoningDeltaEvent)
+        ]
+        self.assertTrue(
+            any("Subsession thinking" in t for t in reasoning_texts),
+            f"Expected 'Subsession thinking' in reasoning. Got: {reasoning_texts}",
+        )
+
+    async def test_run_parallel_with_unknown_agent_fails(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "run_parallel",
+                            agent="nonexistent_agent",
+                            count=1,
+                            task="Task",
+                        ),
+                    ],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+
+    async def test_run_parallel_with_invalid_count_fails(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "run_parallel",
+                            agent="coder",
+                            count=0,
+                            task="Task",
+                        ),
+                    ],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+
+    async def test_run_parallel_with_count_one_returns_single_result(self) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        _internal_action(
+                            "run_parallel",
+                            agent="coder",
+                            count=1,
+                            task="Do it",
+                        ),
+                        "All done",
+                    ],
+                    "coder": ["Solo result"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.content, "All done")
+
+
 def _fake_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
         upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),

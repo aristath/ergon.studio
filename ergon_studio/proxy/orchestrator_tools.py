@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from ergon_studio.proxy.models import ProxyFunctionTool, ProxyToolCall
 from ergon_studio.registry import RuntimeRegistry
 
-INTERNAL_TOOL_NAMES = frozenset({"open_channel", "message_channel", "close_channel"})
+INTERNAL_TOOL_NAMES = frozenset(
+    {"open_channel", "message_channel", "close_channel", "run_parallel"}
+)
 
 
 class MalformedToolCallError(ValueError):
@@ -31,6 +33,13 @@ class MessageChannelAction:
 @dataclass(frozen=True)
 class CloseChannelAction:
     channel: str
+
+
+@dataclass(frozen=True)
+class RunParallelAction:
+    agent: str
+    count: int
+    task: str
 
 
 def build_orchestrator_internal_tools(
@@ -99,6 +108,36 @@ def build_orchestrator_internal_tools(
                 "required": ["channel"],
             },
         ),
+        ProxyFunctionTool(
+            name="run_parallel",
+            description=(
+                "Run N isolated sub-sessions of a specialist agent in parallel on a "
+                "task. Each sub-session gets its own workspace overlay and cannot use "
+                "host tools. All results are automatically returned to you in the next "
+                "turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "enum": list(specialist_ids),
+                        "description": "Specialist agent id to run.",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8,
+                        "description": "Number of parallel sub-sessions (default 1).",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "Prompt given to each sub-session.",
+                    },
+                },
+                "required": ["agent", "task"],
+            },
+        ),
     )
 
 def parse_open_channel_action(
@@ -158,6 +197,24 @@ def parse_close_channel_action(tool_call: ProxyToolCall) -> CloseChannelAction:
     return CloseChannelAction(
         channel=_required_text(payload.get("channel"), field="channel"),
     )
+
+
+def parse_run_parallel_action(
+    tool_call: ProxyToolCall,
+    *,
+    registry: RuntimeRegistry,
+) -> RunParallelAction:
+    if tool_call.name != "run_parallel":
+        raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
+    payload = _parse_tool_payload(tool_call)
+    agent = _required_text(payload.get("agent"), field="agent")
+    if agent not in registry.agent_definitions or agent == "orchestrator":
+        raise ValueError(f"unknown agent for run_parallel: {agent}")
+    raw_count = payload.get("count", 1)
+    if not isinstance(raw_count, int) or raw_count < 1 or raw_count > 8:
+        raise ValueError("count must be an integer between 1 and 8")
+    task = _required_text(payload.get("task"), field="task")
+    return RunParallelAction(agent=agent, count=raw_count, task=task)
 
 
 def is_internal_tool_name(name: str) -> bool:

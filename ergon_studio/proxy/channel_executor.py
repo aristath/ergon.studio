@@ -120,14 +120,12 @@ class ProxyChannelExecutor:
                         channel_transcript=tuple(current_transcript),
                         pending=actor_pending,
                     )
-                    emitted, new_deliveries, new_tool_events = (
+                    emitted, new_deliveries, new_tool_events, new_message = (
                         _process_participant_results(
                             participant=participant,
                             response=result,
                             request=request,
                             channel=channel,
-                            current_transcript=current_transcript,
-                            channel_messages=channel_messages,
                             state=state,
                             emit_tool_calls=self._emit_tool_calls,
                             session_id=session_id,
@@ -137,6 +135,9 @@ class ProxyChannelExecutor:
                         yield reasoning_event
                     deliveries.extend(new_deliveries)
                     pending_tool_events.extend(new_tool_events)
+                    if new_message is not None:
+                        current_transcript.append(new_message)
+                        channel_messages.append(new_message)
 
             while deliveries:
                 delivery = deliveries.popleft()
@@ -164,22 +165,22 @@ class ProxyChannelExecutor:
                     recipients=delivery.recipients,
                 )
 
+                transcript_snapshot = tuple(current_transcript)
+                new_participant_messages: list[ChannelMessage] = []
                 for participant in targets:
                     result = await self._run_channel_participant(
                         request=request,
                         session_id=session_id,
                         channel_name=channel.name,
                         participant=participant,
-                        channel_transcript=tuple(current_transcript),
+                        channel_transcript=transcript_snapshot,
                     )
-                    emitted, new_deliveries, new_tool_events = (
+                    emitted, new_deliveries, new_tool_events, new_message = (
                         _process_participant_results(
                             participant=participant,
                             response=result,
                             request=request,
                             channel=channel,
-                            current_transcript=current_transcript,
-                            channel_messages=channel_messages,
                             state=state,
                             emit_tool_calls=self._emit_tool_calls,
                             session_id=session_id,
@@ -189,6 +190,11 @@ class ProxyChannelExecutor:
                         yield reasoning_event
                     deliveries.extend(new_deliveries)
                     pending_tool_events.extend(new_tool_events)
+                    if new_message is not None:
+                        new_participant_messages.append(new_message)
+                for msg in new_participant_messages:
+                    current_transcript.append(msg)
+                    channel_messages.append(msg)
 
             if pending_tool_events:
                 ordered = [
@@ -290,8 +296,6 @@ def _process_participant_results(
     response: AgentRunResult,
     request: ProxyTurnRequest,
     channel: Channel,
-    current_transcript: list[ChannelMessage],
-    channel_messages: list[ChannelMessage],
     state: ProxyTurnState,
     emit_tool_calls: Callable[..., list[ProxyToolCallEvent]],
     session_id: str,
@@ -299,10 +303,12 @@ def _process_participant_results(
     list[ProxyReasoningDeltaEvent],
     list[_ChannelDelivery],
     list[ProxyToolCallEvent],
+    ChannelMessage | None,
 ]:
     reasoning_events: list[ProxyReasoningDeltaEvent] = []
     deliveries: list[_ChannelDelivery] = []
     tool_events: list[ProxyToolCallEvent] = []
+    new_message: ChannelMessage | None = None
 
     internal_actions: list[_ChannelDelivery] = []
     host_tool_calls: list[ProxyToolCall] = []
@@ -352,8 +358,7 @@ def _process_participant_results(
                 author=participant.label,
                 content=text,
             )
-            channel_messages.append(line)
-            current_transcript.append(line)
+            new_message = line
             state.append_reasoning(line.render())
             reasoning_events.append(ProxyReasoningDeltaEvent(line.render()))
 
@@ -377,4 +382,4 @@ def _process_participant_results(
             )
         )
 
-    return reasoning_events, deliveries, tool_events
+    return reasoning_events, deliveries, tool_events, new_message

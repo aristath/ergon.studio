@@ -156,7 +156,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [message.name for message in captured_conversations[1]],
-            ["orchestrator", "reviewer"],
+            ["orchestrator"],
         )
 
     async def test_execute_can_target_specific_staffed_label(self) -> None:
@@ -550,6 +550,102 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [message.name for message in captured_conversations[1]],
             ["orchestrator", "architect"],
+        )
+
+    async def test_participants_in_same_delivery_see_identical_transcript_snapshot(
+        self,
+    ) -> None:
+        captured_conversations: list[tuple[ProxyInputMessage, ...]] = []
+
+        def _stream_text_agent(**kwargs):
+            captured_conversations.append(kwargs["conversation_messages"])
+            return _response_stream(f"Solution from {kwargs['agent_id']}")
+
+        executor = ProxyChannelExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        channel = Channel(
+            channel_id="channel-1",
+            name="best-of-n",
+            participants=("coder", "coder"),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            channel_message="Both coders, solve independently.",
+            recipients=("coder[1]", "coder[2]"),
+            state=ProxyTurnState(),
+        )
+
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        self.assertEqual(len(captured_conversations), 2)
+        # Both participants see the same pre-delivery snapshot
+        self.assertEqual(captured_conversations[0], captured_conversations[1])
+        # Neither sees the other's response
+        for conv in captured_conversations:
+            self.assertFalse(any(m.name and "coder" in m.name for m in conv))
+
+    async def test_sequential_delivery_via_message_channel_sees_prior_results(
+        self,
+    ) -> None:
+        captured_conversations: list[tuple[ProxyInputMessage, ...]] = []
+
+        def _stream_text_agent(**kwargs):
+            captured_conversations.append(kwargs["conversation_messages"])
+            if kwargs["agent_id"] == "architect":
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(
+                            ProxyToolCall(
+                                id="internal_1",
+                                name="message_channel",
+                                arguments_json='{"message":"Coder, build it.","recipients":["coder"]}',
+                            ),
+                        ),
+                    ),
+                )
+            return _response_stream("Built.")
+
+        executor = ProxyChannelExecutor(
+            stream_text_agent=_stream_text_agent,
+            emit_tool_calls=_no_tool_calls,
+        )
+        request = ProxyTurnRequest(
+            model="qwen",
+            messages=(ProxyInputMessage(role="user", content="Build it"),),
+        )
+        channel = Channel(
+            channel_id="channel-1",
+            name="build",
+            participants=("architect", "coder"),
+        )
+        stream = executor.execute(
+            request=request,
+            session_id="session_1",
+            channel=channel,
+            channel_message="Architect, plan it.",
+            recipients=("architect",),
+            state=ProxyTurnState(),
+        )
+
+        [event async for event in stream]
+        await stream.get_final_response()
+
+        # Coder was invoked in a second delivery and should see architect's message
+        coder_conversation = captured_conversations[1]
+        self.assertTrue(
+            any(m.name == "architect" for m in coder_conversation),
+            "coder should see architect's message_channel message",
         )
 
     async def test_pending_resume_fails_when_actor_is_not_staffed(self) -> None:

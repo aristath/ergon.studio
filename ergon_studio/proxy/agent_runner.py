@@ -401,12 +401,15 @@ def _strip_pending_messages(
             decode_pending_id_from_tool_call_id(tool_call.id)
             for tool_call in message.tool_calls
         }
-        if (
-            message.role == "assistant"
-            and message.tool_calls
-            and tool_pending_ids == {pending_id}
-        ):
-            trimmed.pop()
+        if message.role == "assistant" and message.tool_calls:
+            if tool_pending_ids == {pending_id}:
+                trimmed.pop()
+            elif pending_id in tool_pending_ids:
+                log_event(
+                    "strip_pending_mixed_ids",
+                    pending_id=pending_id,
+                    all_pending_ids=list(tool_pending_ids - {None}),
+                )
     return tuple(trimmed)
 
 

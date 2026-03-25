@@ -182,6 +182,51 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(messages[2]["name"], "orchestrator")
         self.assertEqual(messages[3]["name"], "coder")
 
+    def test_strip_pending_does_not_pop_assistant_with_mixed_pending_ids(self) -> None:
+        from ergon_studio.proxy.agent_runner import _strip_pending_messages
+        from ergon_studio.proxy.continuation import (
+            PendingToolContext,
+            encode_continuation_tool_call,
+        )
+        from ergon_studio.proxy.models import ProxyInputMessage, ProxyToolCall
+
+        call_1 = ProxyToolCall(id="call_1", name="read_file", arguments_json="{}")
+        call_2 = ProxyToolCall(id="call_2", name="write_file", arguments_json="{}")
+        encoded_1 = encode_continuation_tool_call(call_1, pending_id="pending_1")
+        encoded_2 = encode_continuation_tool_call(call_2, pending_id="pending_2")
+
+        assistant = ProxyInputMessage(
+            role="assistant",
+            content="",
+            tool_calls=(encoded_1, encoded_2),
+        )
+        tool_result_1 = ProxyInputMessage(
+            role="tool",
+            content="result",
+            tool_call_id=encoded_1.id,
+        )
+        pending = PendingToolContext(
+            pending_id="pending_1",
+            session_id="session_1",
+            actor="orchestrator",
+            active_channel_id=None,
+            tool_calls=(call_1,),
+            tool_results=(tool_result_1,),
+        )
+        conversation = (
+            ProxyInputMessage(role="user", content="Do it"),
+            assistant,
+            tool_result_1,
+        )
+
+        result = _strip_pending_messages(conversation, pending_continuation=pending)
+
+        # Tool result for pending_1 is stripped
+        # But assistant with mixed pending IDs is preserved (not popped)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[-1].role, "assistant")
+        self.assertEqual(len(result[-1].tool_calls), 2)
+
     def test_stream_accumulator_rebuilds_incremental_tool_call_arguments(self) -> None:
         accumulator = _StreamAccumulator()
         deltas = [

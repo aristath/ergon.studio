@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from ergon_studio.proxy.models import ProxyToolCall
+
+_DEFAULT_TTL_SECONDS = 600.0
 
 
 @dataclass(frozen=True)
@@ -13,6 +16,7 @@ class PendingCallRecord:
     actor: str
     active_channel_id: str | None
     tool_calls: tuple[ProxyToolCall, ...]
+    created_at: float = field(default_factory=time.monotonic)
 
 
 class PendingStore:
@@ -27,6 +31,7 @@ class PendingStore:
         active_channel_id: str | None = None,
         tool_calls: tuple[ProxyToolCall, ...],
     ) -> PendingCallRecord:
+        self.sweep()
         record = PendingCallRecord(
             pending_id=f"pending_{uuid4().hex}",
             session_id=session_id,
@@ -42,3 +47,13 @@ class PendingStore:
 
     def discard(self, pending_id: str) -> None:
         self._records.pop(pending_id, None)
+
+    def sweep(self, max_age_seconds: float = _DEFAULT_TTL_SECONDS) -> None:
+        now = time.monotonic()
+        stale = [
+            pending_id
+            for pending_id, record in self._records.items()
+            if now - record.created_at > max_age_seconds
+        ]
+        for pending_id in stale:
+            del self._records[pending_id]

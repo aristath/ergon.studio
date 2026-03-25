@@ -60,6 +60,7 @@ class ProxyAgentRunner:
         *,
         invoker: AgentInvoker | None = None,
         pending_store: PendingStore | None = None,
+        timeout: float = 120.0,
     ) -> None:
         self.registry = registry
         self._invoker = invoker or self._invoke_upstream
@@ -68,6 +69,7 @@ class ProxyAgentRunner:
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=registry.upstream.base_url,
+            timeout=timeout,
         )
 
     def stream_text_agent(

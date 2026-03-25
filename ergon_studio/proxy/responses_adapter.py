@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -295,8 +296,6 @@ def encode_responses_stream_events(
 
 
 def encode_responses_stream_sse(payload: dict[str, Any]) -> bytes:
-    import json
-
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
 
 

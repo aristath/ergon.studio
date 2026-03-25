@@ -431,6 +431,153 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_orchestrator_retries_on_malformed_tool_json(self) -> None:
+        malformed = {"id": "tc_bad", "name": "open_channel", "arguments": "{bad json"}
+        valid = {
+            "id": "tc_good",
+            "name": "open_channel",
+            "arguments": json.dumps(
+                {"participants": ["coder"], "message": "Build it", "recipients": ["coder"]}
+            ),
+        }
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {"text": "", "tool_calls": [malformed]},
+                        {"text": "", "tool_calls": [valid]},
+                        "Done",
+                    ],
+                    "coder": ["Patch applied"],
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.content, "Done")
+
+    async def test_orchestrator_fails_after_max_retries(self) -> None:
+        malformed = {"id": "tc_bad", "name": "open_channel", "arguments": "{bad json"}
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {"text": "", "tool_calls": [malformed]},
+                        {"text": "", "tool_calls": [malformed]},
+                        {"text": "", "tool_calls": [malformed]},
+                    ]
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+
+    async def test_orchestrator_does_not_retry_structural_errors(self) -> None:
+        invoker_call_count = 0
+
+        def _counting_invoker(invocation: AgentInvocation):
+            nonlocal invoker_call_count
+            invoker_call_count += 1
+            # Valid JSON but missing required 'message' field
+            return _response_stream(
+                "",
+                response=AgentRunResult(
+                    text="",
+                    tool_calls=(
+                        ProxyToolCall(
+                            id="tc_1",
+                            name="open_channel",
+                            arguments_json='{"participants":["coder"],"recipients":["coder"]}',
+                        ),
+                    ),
+                ),
+            )
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_counting_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertEqual(invoker_call_count, 1)
+
+    async def test_message_channel_before_open_raises_error_without_side_effects(
+        self,
+    ) -> None:
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_fake_agent_invoker(
+                {
+                    "orchestrator": [
+                        {
+                            "text": "",
+                            "tool_calls": [
+                                {
+                                    "id": "tc_1",
+                                    "name": "open_channel",
+                                    "arguments": json.dumps(
+                                        {
+                                            "participants": ["coder"],
+                                            "message": "Start",
+                                            "recipients": ["coder"],
+                                        }
+                                    ),
+                                },
+                                {
+                                    "id": "tc_2",
+                                    "name": "message_channel",
+                                    "arguments": json.dumps(
+                                        {
+                                            "channel": "channel-99",
+                                            "message": "Continue",
+                                            "recipients": ["coder"],
+                                        }
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                    # 'coder' intentionally absent: if open_channel runs, it would
+                    # fail with KeyError rather than the expected "unknown channel" error
+                }
+            ),
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        events = [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        error_text = "".join(
+            e.delta for e in events if isinstance(e, ProxyContentDeltaEvent)
+        )
+        self.assertIn("unknown channel", error_text)
+        # "channel-99" must appear — not a KeyError from missing coder
+        self.assertIn("channel-99", error_text)
+
     async def test_final_pass_orchestrator_text_emitted_as_content(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),

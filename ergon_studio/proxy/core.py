@@ -31,6 +31,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnResult,
 )
 from ergon_studio.proxy.orchestrator_tools import (
+    MalformedToolCallError,
     build_orchestrator_internal_tools,
     is_internal_tool_name,
     parse_close_channel_action,
@@ -173,6 +174,7 @@ class ProxyOrchestrationCore:
     ) -> AsyncIterator[ProxyEvent]:
         pending = pending_orchestrator
         loop_history: list[ProxyInputMessage] = []
+        retry_count = 0
         while True:
             log_event(
                 "orchestrator_run_start",
@@ -213,158 +215,180 @@ class ProxyOrchestrationCore:
             processed_internal_action = False
             host_tool_calls: list[ProxyToolCall] = []
             channel_results: list[tuple[str, str, tuple[ChannelMessage, ...]]] = []
-            if response.tool_calls:
-                for tool_call in response.tool_calls:
-                    if not is_internal_tool_name(tool_call.name):
-                        host_tool_calls.append(tool_call)
-                        continue
-                    processed_internal_action = True
-                    if tool_call.name == "open_channel":
-                        open_action = parse_open_channel_action(
-                            tool_call,
-                            registry=self.registry,
-                        )
-                        highest_channel_number = 0
-                        for existing_channel_id in channels:
-                            if not existing_channel_id.startswith("channel-"):
-                                continue
-                            try:
-                                highest_channel_number = max(
-                                    highest_channel_number,
-                                    int(
-                                        existing_channel_id.removeprefix("channel-")
-                                    ),
+            try:
+                if response.tool_calls:
+                    # Validation pre-pass: verify channel references before side effects
+                    for tool_call in response.tool_calls:
+                        if tool_call.name == "message_channel":
+                            action = parse_message_channel_action(tool_call)
+                            if channels.get(action.channel) is None:
+                                raise ValueError(f"unknown channel: {action.channel}")
+                        elif tool_call.name == "close_channel":
+                            action = parse_close_channel_action(tool_call)
+                            if channels.get(action.channel) is None:
+                                raise ValueError(f"unknown channel: {action.channel}")
+                    for tool_call in response.tool_calls:
+                        if not is_internal_tool_name(tool_call.name):
+                            host_tool_calls.append(tool_call)
+                            continue
+                        processed_internal_action = True
+                        if tool_call.name == "open_channel":
+                            open_action = parse_open_channel_action(
+                                tool_call,
+                                registry=self.registry,
+                            )
+                            highest_channel_number = 0
+                            for existing_channel_id in channels:
+                                if not existing_channel_id.startswith("channel-"):
+                                    continue
+                                try:
+                                    highest_channel_number = max(
+                                        highest_channel_number,
+                                        int(
+                                            existing_channel_id.removeprefix(
+                                                "channel-"
+                                            )
+                                        ),
+                                    )
+                                except ValueError:
+                                    continue
+                            channel_id = f"channel-{highest_channel_number + 1}"
+                            if open_action.preset is not None:
+                                channel = Channel(
+                                    channel_id=channel_id,
+                                    name=open_action.preset,
+                                    participants=self.registry.channel_presets[
+                                        open_action.preset
+                                    ],
                                 )
-                            except ValueError:
-                                continue
-                        channel_id = f"channel-{highest_channel_number + 1}"
-                        if open_action.preset is not None:
-                            channel = Channel(
-                                channel_id=channel_id,
-                                name=open_action.preset,
-                                participants=self.registry.channel_presets[
-                                    open_action.preset
-                                ],
+                            elif open_action.participants:
+                                channel = Channel(
+                                    channel_id=channel_id,
+                                    name="ad hoc",
+                                    participants=open_action.participants,
+                                )
+                            else:
+                                raise ValueError(
+                                    "open_channel needs a preset or participants target"
+                                )
+                            channels[channel.channel_id] = channel
+                            log_event(
+                                "open_channel_action",
+                                session_id=session_id,
+                                channel=channel,
+                                message=open_action.message,
+                                recipients=open_action.recipients,
                             )
-                        elif open_action.participants:
-                            channel = Channel(
-                                channel_id=channel_id,
-                                name="ad hoc",
-                                participants=open_action.participants,
+                            channel_stream = self._message_channel(
+                                request=request,
+                                channels=channels,
+                                channel_id=channel.channel_id,
+                                message=open_action.message,
+                                recipients=open_action.recipients,
+                                state=state,
+                                session_id=session_id,
                             )
-                        else:
-                            raise ValueError(
-                                "open_channel needs a preset or participants target"
+                            async for internal_event in channel_stream:
+                                yield internal_event
+                            if state.finish_reason == "tool_calls":
+                                if buffered_deltas:
+                                    text = "".join(buffered_deltas)
+                                    state.append_reasoning(text)
+                                    yield ProxyReasoningDeltaEvent(text)
+                                return
+                            channel_results.append(
+                                (
+                                    channel.channel_id,
+                                    channel.name,
+                                    await channel_stream.get_final_response(),
+                                )
                             )
-                        channels[channel.channel_id] = channel
-                        log_event(
-                            "open_channel_action",
-                            session_id=session_id,
-                            channel=channel,
-                            message=open_action.message,
-                            recipients=open_action.recipients,
+                            continue
+                        if tool_call.name == "message_channel":
+                            message_action = parse_message_channel_action(
+                                tool_call,
+                            )
+                            log_event(
+                                "message_channel_action",
+                                session_id=session_id,
+                                channel=message_action.channel,
+                                message=message_action.message,
+                                recipients=message_action.recipients,
+                            )
+                            channel_stream = self._message_channel(
+                                request=request,
+                                channels=channels,
+                                channel_id=message_action.channel,
+                                message=message_action.message,
+                                recipients=message_action.recipients,
+                                state=state,
+                                session_id=session_id,
+                            )
+                            async for internal_event in channel_stream:
+                                yield internal_event
+                            if state.finish_reason == "tool_calls":
+                                if buffered_deltas:
+                                    text = "".join(buffered_deltas)
+                                    state.append_reasoning(text)
+                                    yield ProxyReasoningDeltaEvent(text)
+                                return
+                            ch = channels.get(message_action.channel)
+                            channel_results.append(
+                                (
+                                    message_action.channel,
+                                    ch.name if ch else "?",
+                                    await channel_stream.get_final_response(),
+                                )
+                            )
+                            continue
+                        if tool_call.name == "close_channel":
+                            close_action = parse_close_channel_action(tool_call)
+                            closed = channels.pop(close_action.channel, None)
+                            if closed is None:
+                                raise ValueError(
+                                    f"unknown channel: {close_action.channel}"
+                                )
+                            notice = (
+                                f"Orchestrator: closing channel {closed.channel_id} "
+                                f"({closed.name}).\n"
+                            )
+                            log_event(
+                                "close_channel_action",
+                                session_id=session_id,
+                                channel_id=closed.channel_id,
+                                channel_name=closed.name,
+                            )
+                            state.append_reasoning(notice)
+                            yield ProxyReasoningDeltaEvent(notice)
+                            continue
+                        raise ValueError(
+                            f"unsupported internal action: {tool_call.name}"
                         )
-                        channel_stream = self._message_channel(
-                            request=request,
-                            channels=channels,
-                            channel_id=channel.channel_id,
-                            message=open_action.message,
-                            recipients=open_action.recipients,
-                            state=state,
-                            session_id=session_id,
-                        )
-                        async for internal_event in channel_stream:
-                            yield internal_event
-                        if state.finish_reason == "tool_calls":
-                            if buffered_deltas:
-                                text = "".join(buffered_deltas)
+                    if host_tool_calls:
+                        if buffered_deltas:
+                            text = "".join(buffered_deltas)
+                            if processed_internal_action:
                                 state.append_reasoning(text)
                                 yield ProxyReasoningDeltaEvent(text)
-                            return
-                        channel_results.append(
-                            (
-                                channel.channel_id,
-                                channel.name,
-                                await channel_stream.get_final_response(),
-                            )
-                        )
-                        continue
-                    if tool_call.name == "message_channel":
-                        message_action = parse_message_channel_action(
-                            tool_call,
-                        )
-                        log_event(
-                            "message_channel_action",
-                            session_id=session_id,
-                            channel=message_action.channel,
-                            message=message_action.message,
-                            recipients=message_action.recipients,
-                        )
-                        channel_stream = self._message_channel(
+                            else:
+                                state.append_content(text)
+                                yield ProxyContentDeltaEvent(text)
+                        for tool_event in self._agent_runner.emit_tool_call_events(
+                            tool_calls=tuple(host_tool_calls),
                             request=request,
-                            channels=channels,
-                            channel_id=message_action.channel,
-                            message=message_action.message,
-                            recipients=message_action.recipients,
+                            session_id=session_id,
+                            actor="orchestrator",
                             state=state,
-                            session_id=session_id,
-                        )
-                        async for internal_event in channel_stream:
-                            yield internal_event
-                        if state.finish_reason == "tool_calls":
-                            if buffered_deltas:
-                                text = "".join(buffered_deltas)
-                                state.append_reasoning(text)
-                                yield ProxyReasoningDeltaEvent(text)
-                            return
-                        ch = channels.get(message_action.channel)
-                        channel_results.append(
-                            (
-                                message_action.channel,
-                                ch.name if ch else "?",
-                                await channel_stream.get_final_response(),
-                            )
-                        )
-                        continue
-                    if tool_call.name == "close_channel":
-                        close_action = parse_close_channel_action(tool_call)
-                        closed = channels.pop(close_action.channel, None)
-                        if closed is None:
-                            raise ValueError(f"unknown channel: {close_action.channel}")
-                        notice = (
-                            f"Orchestrator: closing channel {closed.channel_id} "
-                            f"({closed.name}).\n"
-                        )
-                        log_event(
-                            "close_channel_action",
-                            session_id=session_id,
-                            channel_id=closed.channel_id,
-                            channel_name=closed.name,
-                        )
-                        state.append_reasoning(notice)
-                        yield ProxyReasoningDeltaEvent(notice)
-                        continue
-                    raise ValueError(
-                        f"unsupported internal action: {tool_call.name}"
-                    )
-                if host_tool_calls:
-                    if buffered_deltas:
-                        text = "".join(buffered_deltas)
-                        if processed_internal_action:
-                            state.append_reasoning(text)
-                            yield ProxyReasoningDeltaEvent(text)
-                        else:
-                            state.append_content(text)
-                            yield ProxyContentDeltaEvent(text)
-                    for tool_event in self._agent_runner.emit_tool_call_events(
-                        tool_calls=tuple(host_tool_calls),
-                        request=request,
-                        session_id=session_id,
-                        actor="orchestrator",
-                        state=state,
-                    ):
-                        yield tool_event
-                    return
+                        ):
+                            yield tool_event
+                        return
+            except MalformedToolCallError:
+                if retry_count < 2:
+                    retry_count += 1
+                    continue
+                raise
+
+            retry_count = 0
 
             if buffered_deltas:
                 text = "".join(buffered_deltas)

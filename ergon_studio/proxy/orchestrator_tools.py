@@ -9,6 +9,10 @@ from ergon_studio.registry import RuntimeRegistry
 INTERNAL_TOOL_NAMES = frozenset({"open_channel", "message_channel", "close_channel"})
 
 
+class MalformedToolCallError(ValueError):
+    """Raised when a tool call's arguments_json cannot be decoded as JSON."""
+
+
 @dataclass(frozen=True)
 class OpenChannelAction:
     preset: str | None
@@ -164,7 +168,9 @@ def _parse_tool_payload(tool_call: ProxyToolCall) -> dict[str, object]:
     try:
         payload = json.loads(tool_call.arguments_json or "{}")
     except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid arguments for {tool_call.name}: {exc}") from exc
+        raise MalformedToolCallError(
+            f"invalid arguments for {tool_call.name}: {exc}"
+        ) from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{tool_call.name} arguments must be an object")
     return payload

@@ -181,18 +181,8 @@ async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
         return _error_response(
             HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
         )
-    if result.finish_reason == "error":
-        log_event(
-            "http_request_failure",
-            route=request.path,
-            session_id=session_id,
-            result=result,
-        )
-        return _error_response(
-            HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
-        )
     log_event(
-        "http_request_complete",
+        "http_request_failure" if result.finish_reason == "error" else "http_request_complete",
         route=request.path,
         session_id=session_id,
         result=result,
@@ -370,18 +360,8 @@ async def _handle_responses(request: web.Request) -> web.StreamResponse:
         return _error_response(
             HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(exc).__name__}: {exc}"
         )
-    if result.finish_reason == "error":
-        log_event(
-            "http_request_failure",
-            route=request.path,
-            session_id=session_id,
-            result=result,
-        )
-        return _error_response(
-            HTTPStatus.INTERNAL_SERVER_ERROR, result.content or "proxy turn failed"
-        )
     log_event(
-        "http_request_complete",
+        "http_request_failure" if result.finish_reason == "error" else "http_request_complete",
         route=request.path,
         session_id=session_id,
         result=result,

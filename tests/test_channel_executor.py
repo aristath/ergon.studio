@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from pathlib import Path
 
-from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.channel_executor import (
     MAX_CHANNEL_TRANSCRIPT_MESSAGES,
@@ -21,9 +19,7 @@ from ergon_studio.proxy.models import (
     ProxyTurnRequest,
 )
 from ergon_studio.proxy.turn_state import ProxyTurnState
-from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
-from ergon_studio.upstream import UpstreamSettings
 
 
 class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -37,6 +33,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -79,6 +76,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -124,6 +122,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -175,6 +174,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -210,6 +210,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=lambda **kwargs: _response_stream("unused"),
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -265,6 +266,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -330,6 +332,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -391,6 +394,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_emit_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -475,6 +479,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -568,6 +573,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -623,6 +629,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=_stream_text_agent,
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -656,6 +663,7 @@ class ChannelExecutorTests(unittest.IsolatedAsyncioTestCase):
         executor = ProxyChannelExecutor(
             stream_text_agent=lambda **kwargs: _response_stream("unused"),
             emit_tool_calls=_no_tool_calls,
+
         )
         request = ProxyTurnRequest(
             model="qwen",
@@ -731,42 +739,6 @@ class ChannelConversationMessagesTests(unittest.TestCase):
         # The very first message should not appear (it's beyond the window)
         self.assertFalse(any(m.content == "msg 0" for m in result))
 
-
-def _registry() -> RuntimeRegistry:
-    return RuntimeRegistry(
-        upstream=UpstreamSettings(base_url="http://localhost:8080/v1"),
-        agent_definitions={
-            "architect": DefinitionDocument(
-                id="architect",
-                path=Path("architect.md"),
-                metadata={"id": "architect", "role": "architect"},
-                body="## Identity\nArchitect.",
-                sections={"Identity": "Architect."},
-            ),
-            "coder": DefinitionDocument(
-                id="coder",
-                path=Path("coder.md"),
-                metadata={"id": "coder", "role": "coder"},
-                body="## Identity\nCoder.",
-                sections={"Identity": "Coder."},
-            ),
-            "reviewer": DefinitionDocument(
-                id="reviewer",
-                path=Path("reviewer.md"),
-                metadata={"id": "reviewer", "role": "reviewer"},
-                body="## Identity\nReviewer.",
-                sections={"Identity": "Reviewer."},
-            ),
-            "orchestrator": DefinitionDocument(
-                id="orchestrator",
-                path=Path("orchestrator.md"),
-                metadata={"id": "orchestrator", "role": "orchestrator"},
-                body="## Identity\nLead dev.",
-                sections={"Identity": "Lead dev."},
-            ),
-        },
-        channel_presets={},
-    )
 
 
 def _host_tool(name: str):

@@ -876,6 +876,90 @@ class RunParallelTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("run_parallel", all_system_content)
 
+    async def test_run_parallel_invalid_agent_is_recoverable(self) -> None:
+        # When the orchestrator calls run_parallel with an ineligible agent,
+        # the error must be fed back as a message so the orchestrator can
+        # recover — the turn must NOT end with finish_reason="error".
+        orchestrator_calls = 0
+
+        def _invoker(invocation: AgentInvocation):
+            nonlocal orchestrator_calls
+            if invocation.agent_id == "orchestrator":
+                orchestrator_calls += 1
+                if orchestrator_calls == 1:
+                    # First call: try invalid run_parallel
+                    return _response_stream(
+                        "",
+                        response=AgentRunResult(
+                            text="",
+                            tool_calls=(
+                                ProxyToolCall(
+                                    id="rp1",
+                                    name="run_parallel",
+                                    arguments_json=json.dumps(
+                                        {"agent": "architect", "count": 1, "task": "X"}
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                # Second call: respond normally after seeing the error feedback
+                return _response_stream("Recovered and done.")
+            return _response_stream("ok")
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertNotEqual(result.finish_reason, "error")
+        self.assertEqual(result.content, "Recovered and done.")
+        self.assertEqual(orchestrator_calls, 2)
+
+    async def test_run_parallel_rejects_agent_without_subsession(self) -> None:
+        # architect has no "Subsession" section → not eligible for run_parallel.
+        # The turn must fail at validation, before the architect is ever invoked.
+        architect_invoked = False
+
+        base = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    _internal_action(
+                        "run_parallel",
+                        agent="architect",
+                        count=1,
+                        task="Design X",
+                    ),
+                ],
+                "architect": ["Architect result"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            nonlocal architect_invoked
+            if invocation.agent_id == "architect":
+                architect_invoked = True
+            return base(invocation)
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_capturing_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+        self.assertFalse(architect_invoked, "architect must not be invoked")
+
     async def test_run_parallel_with_unknown_agent_fails(self) -> None:
         core = ProxyOrchestrationCore(
             _fake_registry(),
@@ -1020,6 +1104,47 @@ class RunParallelTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.content, "All done")
 
+    async def test_orchestrator_loop_fails_after_max_iterations(self) -> None:
+        # Orchestrator that perpetually calls run_parallel should hit the
+        # iteration limit and produce finish_reason="error" instead of looping
+        # forever.
+        call_count = 0
+
+        def _looping_invoker(invocation: AgentInvocation):
+            nonlocal call_count
+            if invocation.agent_id == "orchestrator":
+                call_count += 1
+                return _response_stream(
+                    "",
+                    response=AgentRunResult(
+                        text="",
+                        tool_calls=(
+                            ProxyToolCall(
+                                id=f"rp{call_count}",
+                                name="run_parallel",
+                                arguments_json=json.dumps(
+                                    {"agent": "coder", "count": 1, "task": "X"}
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            return _response_stream("coder result")
+
+        core = ProxyOrchestrationCore(
+            _fake_registry(),
+            agent_invoker=_looping_invoker,
+        )
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s1")
+        [event async for event in stream]
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.finish_reason, "error")
+
 
 def _fake_registry() -> RuntimeRegistry:
     return RuntimeRegistry(
@@ -1030,14 +1155,23 @@ def _fake_registry() -> RuntimeRegistry:
                 path=Path("orchestrator.md"),
                 metadata={"id": "orchestrator", "role": "orchestrator"},
                 body="## Identity\nLead engineer.",
-                sections={"Identity": "Lead engineer."},
+                sections={
+                    "Identity": "Lead engineer.",
+                    "Orchestration": (
+                        "Use open_channel, message_channel, close_channel, and "
+                        "run_parallel when needed.{open_channels_section}"
+                    ),
+                },
             ),
             "coder": DefinitionDocument(
                 id="coder",
                 path=Path("coder.md"),
                 metadata={"id": "coder", "role": "coder"},
-                body="## Identity\nCoder.",
-                sections={"Identity": "Coder."},
+                body="## Identity\nCoder.\n\n## Subsession\nWorkspace: {workspace}.",
+                sections={
+                    "Identity": "Coder.",
+                    "Subsession": "Workspace: {workspace}.",
+                },
             ),
             "architect": DefinitionDocument(
                 id="architect",

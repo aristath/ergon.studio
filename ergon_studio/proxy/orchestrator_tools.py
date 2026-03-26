@@ -50,6 +50,11 @@ def build_orchestrator_internal_tools(
         for agent_id in sorted(registry.agent_definitions)
         if agent_id != "orchestrator"
     )
+    subsession_ids = tuple(
+        agent_id
+        for agent_id in specialist_ids
+        if "Subsession" in registry.agent_definitions[agent_id].sections
+    )
     preset_ids = tuple(sorted(registry.channel_presets))
     return (
         ProxyFunctionTool(
@@ -121,7 +126,7 @@ def build_orchestrator_internal_tools(
                 "properties": {
                     "agent": {
                         "type": "string",
-                        "enum": list(specialist_ids),
+                        "enum": list(subsession_ids),
                         "description": "Specialist agent id to run.",
                     },
                     "count": {
@@ -208,8 +213,14 @@ def parse_run_parallel_action(
         raise ValueError(f"unsupported orchestrator tool: {tool_call.name}")
     payload = _parse_tool_payload(tool_call)
     agent = _required_text(payload.get("agent"), field="agent")
-    if agent not in registry.agent_definitions or agent == "orchestrator":
+    definition = registry.agent_definitions.get(agent)
+    if definition is None or agent == "orchestrator":
         raise ValueError(f"unknown agent for run_parallel: {agent}")
+    if "Subsession" not in definition.sections:
+        raise ValueError(
+            f"agent {agent!r} does not support run_parallel "
+            "(no Subsession section in its definition)"
+        )
     raw_count = payload.get("count", 1)
     if not isinstance(raw_count, int) or raw_count < 1 or raw_count > 8:
         raise ValueError("count must be an integer between 1 and 8")

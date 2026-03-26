@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 
+from ergon_studio.definitions import format_definition_section
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.models import (
     ProxyInputMessage,
     ProxyReasoningDeltaEvent,
     ProxyToolCall,
 )
-from ergon_studio.proxy.prompts import subsession_prompt
 from ergon_studio.proxy.session_overlay import SessionOverlay
 from ergon_studio.proxy.workspace_tools import (
     build_workspace_tools,
@@ -16,6 +16,7 @@ from ergon_studio.proxy.workspace_tools import (
     parse_read_file_action,
     parse_write_file_action,
 )
+from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
 
 MAX_SUBSESSION_ITERATIONS = 50
@@ -35,8 +36,10 @@ class SubSessionExecutor:
         self,
         *,
         stream_text_agent: Callable[..., ResponseStream[str, AgentRunResult]],
+        registry: RuntimeRegistry,
     ) -> None:
         self._stream_text_agent = stream_text_agent
+        self._registry = registry
 
     def execute(
         self,
@@ -44,12 +47,19 @@ class SubSessionExecutor:
         agent_id: str,
         task: str,
         session_id: str,
+        session_index: int,
         overlay: SessionOverlay,
         model_id: str,
     ) -> ResponseStream[ProxyReasoningDeltaEvent, str]:
         final_text: list[str] = []
         workspace_tools = build_workspace_tools()
-        framing = subsession_prompt(agent_id=agent_id)
+        workspace = f"/workspace/{session_index}"
+        definition = self._registry.agent_definitions.get(agent_id)
+        framing = (
+            format_definition_section(definition, "Subsession", workspace=workspace)
+            if definition is not None
+            else ""
+        )
 
         async def _events() -> AsyncIterator[ProxyReasoningDeltaEvent]:
             # Start the conversation with the task as the first user message so
@@ -103,6 +113,14 @@ class SubSessionExecutor:
                             tool_call_id=tool_call.id,
                         )
                     )
+
+                # Safety net: if the agent produced non-empty text alongside
+                # tool calls, treat this as the final response after executing
+                # the tools.  This breaks fixed-point loops where the model
+                # simultaneously summarises completed work and re-calls a tool.
+                if result.text.strip():
+                    final_text.append(result.text)
+                    break
 
         return ResponseStream(
             _events(),

@@ -1559,8 +1559,11 @@ def _fake_registry() -> RuntimeRegistry:
                 id="coder",
                 path=Path("coder.md"),
                 metadata={"id": "coder", "role": "coder"},
-                body="## Identity\nCoder.",
-                sections={"Identity": "Coder."},
+                body="## Identity\nCoder.\n\n## Subsession\nWorkspace: {workspace}.",
+                sections={
+                    "Identity": "Coder.",
+                    "Subsession": "Workspace: {workspace}.",
+                },
             ),
             "architect": DefinitionDocument(
                 id="architect",

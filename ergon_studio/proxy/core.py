@@ -43,12 +43,14 @@ from ergon_studio.proxy.orchestrator_tools import (
     parse_run_parallel_action,
 )
 from ergon_studio.proxy.pending_store import PendingStore
-from ergon_studio.proxy.prompts import orchestrator_turn_prompt
+from ergon_studio.definitions import format_definition_section
 from ergon_studio.proxy.session_overlay import SessionOverlay
 from ergon_studio.proxy.subsession_executor import SubSessionExecutor
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
+
+MAX_ORCHESTRATOR_ITERATIONS = 20
 
 ProxyEvent = (
     ProxyReasoningDeltaEvent
@@ -80,8 +82,15 @@ class ProxyOrchestrationCore:
         )
         self._subsession_executor = SubSessionExecutor(
             stream_text_agent=self._agent_runner.stream_text_agent,
+            registry=registry,
         )
         self._channel_sessions: dict[str, dict[str, Channel]] = {}
+        # Per-session parallel state: global index counter and list of overlay
+        # roots for completed sub-sessions.  Sequential sub-sessions (e.g. a
+        # reviewer launched after coders) receive all prior completed roots as
+        # read layers so they can discover and read files written by earlier steps.
+        self._session_parallel_next: dict[str, int] = {}
+        self._session_parallel_done: dict[str, list[Path]] = {}
 
     def stream_turn(
         self,
@@ -186,7 +195,14 @@ class ProxyOrchestrationCore:
         pending = pending_orchestrator
         loop_history: list[ProxyInputMessage] = []
         retry_count = 0
+        iteration = 0
         while True:
+            if iteration >= MAX_ORCHESTRATOR_ITERATIONS:
+                raise ValueError(
+                    f"orchestrator exceeded {MAX_ORCHESTRATOR_ITERATIONS} "
+                    "iterations without producing a final response"
+                )
+            iteration += 1
             log_event(
                 "orchestrator_run_start",
                 session_id=session_id,
@@ -194,10 +210,19 @@ class ProxyOrchestrationCore:
                 open_channels=describe_open_channels(channels),
             )
             internal_tools = build_orchestrator_internal_tools(self.registry)
+            open_channels = describe_open_channels(channels)
+            open_channels_section = (
+                "\nOpen channels:\n" + "\n".join(open_channels)
+                if open_channels
+                else ""
+            )
+            orchestrator_defn = self.registry.agent_definitions["orchestrator"]
             orchestrator_stream = self._agent_runner.stream_text_agent(
                 agent_id="orchestrator",
-                prompt=orchestrator_turn_prompt(
-                    open_channels=describe_open_channels(channels),
+                prompt=format_definition_section(
+                    orchestrator_defn,
+                    "Orchestration",
+                    open_channels_section=open_channels_section,
                 ),
                 prompt_role="system",
                 model_id_override=request.model,
@@ -236,12 +261,9 @@ class ProxyOrchestrationCore:
                                 raise ValueError(
                                     f"unknown channel: {msg_action.channel}"
                                 )
-                        elif tool_call.name == "close_channel":
-                            close_action = parse_close_channel_action(tool_call)
-                            if channels.get(close_action.channel) is None:
-                                raise ValueError(
-                                    f"unknown channel: {close_action.channel}"
-                                )
+                        # close_channel on an unknown channel is a no-op — the
+                        # orchestrator may hallucinate closing a channel that was
+                        # never opened; silently ignoring is safer than crashing.
                     for tool_call in response.tool_calls:
                         if not is_internal_tool_name(tool_call.name):
                             host_tool_calls.append(tool_call)
@@ -360,9 +382,18 @@ class ProxyOrchestrationCore:
                             close_action = parse_close_channel_action(tool_call)
                             closed = channels.pop(close_action.channel, None)
                             if closed is None:
-                                raise ValueError(
-                                    f"unknown channel: {close_action.channel}"
+                                # Channel was never opened or already closed.
+                                # Add feedback so the orchestrator doesn't retry.
+                                loop_history.append(
+                                    ProxyInputMessage(
+                                        role="user",
+                                        content=(
+                                            f"Channel {close_action.channel!r} "
+                                            "is not open."
+                                        ),
+                                    )
                                 )
+                                continue
                             notice = (
                                 f"Orchestrator: closing channel {closed.channel_id} "
                                 f"({closed.name}).\n"
@@ -377,17 +408,29 @@ class ProxyOrchestrationCore:
                             yield ProxyReasoningDeltaEvent(notice)
                             continue
                         if tool_call.name == "run_parallel":
-                            parallel_action = parse_run_parallel_action(
-                                tool_call,
-                                registry=self.registry,
-                            )
+                            try:
+                                parallel_action = parse_run_parallel_action(
+                                    tool_call,
+                                    registry=self.registry,
+                                )
+                            except ValueError as exc:
+                                # Invalid run_parallel call (e.g. agent without
+                                # Subsession section).  Feed the error back so
+                                # the orchestrator can recover.
+                                loop_history.append(
+                                    ProxyInputMessage(
+                                        role="user",
+                                        content=f"run_parallel error: {exc}",
+                                    )
+                                )
+                                break
                             log_event(
                                 "run_parallel_action",
                                 session_id=session_id,
                                 agent=parallel_action.agent,
                                 count=parallel_action.count,
                             )
-                            results, parallel_events = (
+                            results, parallel_events, start_index = (
                                 await self._run_parallel_subsessions(
                                     action=parallel_action,
                                     session_id=session_id,
@@ -401,7 +444,7 @@ class ProxyOrchestrationCore:
                                 ProxyInputMessage(
                                     role="user",
                                     content=_format_parallel_results(
-                                        parallel_action, results
+                                        parallel_action, results, start_index
                                     ),
                                 )
                             )
@@ -571,15 +614,28 @@ class ProxyOrchestrationCore:
         action: RunParallelAction,
         session_id: str,
         model_id: str,
-    ) -> tuple[list[str], list[ProxyReasoningDeltaEvent]]:
+    ) -> tuple[list[str], list[ProxyReasoningDeltaEvent], int]:
+        # Assign globally unique indices within this session so successive
+        # run_parallel calls never reuse the same overlay directory.
+        start = self._session_parallel_next.get(session_id, 0)
+        self._session_parallel_next[session_id] = start + action.count
+
+        # All sub-sessions from *previous* run_parallel calls in this session
+        # are provided as read-only layers.  This lets a reviewer (or any later
+        # sub-session) read files written by earlier coders without sharing a
+        # writable workspace with them.
+        prior_roots = tuple(self._session_parallel_done.get(session_id, []))
+
         all_events: list[ProxyReasoningDeltaEvent] = []
         streams = [
             self._subsession_executor.execute(
                 agent_id=action.agent,
                 task=action.task,
-                session_id=f"{session_id}-parallel-{i}",
+                session_id=f"{session_id}-parallel-{start + i}",
+                session_index=start + i,
                 overlay=SessionOverlay(
-                    root=self._overlay_root / f"{session_id}-parallel-{i}"
+                    root=self._overlay_root / f"{session_id}-parallel-{start + i}",
+                    read_layers=prior_roots,
                 ),
                 model_id=model_id,
             )
@@ -596,10 +652,27 @@ class ProxyOrchestrationCore:
         raw = await asyncio.gather(
             *(_drain(s) for s in streams), return_exceptions=True
         )
-        results: list[str] = [
-            f"Error: {r}" if isinstance(r, BaseException) else r for r in raw
-        ]
-        return results, all_events
+        results: list[str] = []
+        for i, r in enumerate(raw):
+            text = f"Error: {r}" if isinstance(r, BaseException) else r
+            overlay_root = self._overlay_root / f"{session_id}-parallel-{start + i}"
+            written = sorted(
+                "/" + str(p.relative_to(overlay_root))
+                for p in overlay_root.rglob("*")
+                if p.is_file()
+            )
+            if written:
+                text = text + "\n\nFiles written:\n" + "\n".join(written)
+            results.append(text)
+
+        # Register this batch's roots so the next run_parallel can read them.
+        done = self._session_parallel_done.setdefault(session_id, [])
+        done.extend(
+            self._overlay_root / f"{session_id}-parallel-{start + i}"
+            for i in range(action.count)
+        )
+
+        return results, all_events, start
 
     def _finalize_turn(
         self,
@@ -687,10 +760,11 @@ class ProxyOrchestrationCore:
 
 
 def _format_parallel_results(
-    action: RunParallelAction, results: list[str]
+    action: RunParallelAction, results: list[str], start_index: int
 ) -> str:
     header = f"run_parallel({action.agent!r}, count={action.count}) results:"
     body = "\n".join(
-        f"\n[Sub-session {i + 1}]\n{result}" for i, result in enumerate(results)
+        f"\n[{i + 1}]\n{result}"
+        for i, result in enumerate(results)
     )
     return header + body

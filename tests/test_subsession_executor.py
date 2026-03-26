@@ -5,11 +5,14 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from ergon_studio.definitions import DefinitionDocument
 from ergon_studio.proxy.agent_runner import AgentRunResult
 from ergon_studio.proxy.models import ProxyReasoningDeltaEvent, ProxyToolCall
 from ergon_studio.proxy.session_overlay import SessionOverlay
 from ergon_studio.proxy.subsession_executor import SubSessionExecutor
+from ergon_studio.registry import RuntimeRegistry
 from ergon_studio.response_stream import ResponseStream
+from ergon_studio.upstream import UpstreamSettings
 
 
 class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
@@ -27,6 +30,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_with_no_tool_calls_returns_text(self) -> None:
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [AgentRunResult(text="Final answer", tool_calls=())]
             )
@@ -35,6 +39,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Do the thing",
             session_id="s1",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -45,6 +50,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_final_result_is_last_agent_text(self) -> None:
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [
                     AgentRunResult(
@@ -67,6 +73,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s2",
+            session_index=0,
             overlay=overlay,
             model_id="test-model",
         )
@@ -83,6 +90,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [
@@ -104,6 +112,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Read the file",
             session_id="s3",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -131,6 +140,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [
@@ -152,6 +162,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s4",
+            session_index=0,
             overlay=overlay,
             model_id="test-model",
         )
@@ -165,6 +176,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
         target = self.tmp / "out.py"
         overlay = self._overlay()
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [
                     AgentRunResult(
@@ -185,6 +197,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Write a file",
             session_id="s5",
+            session_index=0,
             overlay=overlay,
             model_id="test-model",
         )
@@ -203,6 +216,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [
@@ -224,6 +238,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="List files",
             session_id="s6",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -237,6 +252,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_file_not_found_returns_error_message(self) -> None:
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [
@@ -258,6 +274,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s7",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -275,6 +292,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
         overlay = self._overlay()
 
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [
                     AgentRunResult(
@@ -300,6 +318,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s8",
+            session_index=0,
             overlay=overlay,
             model_id="test-model",
         )
@@ -314,6 +333,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_sub_session_passes_no_host_tools(self) -> None:
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [AgentRunResult(text="Done", tool_calls=())],
@@ -323,6 +343,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s9",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -337,6 +358,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [AgentRunResult(text="Done", tool_calls=())],
@@ -346,6 +368,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s10",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -360,6 +383,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_sub_session_uses_system_prompt_framing(self) -> None:
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [AgentRunResult(text="Done", tool_calls=())],
@@ -369,6 +393,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="My specific task",
             session_id="s-framing",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -382,6 +407,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_sub_session_task_injected_as_first_user_message(self) -> None:
         invocations: list[dict[str, Any]] = []
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_capturing_stream_text_agent(
                 invocations,
                 [AgentRunResult(text="Done", tool_calls=())],
@@ -391,6 +417,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="My specific task",
             session_id="s-task",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -426,11 +453,12 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        executor = SubSessionExecutor(stream_text_agent=_always_tool)
+        executor = SubSessionExecutor(registry=_registry(), stream_text_agent=_always_tool)
         stream = executor.execute(
             agent_id="coder",
             task="Task",
             session_id="s-limit",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -442,6 +470,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reasoning_events_emitted_for_agent_text(self) -> None:
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [AgentRunResult(text="Thinking...", tool_calls=())]
             )
@@ -450,6 +479,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s11",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -461,6 +491,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_reasoning_event_for_empty_text(self) -> None:
         executor = SubSessionExecutor(
+            registry=_registry(),
             stream_text_agent=_fake_stream_text_agent(
                 [
                     AgentRunResult(
@@ -481,6 +512,7 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
             agent_id="coder",
             task="Task",
             session_id="s12",
+            session_index=0,
             overlay=self._overlay(),
             model_id="test-model",
         )
@@ -495,6 +527,26 @@ class SubSessionExecutorTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_SUBSESSION_SECTION = (
+    "You are working in an isolated sub-session.\n"
+    "Your working directory is {workspace}.\n"
+)
+
+
+def _registry() -> RuntimeRegistry:
+    definition = DefinitionDocument(
+        id="coder",
+        path=Path("/fake/coder.md"),
+        metadata={"id": "coder"},
+        body="",
+        sections={"Subsession": _SUBSESSION_SECTION},
+    )
+    return RuntimeRegistry(
+        upstream=UpstreamSettings(base_url="http://localhost"),
+        agent_definitions={"coder": definition},
+        channel_presets={},
+    )
 
 
 def _fake_stream_text_agent(

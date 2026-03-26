@@ -54,6 +54,19 @@ def parse_definition_text(text: str, *, path: Path) -> DefinitionDocument:
     )
 
 
+def format_definition_section(
+    definition: DefinitionDocument,
+    section: str,
+    **kwargs: str,
+) -> str:
+    """Return the named section from a definition with {placeholders} substituted.
+
+    Returns an empty string if the section does not exist.
+    """
+    template = definition.sections.get(section, "")
+    return template.format_map(kwargs) if template else ""
+
+
 def _split_frontmatter(text: str) -> tuple[str, str]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":

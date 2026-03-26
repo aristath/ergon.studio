@@ -29,7 +29,6 @@ from ergon_studio.proxy.orchestrator_tools import (
     is_internal_tool_name,
     parse_message_channel_action,
 )
-from ergon_studio.proxy.prompts import channel_message_prompt
 from ergon_studio.proxy.turn_state import ProxyTurnState
 from ergon_studio.response_stream import ResponseStream
 
@@ -230,14 +229,12 @@ class ProxyChannelExecutor:
             participant=participant.label,
             pending=bool(pending),
         )
-        prompt = channel_message_prompt(
-            channel_name=channel_name,
-            agent_id=participant.agent_id,
-            role_instance_label=(
-                participant.label if participant.label != participant.agent_id else None
-            ),
-            role_instance_context=participant_context(participant),
-        )
+        prompt = ""
+        if participant.label != participant.agent_id:
+            prompt = f"Current staffed instance: {participant.label}"
+            ctx = participant_context(participant)
+            if ctx:
+                prompt += f"\n{ctx}"
         stream = self._stream_text_agent(
             agent_id=participant.agent_id,
             prompt=prompt,

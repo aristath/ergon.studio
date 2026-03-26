@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
+from ergon_studio.debug_log import configure_debug_logging, disable_debug_logging
 from ergon_studio.proxy.core import ProxyOrchestrationCore
 from ergon_studio.proxy.server import ProxyServerHandle, start_proxy_server_in_thread
 from ergon_studio.registry import load_registry
@@ -29,7 +31,7 @@ class RealProxyE2ETests(unittest.TestCase):
         cls._config = _load_real_e2e_config(cls._repo_root / ".env.e2e-tests")
         _ensure_upstream_available(cls._config)
         registry = load_registry(
-            cls._repo_root / "tests" / "fixtures" / "real_proxy_definitions",
+            cls._repo_root / "ergon_studio" / "default_definitions",
             upstream=UpstreamSettings(
                 base_url=cls._config.upstream_base_url,
                 api_key=cls._config.upstream_api_key,
@@ -150,6 +152,90 @@ class RealProxyE2ETests(unittest.TestCase):
 
         content = _normalize_scalar_reply(response.output_text)
         self.assertEqual(content, "GAMMA")
+
+    def test_orchestrator_builds_project_from_brief(self) -> None:
+        """Real end-to-end orchestration run.
+
+        Sends a product brief to the orchestrator with no instructions on *how*
+        to build it.  The orchestrator decides what channels to open, which
+        agents to involve, and what to write to disk.  Nothing is scripted —
+        this is a live run against the configured upstream model.
+
+        After the test completes, inspect:
+          ~/.ergon-workspace/<session_id>/run.log   — every orchestration event
+          ~/.ergon-workspace/<session_id>-parallel-*/  — files the agents wrote
+        """
+        session_id = f"tictactoe-e2e-{int(time.time())}"
+        workspace_root = Path.home() / ".ergon-workspace"
+        session_dir = workspace_root / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        log_path = configure_debug_logging(path=session_dir / "run.log")
+
+        print(f"\n{'='*60}")
+        print(f"Session : {session_id}")
+        print(f"Log     : {log_path}")
+        print(f"Workspace: {workspace_root}/{session_id}-parallel-*")
+        print(f"{'='*60}\n")
+
+        brief = (
+            "Build a tic-tac-toe game in JavaScript for two players. "
+            "It should support alternating turns between X and O, "
+            "display the 3×3 board after each move, detect wins and draws, "
+            "and run in the terminal via Node.js."
+        )
+
+        try:
+            stream = self._client.chat.completions.create(
+                model=self._config.model,
+                messages=[{"role": "user", "content": brief}],
+                stream=True,
+                extra_headers={"X-Ergon-Session": session_id},
+                timeout=1200,
+            )
+
+            finish_reason: str | None = None
+            final_content: list[str] = []
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                finish_reason = choice.finish_reason or finish_reason
+                delta = choice.delta
+                reasoning = getattr(delta, "reasoning", None) or getattr(
+                    delta, "reasoning_content", None
+                )
+                if reasoning:
+                    print(reasoning, end="", flush=True)
+                if delta.content:
+                    final_content.append(delta.content)
+                    print(delta.content, end="", flush=True)
+
+        finally:
+            disable_debug_logging()
+
+        print(f"\n\n{'='*60}")
+        print(f"Finish reason: {finish_reason}")
+
+        # List every file written to the workspace by sub-sessions.
+        written: list[Path] = sorted(
+            p
+            for p in workspace_root.glob(f"{session_id}-parallel-*/**/*")
+            if p.is_file()
+        )
+        print(f"Files written ({len(written)}):")
+        for p in written:
+            rel = p.relative_to(workspace_root)
+            size = p.stat().st_size
+            print(f"  {rel}  ({size} bytes)")
+
+        print(f"\nLog: {log_path}")
+        print(f"{'='*60}\n")
+
+        self.assertNotEqual(
+            finish_reason,
+            "error",
+            "orchestration turn ended with finish_reason='error' — check log",
+        )
 
 
 def _load_real_e2e_config(path: Path) -> RealE2EConfig:

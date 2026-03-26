@@ -322,6 +322,11 @@ class ProxyAgentRunner:
             _events(),
             finalizer=_finalize,
         )
+# Sections that are injected at runtime with resolved placeholders.
+# They must not be included verbatim in the static instructions.
+_RUNTIME_SECTIONS: frozenset[str] = frozenset({"Orchestration", "Subsession"})
+
+
 def compose_instructions(
     definition: DefinitionDocument,
     *,
@@ -330,6 +335,8 @@ def compose_instructions(
     if definition.sections:
         parts: list[str] = []
         for title, content in definition.sections.items():
+            if title in _RUNTIME_SECTIONS:
+                continue
             parts.append(f"## {title}")
             if content:
                 parts.append(content)

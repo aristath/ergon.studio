@@ -80,8 +80,9 @@ class ProxyOpenAISDKTests(unittest.TestCase):
         )
         chunks = list(stream)
 
+        finish_chunk = next(c for c in reversed(chunks) if c.choices)
         self.assertEqual(chunks[0].choices[0].delta.content, "Done.")
-        self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
+        self.assertEqual(finish_chunk.choices[0].finish_reason, "stop")
 
     def test_chat_completions_stream_returns_tool_call_deltas(self) -> None:
         call = ProxyToolCall(
@@ -108,10 +109,11 @@ class ProxyOpenAISDKTests(unittest.TestCase):
             )
         )
 
+        finish_chunk = next(c for c in reversed(chunks) if c.choices)
         self.assertEqual(
             chunks[0].choices[0].delta.tool_calls[0].function.name, "read_file"
         )
-        self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
+        self.assertEqual(finish_chunk.choices[0].finish_reason, "tool_calls")
 
     def test_responses_create_returns_parsed_content(self) -> None:
         handle = start_proxy_server_in_thread(

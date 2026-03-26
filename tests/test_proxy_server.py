@@ -237,10 +237,82 @@ class ProxyServerTests(unittest.TestCase):
         self.assertEqual(second_payload["choices"][0]["message"]["content"], "Done")
 
 
+    def test_chat_completions_includes_usage_in_non_streaming_response(self) -> None:
+        """Non-streaming responses include a usage block with token counts."""
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")],
+                prompt_tokens=42,
+                completion_tokens=13,
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {"model": "ergon", "messages": [{"role": "user", "content": "Hi"}]}
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["usage"]["prompt_tokens"], 42)
+        self.assertEqual(payload["usage"]["completion_tokens"], 13)
+        self.assertEqual(payload["usage"]["total_tokens"], 55)
+
+    def test_chat_completions_streaming_includes_usage_chunk(self) -> None:
+        """Streaming responses include a usage-only chunk before [DONE]."""
+        handle = start_proxy_server_in_thread(
+            host="127.0.0.1",
+            port=0,
+            core=_FakeCore(
+                [ProxyContentDeltaEvent("Done."), ProxyFinishEvent("stop")],
+                prompt_tokens=42,
+                completion_tokens=13,
+            ),
+        )
+        self.addCleanup(handle.close)
+
+        request = Request(
+            f"http://127.0.0.1:{handle.port}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "ergon",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+        usage_chunk = None
+        for line in body.splitlines():
+            if line.startswith("data: ") and line != "data: [DONE]":
+                chunk = json.loads(line[6:])
+                if chunk.get("usage"):
+                    usage_chunk = chunk
+                    break
+
+        self.assertIsNotNone(usage_chunk, "No usage chunk found in streaming response")
+        self.assertEqual(usage_chunk["usage"]["prompt_tokens"], 42)
+        self.assertEqual(usage_chunk["usage"]["completion_tokens"], 13)
+        self.assertEqual(usage_chunk["usage"]["total_tokens"], 55)
+
+
 class _FakeCore:
-    def __init__(self, events):
+    def __init__(self, events, *, prompt_tokens: int = 0, completion_tokens: int = 0):
         self.events = list(events)
         self.registry = _fake_registry()
+        self._prompt_tokens = prompt_tokens
+        self._completion_tokens = completion_tokens
 
     def stream_turn(self, _request, *, session_id=None):
         async def _events():
@@ -257,6 +329,8 @@ class _FakeCore:
                 if isinstance(event, ProxyToolCallEvent)
             ),
             output_items=(ProxyOutputItemRef(kind="content"),),
+            prompt_tokens=self._prompt_tokens,
+            completion_tokens=self._completion_tokens,
         )
         return ResponseStream(_events(), finalizer=lambda: final)
 

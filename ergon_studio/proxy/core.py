@@ -243,6 +243,7 @@ class ProxyOrchestrationCore:
                 buffered_deltas.append(delta)
             pending = None
             response = await orchestrator_stream.get_final_response()
+            state.add_usage(response.prompt_tokens, response.completion_tokens)
             log_event(
                 "orchestrator_run_result",
                 session_id=session_id,
@@ -687,6 +688,8 @@ class ProxyOrchestrationCore:
             reasoning=state.reasoning,
             tool_calls=state.tool_calls,
             output_items=state.output_items,
+            prompt_tokens=state.prompt_tokens,
+            completion_tokens=state.completion_tokens,
         )
         if session_id is not None and result.finish_reason not in {
             "error",

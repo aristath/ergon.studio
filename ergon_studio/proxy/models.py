@@ -166,6 +166,8 @@ class ProxyTurnResult:
     reasoning: str
     tool_calls: tuple[ProxyToolCall, ...] = ()
     output_items: tuple[ProxyOutputItemRef, ...] = ()
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
     def __post_init__(self) -> None:
         if self.finish_reason not in _VALID_FINISH_REASONS:

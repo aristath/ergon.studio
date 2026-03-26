@@ -48,6 +48,8 @@ class AgentInvocation:
 class AgentRunResult:
     text: str
     tool_calls: tuple[ProxyToolCall, ...]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 AgentInvoker = Callable[[AgentInvocation], ResponseStream[str, AgentRunResult]]
@@ -282,34 +284,39 @@ class ProxyAgentRunner:
                 **create_kwargs
             ):
                 choices = getattr(chunk, "choices", None)
-                if not isinstance(choices, list):
-                    continue
-                for choice in choices:
-                    delta = getattr(choice, "delta", None)
-                    if delta is None:
-                        continue
-                    content = getattr(delta, "content", None)
-                    if isinstance(content, str) and content:
-                        accumulator.text += content
-                        log_event(
-                            "agent_delta",
-                            agent_id=invocation.agent_id,
-                            delta=content,
-                        )
-                        yield content
-                    tool_deltas = getattr(delta, "tool_calls", None)
-                    if isinstance(tool_deltas, list):
-                        accumulator.append_tool_deltas(tool_deltas)
-                        log_event(
-                            "agent_tool_delta",
-                            agent_id=invocation.agent_id,
-                            tool_delta_count=len(tool_deltas),
-                        )
+                if isinstance(choices, list):
+                    for choice in choices:
+                        delta = getattr(choice, "delta", None)
+                        if delta is None:
+                            continue
+                        content = getattr(delta, "content", None)
+                        if isinstance(content, str) and content:
+                            accumulator.text += content
+                            log_event(
+                                "agent_delta",
+                                agent_id=invocation.agent_id,
+                                delta=content,
+                            )
+                            yield content
+                        tool_deltas = getattr(delta, "tool_calls", None)
+                        if isinstance(tool_deltas, list):
+                            accumulator.append_tool_deltas(tool_deltas)
+                            log_event(
+                                "agent_tool_delta",
+                                agent_id=invocation.agent_id,
+                                tool_delta_count=len(tool_deltas),
+                            )
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    accumulator.prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
+                    accumulator.completion_tokens += getattr(usage, "completion_tokens", 0) or 0
 
         def _finalize() -> AgentRunResult:
             result = AgentRunResult(
                 text=accumulator.text,
                 tool_calls=accumulator.tool_calls(),
+                prompt_tokens=accumulator.prompt_tokens,
+                completion_tokens=accumulator.completion_tokens,
             )
             log_event(
                 "agent_result",
@@ -565,6 +572,8 @@ class _ToolAccumulator:
 @dataclass
 class _StreamAccumulator:
     text: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     _tool_calls: dict[int, _ToolAccumulator] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:

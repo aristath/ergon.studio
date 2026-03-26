@@ -15,6 +15,7 @@ from ergon_studio.proxy.chat_adapter import (
     build_chat_completion_response,
     encode_chat_stream_done,
     encode_chat_stream_sse,
+    encode_chat_stream_usage_sse,
 )
 from ergon_studio.proxy.chat_bridge import parse_chat_completion_request
 from ergon_studio.proxy.core import ProxyOrchestrationCore
@@ -130,6 +131,16 @@ async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
                         created_at=created_at,
                     )
                 )
+            turn_result = await turn_stream.get_final_response()
+            await resp.write(
+                encode_chat_stream_usage_sse(
+                    completion_id=completion_id,
+                    model=turn_request.model,
+                    created_at=created_at,
+                    prompt_tokens=turn_result.prompt_tokens,
+                    completion_tokens=turn_result.completion_tokens,
+                )
+            )
             await resp.write(encode_chat_stream_done())
         except (BrokenPipeError, ConnectionResetError, OSError):
             log_event(
@@ -199,6 +210,8 @@ async def _handle_chat_completions(request: web.Request) -> web.StreamResponse:
                 reasoning=result.reasoning,
                 finish_reason=result.finish_reason,
                 tool_calls=result.tool_calls,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
             )
         ),
         headers={SESSION_HEADER_NAME: session_id},

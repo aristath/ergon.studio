@@ -1104,6 +1104,86 @@ class RunParallelTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.content, "All done")
 
+    async def test_orchestrator_token_usage_flows_into_turn_result(self) -> None:
+        """Usage reported by the orchestrator's AgentRunResult ends up in ProxyTurnResult."""
+
+        def _usage_invoker(invocation: AgentInvocation):
+            return _response_stream(
+                "Done",
+                response=AgentRunResult(
+                    text="Done",
+                    tool_calls=(),
+                    prompt_tokens=100,
+                    completion_tokens=50,
+                ),
+            )
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_usage_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Hi"),),
+        )
+        stream = core.stream_turn(request, session_id="s_usage")
+        async for _ in stream:
+            pass
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.prompt_tokens, 100)
+        self.assertEqual(result.completion_tokens, 50)
+
+    async def test_orchestrator_usage_accumulates_across_loop_iterations(self) -> None:
+        """Multiple orchestrator invocations sum their token counts."""
+        calls = [0]
+
+        def _usage_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                calls[0] += 1
+                if calls[0] == 1:
+                    return _response_stream(
+                        "",
+                        response=AgentRunResult(
+                            text="",
+                            tool_calls=(
+                                ProxyToolCall(
+                                    id="open1",
+                                    name="open_channel",
+                                    arguments_json=json.dumps(
+                                        {
+                                            "participants": ["coder"],
+                                            "message": "Build",
+                                            "recipients": ["coder"],
+                                        }
+                                    ),
+                                ),
+                            ),
+                            prompt_tokens=10,
+                            completion_tokens=5,
+                        ),
+                    )
+                return _response_stream(
+                    "Done",
+                    response=AgentRunResult(
+                        text="Done",
+                        tool_calls=(),
+                        prompt_tokens=20,
+                        completion_tokens=8,
+                    ),
+                )
+            return _response_stream("coder result")
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_usage_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s_usage2")
+        async for _ in stream:
+            pass
+        result = await stream.get_final_response()
+
+        self.assertEqual(result.prompt_tokens, 30)   # 10 + 20
+        self.assertEqual(result.completion_tokens, 13)  # 5 + 8
+
     async def test_orchestrator_loop_fails_after_max_iterations(self) -> None:
         # Orchestrator that perpetually calls run_parallel should hit the
         # iteration limit and produce finish_reason="error" instead of looping

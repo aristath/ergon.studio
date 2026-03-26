@@ -13,6 +13,8 @@ class ProxyTurnState:
     tool_calls: tuple[ProxyToolCall, ...] = ()
     output_items: tuple[ProxyOutputItemRef, ...] = field(default_factory=tuple)
     _output_item_set: set[ProxyOutputItemRef] = field(default_factory=set)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
     def append_content(self, delta: str) -> None:
         self.content += delta
@@ -21,6 +23,10 @@ class ProxyTurnState:
     def append_reasoning(self, delta: str) -> None:
         self.reasoning += delta
         self.record_output_item("reasoning")
+
+    def add_usage(self, prompt: int, completion: int) -> None:
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
 
     def record_output_item(self, kind: str, *, call_id: str | None = None) -> None:
         item = ProxyOutputItemRef(kind, call_id)

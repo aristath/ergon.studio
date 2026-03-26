@@ -99,6 +99,8 @@ def build_chat_completion_response(
     finish_reason: str,
     reasoning: str = "",
     tool_calls: tuple[Any, ...] = (),
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
         "role": "assistant",
@@ -131,4 +133,32 @@ def build_chat_completion_response(
                 "finish_reason": finish_reason,
             }
         ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
     }
+
+
+def encode_chat_stream_usage_sse(
+    *,
+    completion_id: str,
+    model: str,
+    created_at: int,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> bytes:
+    payload: dict[str, Any] = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created_at,
+        "model": model,
+        "choices": [],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()

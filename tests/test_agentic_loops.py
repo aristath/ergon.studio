@@ -152,7 +152,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                 channel_result = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "Channel channel-1" in m.get("content", "")
                     ),
                     None,
@@ -242,7 +242,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                 channel_result = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "Channel channel-1" in m.get("content", "")
                     ),
                     None,
@@ -328,7 +328,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                 channel_result = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "Channel channel-1" in m.get("content", "")
                     ),
                     None,
@@ -508,7 +508,7 @@ class AgenticLoopHTTPTests(unittest.TestCase):
                 parallel_result = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "run_parallel" in m.get("content", "")
                     ),
                     None,
@@ -1243,7 +1243,7 @@ class AgenticLoopCoreTests(unittest.IsolatedAsyncioTestCase):
                 parallel_done = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "run_parallel" in m.get("content", "")
                     ),
                     None,
@@ -1251,7 +1251,7 @@ class AgenticLoopCoreTests(unittest.IsolatedAsyncioTestCase):
                 channel_done = next(
                     (
                         m["content"] for m in msgs
-                        if m.get("role") == "user"
+                        if m.get("role") == "tool"
                         and "Channel channel-1" in m.get("content", "")
                     ),
                     None,

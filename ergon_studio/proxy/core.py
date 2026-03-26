@@ -252,6 +252,14 @@ class ProxyOrchestrationCore:
             processed_internal_action = False
             host_tool_calls: list[ProxyToolCall] = []
             channel_results: list[tuple[str, str, tuple[ChannelMessage, ...]]] = []
+            # Per-iteration tracking for proper tool-calling format in loop_history.
+            # tool_results maps each internal tool call's ID to its result text.
+            # channel_for_tool maps each open_channel/message_channel call ID to
+            # the ergon-assigned channel ID (for result lookup after the loop).
+            # processed_internal_tcs tracks internal tool calls in execution order.
+            tool_results: dict[str, str] = {}
+            channel_for_tool: dict[str, str] = {}
+            processed_internal_tcs: list[ProxyToolCall] = []
             try:
                 if response.tool_calls:
                     # Validation pre-pass: verify channel references before side effects
@@ -270,6 +278,7 @@ class ProxyOrchestrationCore:
                             host_tool_calls.append(tool_call)
                             continue
                         processed_internal_action = True
+                        processed_internal_tcs.append(tool_call)
                         if tool_call.name == "open_channel":
                             open_action = parse_open_channel_action(
                                 tool_call,
@@ -310,6 +319,7 @@ class ProxyOrchestrationCore:
                                     "open_channel needs a preset or participants target"
                                 )
                             channels[channel.channel_id] = channel
+                            channel_for_tool[tool_call.id] = channel.channel_id
                             log_event(
                                 "open_channel_action",
                                 session_id=session_id,
@@ -346,6 +356,7 @@ class ProxyOrchestrationCore:
                             message_action = parse_message_channel_action(
                                 tool_call,
                             )
+                            channel_for_tool[tool_call.id] = message_action.channel
                             log_event(
                                 "message_channel_action",
                                 session_id=session_id,
@@ -384,17 +395,13 @@ class ProxyOrchestrationCore:
                             closed = channels.pop(close_action.channel, None)
                             if closed is None:
                                 # Channel was never opened or already closed.
-                                # Add feedback so the orchestrator doesn't retry.
-                                loop_history.append(
-                                    ProxyInputMessage(
-                                        role="user",
-                                        content=(
-                                            f"Channel {close_action.channel!r} "
-                                            "is not open."
-                                        ),
-                                    )
+                                tool_results[tool_call.id] = (
+                                    f"Channel {close_action.channel!r} is not open."
                                 )
                                 continue
+                            tool_results[tool_call.id] = (
+                                f"Channel {closed.channel_id} ({closed.name}) closed."
+                            )
                             notice = (
                                 f"Orchestrator: closing channel {closed.channel_id} "
                                 f"({closed.name}).\n"
@@ -418,11 +425,8 @@ class ProxyOrchestrationCore:
                                 # Invalid run_parallel call (e.g. agent without
                                 # Subsession section).  Feed the error back so
                                 # the orchestrator can recover.
-                                loop_history.append(
-                                    ProxyInputMessage(
-                                        role="user",
-                                        content=f"run_parallel error: {exc}",
-                                    )
+                                tool_results[tool_call.id] = (
+                                    f"run_parallel error: {exc}"
                                 )
                                 break
                             log_event(
@@ -441,13 +445,8 @@ class ProxyOrchestrationCore:
                             for event in parallel_events:
                                 state.append_reasoning(event.delta)
                                 yield event
-                            loop_history.append(
-                                ProxyInputMessage(
-                                    role="user",
-                                    content=_format_parallel_results(
-                                        parallel_action, results, start_index
-                                    ),
-                                )
+                            tool_results[tool_call.id] = _format_parallel_results(
+                                parallel_action, results, start_index
                             )
                             continue
                         raise ValueError(
@@ -489,22 +488,39 @@ class ProxyOrchestrationCore:
                     yield ProxyContentDeltaEvent(text)
 
             if processed_internal_action:
+                # Map channel tool calls to their results
+                for tc_id, ch_id in channel_for_tool.items():
+                    for cid, cname, cresult in channel_results:
+                        if cid == ch_id:
+                            if cresult:
+                                lines = "\n".join(
+                                    f"  {m.author}: {m.content}" for m in cresult
+                                )
+                                tool_results[tc_id] = (
+                                    f"Channel {cid} ({cname}) completed:\n{lines}"
+                                )
+                            else:
+                                tool_results[tc_id] = (
+                                    f"Channel {cid} ({cname}) produced no messages."
+                                )
+                            break
+                # Emit proper [assistant(tool_calls), tool, tool, ...] messages
                 text_this_iteration = "".join(buffered_deltas)
-                if text_this_iteration:
-                    loop_history.append(
-                        ProxyInputMessage(role="assistant", content=text_this_iteration)
+                loop_history.append(
+                    ProxyInputMessage(
+                        role="assistant",
+                        content=text_this_iteration,
+                        tool_calls=tuple(processed_internal_tcs),
                     )
-                for cid, cname, cresult in channel_results:
-                    if cresult:
-                        lines = "\n".join(
-                            f"  {m.author}: {m.content}" for m in cresult
+                )
+                for tc in processed_internal_tcs:
+                    loop_history.append(
+                        ProxyInputMessage(
+                            role="tool",
+                            content=tool_results.get(tc.id, ""),
+                            tool_call_id=tc.id,
                         )
-                        loop_history.append(
-                            ProxyInputMessage(
-                                role="user",
-                                content=f"Channel {cid} ({cname}) completed:\n{lines}",
-                            )
-                        )
+                    )
                 continue
 
             if request.tool_choice == "required" or isinstance(

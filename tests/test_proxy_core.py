@@ -726,13 +726,113 @@ class ProxyCoreTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(captured_invocations), 2)
         second_messages = captured_invocations[1].messages
-        user_msgs_with_solution = [
+        # Channel results are returned as role="tool" (proper tool-calling format)
+        tool_msgs_with_solution = [
             m for m in second_messages
-            if m["role"] == "user" and "Solution X" in str(m.get("content", ""))
+            if m["role"] == "tool" and "Solution X" in str(m.get("content", ""))
         ]
         self.assertTrue(
-            len(user_msgs_with_solution) >= 1,
-            f"Expected user message with 'Solution X' in second invocation. Messages: {second_messages}",
+            len(tool_msgs_with_solution) >= 1,
+            f"Expected tool message with 'Solution X' in second invocation. Messages: {second_messages}",
+        )
+
+    async def test_loop_history_has_no_adjacent_assistant_messages(self) -> None:
+        """Two consecutive iterations with internal actions must not produce adjacent
+        assistant messages — that causes a 400 from strict OpenAI-compatible endpoints."""
+        captured_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    _internal_action(
+                        "open_channel",
+                        participants=["coder"],
+                        message="First task",
+                        recipients=["coder"],
+                    ),
+                    _internal_action(
+                        "open_channel",
+                        participants=["coder"],
+                        message="Second task",
+                        recipients=["coder"],
+                    ),
+                    "Done",
+                ],
+                "coder": ["Result A", "Result B"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                captured_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_capturing_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s_no_adj")
+        async for _ in stream:
+            pass
+        await stream.get_final_response()
+
+        # Check all orchestrator invocations (2nd and 3rd) have no adjacent assistant msgs
+        for inv in captured_invocations[1:]:
+            roles = [m["role"] for m in inv.messages]
+            for i in range(len(roles) - 1):
+                self.assertFalse(
+                    roles[i] == "assistant" and roles[i + 1] == "assistant",
+                    f"Adjacent assistant messages at positions {i},{i+1} in "
+                    f"invocation messages: {roles}",
+                )
+
+    async def test_loop_history_ends_with_tool_not_assistant(self) -> None:
+        """After an iteration with an internal action, the messages passed to the
+        next orchestrator invocation must not end with an assistant message."""
+        captured_invocations: list[AgentInvocation] = []
+        base_invoker = _fake_agent_invoker(
+            {
+                "orchestrator": [
+                    {
+                        "text": "Let me run parallel...",
+                        "tool_calls": [
+                            {
+                                "id": "rp1",
+                                "name": "run_parallel",
+                                "arguments": json.dumps(
+                                    {"agent": "coder", "count": 1, "task": "Build X"}
+                                ),
+                            }
+                        ],
+                    },
+                    "Done",
+                ],
+                "coder": ["Coder result"],
+            }
+        )
+
+        def _capturing_invoker(invocation: AgentInvocation):
+            if invocation.agent_id == "orchestrator":
+                captured_invocations.append(invocation)
+            return base_invoker(invocation)
+
+        core = ProxyOrchestrationCore(_fake_registry(), agent_invoker=_capturing_invoker)
+        request = ProxyTurnRequest(
+            model="ergon",
+            messages=(ProxyInputMessage(role="user", content="Go"),),
+        )
+        stream = core.stream_turn(request, session_id="s_end_check")
+        async for _ in stream:
+            pass
+        await stream.get_final_response()
+
+        self.assertEqual(len(captured_invocations), 2)
+        last_role = captured_invocations[1].messages[-1]["role"]
+        self.assertNotEqual(
+            last_role,
+            "assistant",
+            f"Second orchestrator invocation must not end with 'assistant', got: "
+            f"{[m['role'] for m in captured_invocations[1].messages]}",
         )
 
 

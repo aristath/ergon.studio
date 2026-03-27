@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["ergon-studio"],
+  "default_agent": "orchestrator",
+  "agent": {
+    "architect": {
+      "tools": { "write": false, "edit": false, "bash": false }
+    },
+    "reviewer": {
+      "tools": { "write": false, "edit": false }
+    },
+    "critic": {
+      "tools": { "write": false, "edit": false }
+    },
+    "researcher": {
+      "tools": { "write": false, "edit": false }
+    }
+  }
+}

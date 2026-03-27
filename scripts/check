@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-.venv/bin/ruff check .
-.venv/bin/mypy
-.venv/bin/python -m unittest discover -s tests -p 'test_*.py'

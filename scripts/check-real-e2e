@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-.venv/bin/python -m unittest discover -s tests -p 'real_*.py'

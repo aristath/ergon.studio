@@ -1,5 +1,3 @@
-import type { Plugin } from "@opencode-ai/plugin"
-
-export const ErgonPlugin: Plugin = async (_ctx) => {
+export const ErgonPlugin = async (_ctx: unknown): Promise<Record<string, unknown>> => {
   return {}
 }

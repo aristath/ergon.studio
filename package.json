@@ -1,0 +1,40 @@
+{
+  "name": "ergon-studio",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestration plugin for opencode",
+  "main": "dist/index.js",
+  "bin": {
+    "ergon": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "agents/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "ai",
+    "agents",
+    "orchestration"
+  ],
+  "author": "Aristeidis Stathopoulos <aristath@gmail.com>",
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aristath/ergon.studio"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "*",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

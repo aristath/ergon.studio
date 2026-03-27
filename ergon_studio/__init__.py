@@ -1,1 +1,0 @@
-"""ergon.studio package."""

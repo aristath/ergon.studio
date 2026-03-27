@@ -2,10 +2,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { join, resolve } from "path"
 
-type AgentConfig = { tools?: Record<string, boolean>; [key: string]: unknown }
+type AgentConfig = { permission?: Record<string, string>; [key: string]: unknown }
 type Config = {
   $schema?: string
-  plugins?: string[]
+  plugin?: string[]
   default_agent?: string
   agent?: Record<string, AgentConfig>
   [key: string]: unknown
@@ -34,31 +34,31 @@ if (command === "init") {
     : { $schema: "https://opencode.ai/config.json" }
 
   // Add plugin if not present
-  config.plugins ??= []
-  if (!config.plugins.includes("ergon-studio")) {
-    config.plugins.push("ergon-studio")
+  config.plugin ??= []
+  if (!config.plugin.includes("ergon-studio")) {
+    config.plugin.push("ergon-studio")
   }
 
   // Set default agent if not already set
   config.default_agent ??= "orchestrator"
 
-  // Apply tool restrictions for read-only agents
+  // Apply permission restrictions for read-only agents
   config.agent ??= {}
   config.agent.architect = {
     ...config.agent.architect,
-    tools: { write: false, edit: false, bash: false },
+    permission: { edit: "deny", bash: "deny" },
   }
   config.agent.reviewer = {
     ...config.agent.reviewer,
-    tools: { write: false, edit: false },
+    permission: { edit: "deny" },
   }
   config.agent.critic = {
     ...config.agent.critic,
-    tools: { write: false, edit: false },
+    permission: { edit: "deny" },
   }
   config.agent.researcher = {
     ...config.agent.researcher,
-    tools: { write: false, edit: false },
+    permission: { edit: "deny" },
   }
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")

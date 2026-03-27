@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
-import { join, resolve } from "path"
+import { homedir } from "os"
+import { join } from "path"
 
 type AgentConfig = { permission?: Record<string, string>; [key: string]: unknown }
 type Config = {
@@ -9,6 +10,11 @@ type Config = {
   default_agent?: string
   agent?: Record<string, AgentConfig>
   [key: string]: unknown
+}
+
+function getOpencodeConfigDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME
+  return xdg ? join(xdg, "opencode") : join(homedir(), ".config", "opencode")
 }
 
 const command = process.argv[2]
@@ -21,14 +27,16 @@ if (command === "init") {
     process.exit(1)
   }
 
+  const configDir = getOpencodeConfigDir()
+
   // Install agent files
-  const agentsDest = resolve(process.cwd(), ".opencode", "agents")
+  const agentsDest = join(configDir, "agents")
   mkdirSync(agentsDest, { recursive: true })
   cpSync(agentsSource, agentsDest, { recursive: true })
   console.log(`Ergon agents installed to ${agentsDest}`)
 
-  // Merge opencode.json
-  const configPath = resolve(process.cwd(), "opencode.json")
+  // Merge global opencode.json
+  const configPath = join(configDir, "opencode.json")
   const config: Config = existsSync(configPath)
     ? (JSON.parse(readFileSync(configPath, "utf8")) as Config)
     : { $schema: "https://opencode.ai/config.json" }
@@ -62,7 +70,7 @@ if (command === "init") {
   }
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")
-  console.log(`opencode.json updated at ${configPath}`)
+  console.log(`Global opencode.json updated at ${configPath}`)
 } else {
   console.log("Usage: ergon init")
 }

@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node ./tests/plugin.test.js"
   },
   "keywords": [
     "opencode",

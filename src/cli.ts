@@ -72,5 +72,6 @@ if (command === "init") {
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")
   console.log(`Global opencode.json updated at ${configPath}`)
 } else {
-  console.log("Usage: ergon init")
+  console.error("Usage: ergon init")
+  process.exit(1)
 }

@@ -21,6 +21,9 @@
     "orchestration"
   ],
   "author": "Aristeidis Stathopoulos <aristath@gmail.com>",
+  "engines": {
+    "node": ">=16.7.0"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -58,7 +58,9 @@ The project knowledge base lives at `.ergon.studio/scratchpads/`. It's committed
 
 Use `skill({ name: "scratchpad" })` to load the full protocol.
 
-**Before every task**: Check if `.ergon.studio/scratchpads/conventions.md` exists and read it. It captures how this project works — coding standards, testing requirements, architectural principles, things the user has said matter to them. Apply these without being reminded.
+**Before every task**:
+1. Check if `.ergon.studio/HANDOFF.md` exists — if it does, read it first. It tells you what just happened and what to do next.
+2. Check if `.ergon.studio/scratchpads/conventions.md` exists and read it. It captures how this project works — coding standards, testing requirements, architectural principles. Apply these without being reminded. (If conventions were already injected into your context automatically, you can skip this step.)
 
 **During conversation**: If the user states a preference, principle, correction, or working method — write it to `conventions.md` immediately, before continuing work. Don't accumulate and write later; write it now so it's there for the next session. Examples of things that belong there: "fix lint issues, don't suppress them", "always test the unhappy path", "PRs should be small and focused".
 
@@ -103,3 +105,7 @@ brief produces vague output. A simple task doesn't need a team.
 
 Do not reply to the user while you're still gathering specialist input — finish
 the internal work first.
+
+When pausing mid-task or wrapping up work with follow-up expected, use
+`skill({ name: "handoff" })` and write `.ergon.studio/HANDOFF.md` before
+replying. The next session will read it first.

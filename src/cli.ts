@@ -20,25 +20,17 @@ function getOpencodeConfigDir(): string {
   return xdg ? join(xdg, "opencode") : join(homedir(), ".config", "opencode")
 }
 
-const command = process.argv[2]
-
-if (command === "init") {
+function installAgentsAndSkills(configDir: string): void {
   const agentsSource = join(__dirname, "..", "agents")
-
   if (!existsSync(agentsSource)) {
     console.error(`Error: agents directory not found at ${agentsSource}`)
     process.exit(1)
   }
-
-  const configDir = getOpencodeConfigDir()
-
-  // Install agent files
   const agentsDest = join(configDir, "agents")
   mkdirSync(agentsDest, { recursive: true })
   cpSync(agentsSource, agentsDest, { recursive: true })
   console.log(`Ergon agents installed to ${agentsDest}`)
 
-  // Install skill files
   const skillsSource = join(__dirname, "..", "skills")
   if (existsSync(skillsSource)) {
     const skillsDest = join(configDir, "skills")
@@ -46,6 +38,17 @@ if (command === "init") {
     cpSync(skillsSource, skillsDest, { recursive: true })
     console.log(`Ergon skills installed to ${skillsDest}`)
   }
+}
+
+const command = process.argv[2]
+
+if (command === "update") {
+  const configDir = getOpencodeConfigDir()
+  installAgentsAndSkills(configDir)
+} else if (command === "init") {
+  const configDir = getOpencodeConfigDir()
+
+  installAgentsAndSkills(configDir)
 
   // Merge global opencode.json
   const configPath = join(configDir, "opencode.json")
@@ -84,6 +87,6 @@ if (command === "init") {
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")
   console.log(`Global opencode.json updated at ${configPath}`)
 } else {
-  console.error("Usage: ergon init")
+  console.error("Usage: ergon <init|update>")
   process.exit(1)
 }

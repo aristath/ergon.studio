@@ -9,7 +9,8 @@
   },
   "files": [
     "dist/",
-    "agents/"
+    "agents/",
+    "skills/"
   ],
   "scripts": {
     "build": "tsc",

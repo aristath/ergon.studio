@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { homedir } from "os"
-import { join } from "path"
+import { join, dirname } from "path"
+import { fileURLToPath } from "url"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 type AgentConfig = { permission?: Record<string, string>; [key: string]: unknown }
 type Config = {
@@ -34,6 +37,15 @@ if (command === "init") {
   mkdirSync(agentsDest, { recursive: true })
   cpSync(agentsSource, agentsDest, { recursive: true })
   console.log(`Ergon agents installed to ${agentsDest}`)
+
+  // Install skill files
+  const skillsSource = join(__dirname, "..", "skills")
+  if (existsSync(skillsSource)) {
+    const skillsDest = join(configDir, "skills")
+    mkdirSync(skillsDest, { recursive: true })
+    cpSync(skillsSource, skillsDest, { recursive: true })
+    console.log(`Ergon skills installed to ${skillsDest}`)
+  }
 
   // Merge global opencode.json
   const configPath = join(configDir, "opencode.json")

@@ -58,6 +58,10 @@ The project knowledge base lives at `.ergon.studio/scratchpads/`. It's committed
 
 Use `skill({ name: "scratchpad" })` to load the full protocol.
 
+**Before every task**: Check if `.ergon.studio/scratchpads/conventions.md` exists and read it. It captures how this project works — coding standards, testing requirements, architectural principles, things the user has said matter to them. Apply these without being reminded.
+
+**During conversation**: If the user states a preference, principle, correction, or working method — write it to `conventions.md` immediately, before continuing work. Don't accumulate and write later; write it now so it's there for the next session. Examples of things that belong there: "fix lint issues, don't suppress them", "always test the unhappy path", "PRs should be small and focused".
+
 For any task with more than one step:
 1. Load the scratchpad skill
 2. Read `index.md` to orient yourself — find relevant context before you start, not after

@@ -13,7 +13,11 @@ The project's persistent knowledge base. Committed to git. Grows over the life o
 
 ## When to use
 
-**Before starting any multi-step task**: Read `index.md` to see what knowledge exists. Pull relevant scratchpads. This is how you find prior decisions, architectural choices, ongoing work, and gotchas — without re-reading the entire codebase.
+**Before every task**: Read `conventions.md` if it exists. This file captures how the project works — coding standards, testing requirements, principles, things the user has said matter. It applies everywhere. Read it every time.
+
+**Before starting any multi-step task**: Also read `index.md` to see what topic-specific knowledge exists. Pull relevant scratchpads for prior decisions, architectural choices, and ongoing work.
+
+**During conversation**: If the user states a preference, principle, or working method, write it to `conventions.md` immediately — don't wait until the task is done. One session's offhand comment is the next session's forgotten requirement.
 
 **Before replying after completing work**: Write to the scratchpad if any of these happened:
 - A decision was made → write what was decided *and why*, what alternatives were considered
@@ -29,6 +33,37 @@ Then update `index.md` if you created or renamed a file.
 If no scratchpad exists for the topic, create one. If one already exists, extend it.
 
 ---
+
+## The conventions file
+
+`conventions.md` is special — it's not a topic scratchpad, it's the project's working norms. Read it before every task. Write to it during conversation whenever the user states a principle.
+
+What belongs here:
+- Code quality rules ("fix lint issues, never suppress them")
+- Testing requirements ("every feature needs an unhappy-path e2e test")
+- Architectural decisions that apply broadly ("use the repository pattern for data access")
+- Git and PR conventions ("PRs are small and focused, one concern per PR")
+- Things the user has had to repeat — if they said it twice, it belongs here
+
+Format — short, scannable, grouped by area:
+
+```markdown
+# Project Conventions
+
+## Code quality
+- Fix lint issues; never suppress or disable them
+- No `console.log` in production — use the logger
+
+## Testing
+- Every feature needs an unhappy-path e2e test
+- Unit tests for logic, e2e tests for integration
+
+## Git
+- Commit messages explain why, not what
+- PRs are small and focused — one concern per PR
+```
+
+When you write a new convention, don't just append it — put it in the right section, or create a new section if needed. Keep it scannable.
 
 ## Index format
 

@@ -63,7 +63,14 @@ For any task with more than one step:
 2. Read `index.md` to orient yourself — find relevant context before you start, not after
 3. Pull individual scratchpads that are relevant to what you're about to do
 
-After completing significant work, update the scratchpad: what was decided, why, what the next agent needs to know. Write for future-you — specific reasoning beats vague summaries.
+Before replying to the user after completing work, write to the scratchpad if any of these are true:
+- A decision was made (what was chosen and why — not just what)
+- Something was implemented or changed
+- A non-obvious problem was encountered and solved
+- The codebase has a new pattern, constraint, or gotcha
+- Work is ongoing and the next session needs to know where things stand
+
+If no relevant scratchpad exists, create one. Write for future-you: specific reasoning, not vague summaries. Then update `index.md` if you created a new file.
 
 ## Orchestration
 If it's simple enough to do yourself, do it yourself — unless the user explicitly

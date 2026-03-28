@@ -15,7 +15,16 @@ The project's persistent knowledge base. Committed to git. Grows over the life o
 
 **Before starting any multi-step task**: Read `index.md` to see what knowledge exists. Pull relevant scratchpads. This is how you find prior decisions, architectural choices, ongoing work, and gotchas — without re-reading the entire codebase.
 
-**After completing significant work**: Update the relevant scratchpad with what you learned, what you decided, and what the next agent needs to know. Then update `index.md` if you created or renamed a file.
+**Before replying after completing work**: Write to the scratchpad if any of these happened:
+- A decision was made → write what was decided *and why*, what alternatives were considered
+- Something was implemented → write what changed and any non-obvious aspects
+- A problem was encountered and solved → write the problem, root cause, and fix
+- A new pattern or constraint exists in the codebase → write it so the next agent doesn't have to rediscover it
+- Work is in progress and you're stopping → write current state, what's done, what's next, what's blocked
+
+Write **before** replying to the user — once you've replied and moved on, the context is gone.
+
+Then update `index.md` if you created or renamed a file.
 
 If no scratchpad exists for the topic, create one. If one already exists, extend it.
 

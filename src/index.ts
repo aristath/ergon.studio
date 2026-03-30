@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 
 export const ErgonPlugin: Plugin = async ({ client, directory }) => {
-  function readConventions(): string | null {
-    const p = join(directory, ".ergon.studio", "scratchpads", "conventions.md")
+  function readScratchpad(): string | null {
+    const p = join(directory, ".ergon.studio", "scratchpad.md")
     return existsSync(p) ? readFileSync(p, "utf8") : null
   }
 
@@ -22,22 +22,30 @@ export const ErgonPlugin: Plugin = async ({ client, directory }) => {
       }
     },
 
-    // Inject project conventions into every agent's system prompt automatically.
-    // Agents see the conventions without needing to load the scratchpad skill.
+    // Inject project scratchpad into every agent's system prompt automatically.
     "experimental.chat.system.transform": async (_input, output) => {
-      const conventions = readConventions()
-      if (conventions) {
+      const scratchpad = readScratchpad()
+      if (scratchpad) {
+        output.system.push(`## Project Scratchpad\n\n${scratchpad}`)
+      } else {
         output.system.push(
-          `## Project Conventions\n\nThe following conventions apply to this project. Follow them without being asked.\n\n${conventions}`
+          `## Project Scratchpad\n\nNo scratchpad yet for this project. ` +
+          `When you discover something worth keeping (a constraint, a decision and why, a gotcha), ` +
+          `create \`.ergon.studio/scratchpad.md\` with \`## Conventions\` and \`## Notes\` sections.`
         )
       }
     },
 
-    // Re-inject conventions when context is compacted so they survive long sessions.
+    // Re-inject scratchpad when context is compacted so it survives long sessions.
     "experimental.session.compacting": async (_input, output) => {
-      const conventions = readConventions()
-      if (conventions) {
-        output.context.push(`## Project Conventions\n\n${conventions}`)
+      const scratchpad = readScratchpad()
+      if (scratchpad) {
+        output.context.push(`## Project Scratchpad\n\n${scratchpad}`)
+      } else {
+        output.context.push(
+          `## Project Scratchpad\n\nNo scratchpad yet. ` +
+          `Create \`.ergon.studio/scratchpad.md\` when you have something worth keeping.`
+        )
       }
     },
 

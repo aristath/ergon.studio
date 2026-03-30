@@ -107,8 +107,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
   assert.ok(skillContent.startsWith('---'), 'SKILL.md must have YAML frontmatter');
   assert.ok(/^name:\s*scratchpad\s*$/m.test(skillContent), 'skill name must be "scratchpad"');
   assert.ok(/^description:\s*.+/m.test(skillContent), 'skill must have a non-empty description');
-  assert.ok(skillContent.includes('.ergon.studio/scratchpads'), 'skill must reference .ergon.studio/scratchpads');
-  assert.ok(skillContent.includes('index.md'), 'skill must reference index.md');
+  assert.ok(skillContent.includes('.ergon.studio/scratchpad.md'), 'skill must reference .ergon.studio/scratchpad.md');
+  assert.ok(skillContent.includes('## Conventions'), 'skill must reference Conventions section');
+  assert.ok(skillContent.includes('## Notes'), 'skill must reference Notes section');
 
   console.log('✅ Scratchpad skill file validation passed');
 
@@ -175,9 +176,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
   // --- auto-inject conventions via experimental hooks ---
 
   const tmpConventionsDir = path.resolve(__dirname, '..', 'tmp-conventions-test');
-  const conventionsPath = path.join(tmpConventionsDir, '.ergon.studio', 'scratchpads', 'conventions.md');
+  const conventionsPath = path.join(tmpConventionsDir, '.ergon.studio', 'scratchpad.md');
   mkdirSync(path.dirname(conventionsPath), { recursive: true });
-  writeFileSync(conventionsPath, '# Project Conventions\n\n- Fix lint issues, never suppress them\n');
+  writeFileSync(conventionsPath, '## Conventions\n\nFix lint issues, never suppress them\n\n## Notes\n\nCan\'t use fs.watch on NFS mounts — use polling\n');
 
   try {
     const pluginWithConventions = await ErgonPlugin({ client: { app: { log: async () => {} } }, directory: tmpConventionsDir });
@@ -186,19 +187,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     const systemOutput = { system: [] };
     await pluginWithConventions['experimental.chat.system.transform']({}, systemOutput);
     assert.ok(systemOutput.system.length > 0, 'system transform should inject content when conventions.md exists');
-    assert.ok(systemOutput.system.some(s => s.includes('Fix lint issues')), 'system should include conventions content');
+    assert.ok(systemOutput.system.some(s => s.includes('Fix lint issues')), 'system should include scratchpad content');
+    assert.ok(systemOutput.system.some(s => s.includes('NFS mounts')), 'system should include notes content');
 
-    // compacting hook should preserve conventions through context compression
+    // compacting hook should preserve scratchpad through context compression
     const compactOutput = { context: [] };
     await pluginWithConventions['experimental.session.compacting']({ sessionID: 'ses_test' }, compactOutput);
-    assert.ok(compactOutput.context.length > 0, 'compacting hook should inject conventions into context');
-    assert.ok(compactOutput.context.some(s => s.includes('Fix lint issues')), 'compacting context should include conventions');
+    assert.ok(compactOutput.context.length > 0, 'compacting hook should inject scratchpad into context');
+    assert.ok(compactOutput.context.some(s => s.includes('Fix lint issues')), 'compacting context should include scratchpad content');
 
-    // no conventions.md → hooks should not inject anything
-    const pluginNoConventions = await ErgonPlugin({ client: { app: { log: async () => {} } }, directory: '/tmp' });
-    const emptySystem = { system: [] };
-    await pluginNoConventions['experimental.chat.system.transform']({}, emptySystem);
-    assert.strictEqual(emptySystem.system.length, 0, 'no injection when conventions.md is absent');
+    // no scratchpad.md → hooks should inject bootstrap stub
+    const pluginNoScratchpad = await ErgonPlugin({ client: { app: { log: async () => {} } }, directory: '/tmp' });
+    const stubSystem = { system: [] };
+    await pluginNoScratchpad['experimental.chat.system.transform']({}, stubSystem);
+    assert.strictEqual(stubSystem.system.length, 1, 'bootstrap stub injected when scratchpad.md is absent');
+    assert.ok(stubSystem.system[0].includes('scratchpad.md'), 'stub should reference scratchpad.md');
   } finally {
     rmSync(tmpConventionsDir, { recursive: true, force: true });
   }

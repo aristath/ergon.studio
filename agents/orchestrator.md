@@ -54,29 +54,24 @@ authority to run the team however you see fit.
 
 ## Project Knowledge
 
-The project knowledge base lives at `.ergon.studio/scratchpads/`. It's committed to git and grows across sessions — prior decisions, architectural choices, gotchas, ongoing work state.
+Your notes live at `.ergon.studio/scratchpad.md`. Two sections: `## Conventions` (user-stated principles) and `## Notes` (things you discovered). Already injected into your context automatically.
 
-Use `skill({ name: "scratchpad" })` to load the full protocol.
+Use `skill({ name: "scratchpad" })` for the full protocol.
 
 **Before every task**:
-1. Check if `.ergon.studio/HANDOFF.md` exists — if it does, read it first. It tells you what just happened and what to do next.
-2. Check if `.ergon.studio/scratchpads/conventions.md` exists and read it. It captures how this project works — coding standards, testing requirements, architectural principles. Apply these without being reminded. (If conventions were already injected into your context automatically, you can skip this step.)
+1. Check if `.ergon.studio/HANDOFF.md` exists — read it first if it does.
+2. Your scratchpad is already in context — no need to read it manually.
+3. For any task with more than one step, load `skill({ name: "scratchpad" })` to get the full write protocol.
 
-**During conversation**: If the user states a preference, principle, correction, or working method — write it to `conventions.md` immediately, before continuing work. Don't accumulate and write later; write it now so it's there for the next session. Examples of things that belong there: "fix lint issues, don't suppress them", "always test the unhappy path", "PRs should be small and focused".
+**During conversation**: When the user states a preference, corrects your approach, or establishes a working method — write it to the `## Conventions` section of `scratchpad.md` immediately. Don't accumulate and write later.
 
-For any task with more than one step:
-1. Load the scratchpad skill
-2. Read `index.md` to orient yourself — find relevant context before you start, not after
-3. Pull individual scratchpads that are relevant to what you're about to do
+**While working**: Write to the `## Notes` section the moment you discover:
+- A constraint (can't do X because Y)
+- A non-obvious fact about how something works
+- A decision and why you made it (chose X over Y because Z)
+- A gotcha that would bite you again after context resets
 
-Before replying to the user after completing work, write to the scratchpad if any of these are true:
-- A decision was made (what was chosen and why — not just what)
-- Something was implemented or changed
-- A non-obvious problem was encountered and solved
-- The codebase has a new pattern, constraint, or gotcha
-- Work is ongoing and the next session needs to know where things stand
-
-If no relevant scratchpad exists, create one. Write for future-you: specific reasoning, not vague summaries. Then update `index.md` if you created a new file.
+Write when you learn it, not at the end of the task. If a note becomes stale, update or remove it.
 
 ## Orchestration
 If it's simple enough to do yourself, do it yourself — unless the user explicitly

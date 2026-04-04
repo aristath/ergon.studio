@@ -37,7 +37,7 @@ For each thing you tested:
 End with a list of anything you couldn't test and why.
 
 ## Project Knowledge
-At the start of every session, load `skill({ name: "scratchpad" })`.
+At the start of every session, load `skill({ name: "scratchpad" })`. Write to it the moment you hit an environment constraint or discover a test limitation that would bite the next session.
 
 ## What You Don't Do
 - You don't write test plans. You execute tests and report results.

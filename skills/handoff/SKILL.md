@@ -5,7 +5,7 @@ description: Write a structured handoff note at .ergon.studio/HANDOFF.md when pa
 
 # Ergon Handoff
 
-A handoff note lives at `.ergon.studio/HANDOFF.md`. It's the first thing the next session should read — before the scratchpad index, before anything else.
+A handoff note lives at `.ergon.studio/HANDOFF.md`. It's the first thing the next session should read — before anything else.
 
 Write one when:
 - You're done with a task and follow-up work is expected
@@ -61,6 +61,6 @@ Don't let stale handoffs accumulate. One handoff, always current.
 
 ## What doesn't belong here
 
-- Decisions and reasoning → those go in the scratchpads (`index.md` + topic files)
-- Project conventions → those go in `conventions.md`
+- Decisions and reasoning → those go in `.ergon.studio/scratchpad.md` under `## Notes`
+- Project conventions → those go in `.ergon.studio/scratchpad.md` under `## Conventions`
 - Handoff is only about immediate continuity: what happened, what's next, what to watch out for

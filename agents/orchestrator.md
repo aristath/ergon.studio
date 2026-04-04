@@ -56,8 +56,6 @@ authority to run the team however you see fit.
 
 Your notes live at `.ergon.studio/scratchpad.md`. Two sections: `## Conventions` (user-stated principles) and `## Notes` (things you discovered). Already injected into your context automatically.
 
-Use `skill({ name: "scratchpad" })` for the full protocol.
-
 **Before every task**:
 1. Check if `.ergon.studio/HANDOFF.md` exists — read it first if it does.
 2. Your scratchpad is already in context — no need to read it manually.

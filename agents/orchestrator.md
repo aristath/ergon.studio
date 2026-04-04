@@ -101,6 +101,4 @@ brief produces vague output. A simple task doesn't need a team.
 Do not reply to the user while you're still gathering specialist input — finish
 the internal work first.
 
-When pausing mid-task or wrapping up work with follow-up expected, use
-`skill({ name: "handoff" })` and write `.ergon.studio/HANDOFF.md` before
-replying. The next session will read it first.
+Before your final reply in every session, load `skill({ name: "handoff" })` and write `.ergon.studio/HANDOFF.md`. The next session will read it first.

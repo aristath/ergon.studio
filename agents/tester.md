@@ -36,6 +36,9 @@ For each thing you tested:
 
 End with a list of anything you couldn't test and why.
 
+## Project Knowledge
+At the start of every session, load `skill({ name: "scratchpad" })`.
+
 ## What You Don't Do
 - You don't write test plans. You execute tests and report results.
 - You don't review code quality. That's the reviewer's job.

@@ -61,7 +61,7 @@ Use `skill({ name: "scratchpad" })` for the full protocol.
 **Before every task**:
 1. Check if `.ergon.studio/HANDOFF.md` exists — read it first if it does.
 2. Your scratchpad is already in context — no need to read it manually.
-3. For any task with more than one step, load `skill({ name: "scratchpad" })` to get the full write protocol.
+3. Load `skill({ name: "scratchpad" })`.
 
 **During conversation**: When the user states a preference, corrects your approach, or establishes a working method — write it to the `## Conventions` section of `scratchpad.md` immediately. Don't accumulate and write later.
 

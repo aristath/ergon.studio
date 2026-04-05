@@ -30,8 +30,8 @@ export const ErgonPlugin: Plugin = async ({ client, directory }) => {
       } else {
         output.system.push(
           `## Project Scratchpad\n\nNo scratchpad yet for this project. ` +
-          `When you discover something worth keeping (a constraint, a decision and why, a gotcha), ` +
-          `create \`.ergon.studio/scratchpad.md\` with \`## Conventions\` and \`## Notes\` sections.`
+          `When you discover something worth keeping (a constraint, a gotcha, a decision and why), ` +
+          `create \`.ergon.studio/scratchpad.md\` with \`## Conventions\`, \`## Notes\`, and \`## Decisions\` sections.`
         )
       }
     },
@@ -44,7 +44,7 @@ export const ErgonPlugin: Plugin = async ({ client, directory }) => {
       } else {
         output.context.push(
           `## Project Scratchpad\n\nNo scratchpad yet. ` +
-          `Create \`.ergon.studio/scratchpad.md\` when you have something worth keeping.`
+          `Create \`.ergon.studio/scratchpad.md\` with \`## Conventions\`, \`## Notes\`, and \`## Decisions\` sections when you have something worth keeping.`
         )
       }
     },

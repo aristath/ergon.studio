@@ -7,7 +7,7 @@ description: Read and write .ergon.studio/scratchpad.md — your private notes t
 
 Your private notes. One file: `.ergon.studio/scratchpad.md`
 
-Two sections:
+Three sections:
 
 ```markdown
 ## Conventions
@@ -19,6 +19,9 @@ PRs should be small and focused
 
 Auth middleware reads JWT from Authorization header only, not cookies
 Can't use fs.watch on NFS mounts — use polling
+
+## Decisions
+
 Chose uuid v4 over nanoid — nanoid causes ESM/CJS issues in this build setup
 ```
 
@@ -42,12 +45,22 @@ Write here immediately when the user states a preference or corrects your approa
 Things you discovered while working:
 - A constraint you hit (can't do X because Y)
 - A non-obvious fact about the codebase (how something actually works)
-- A decision you made and why (chose X over Y because Z)
 - A gotcha that would bite you again after context resets
 
-Write here the moment you discover it — not at the end of the task.
+If you had to look for it, write it down — if discovering it required reading code, running a command, or tracing a call path, the next session will have to do the same work over again.
 
 If a note becomes wrong or outdated, update or delete it. Stale notes are worse than no notes.
+
+---
+
+## Decisions section
+
+Choices you made and why:
+- Chose X over Y because Z
+- Ruled out approach X because Y
+- Picked this library/pattern/structure for this reason
+
+Write here when you commit to an approach after considering alternatives. The reasoning matters — not just what you chose, but what you didn't and why.
 
 ---
 

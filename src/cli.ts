@@ -83,6 +83,10 @@ if (command === "update") {
     ...config.agent.researcher,
     permission: { edit: "deny" },
   }
+  config.agent.scout = {
+    ...config.agent.scout,
+    permission: { bash: "deny" },
+  }
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")
   console.log(`Global opencode.json updated at ${configPath}`)

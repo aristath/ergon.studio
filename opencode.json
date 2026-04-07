@@ -3,6 +3,9 @@
   "plugin": ["."],
   "default_agent": "orchestrator",
   "agent": {
+    "scout": {
+      "permission": { "bash": "deny" }
+    },
     "architect": {
       "permission": { "edit": "deny", "bash": "deny" }
     },

@@ -10,12 +10,14 @@
   "files": [
     "dist/",
     "agents/",
-    "skills/"
+    "skills/",
+    "prompts/",
+    "scripts/"
   ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "npm run build && node ./tests/plugin.test.mjs",
+    "test": "npm run build && node ./tests/steward.test.mjs && node ./tests/memory.test.mjs && node ./tests/plugin.test.mjs",
     "test:e2e": "node --experimental-vm-modules --test tests/e2e.test.js"
   },
   "keywords": [

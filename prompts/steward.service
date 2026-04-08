@@ -1,0 +1,13 @@
+[Unit]
+Description=llama.cpp Memory Steward (reads config from ergon.studio/prompts/steward.md)
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Update this path if your ergon.studio checkout lives elsewhere.
+ExecStart=/home/aristath/ergon.studio/scripts/run-steward.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

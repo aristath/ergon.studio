@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 (async () => {
   const pluginPath = path.resolve(__dirname, '..', 'dist', 'index.js');
-  const { ErgonPlugin } = await import(pluginPath);
+  const { ErgonPlugin, createErgonPlugin } = await import(pluginPath);
 
   // Plugin requires a context with a client property
   let logCalled = false;
@@ -235,4 +235,344 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
   }
 
   console.log('✅ ergon update test passed');
+
+  // ===========================================================================
+  // Memory steward integration tests
+  // ===========================================================================
+  //
+  // The memory steward adds two integration points to the plugin:
+  //   - chat.message hook   → recall path (rewrite query, search memory, inject)
+  //   - event/session.idle  → save path   (judge exchange, store memory)
+  //
+  // Both are tested with injected stub steward and memory clients via the
+  // exported createErgonPlugin factory.
+
+  function makeStewardStub(overrides = {}) {
+    const calls = { rewrite: [], judge: [] };
+    const stub = {
+      async rewriteQuery(text) {
+        calls.rewrite.push(text);
+        return overrides.rewriteResult ?? null;
+      },
+      async judgeSave(userMsg, assistantMsg) {
+        calls.judge.push({ userMsg, assistantMsg });
+        return overrides.judgeResult ?? null;
+      },
+    };
+    return { stub, calls };
+  }
+
+  function makeMemoryStub(overrides = {}) {
+    const calls = { recall: [], save: [] };
+    const stub = {
+      async recall(query, limit) {
+        calls.recall.push({ query, limit });
+        return overrides.recallResult ?? [];
+      },
+      async save(content) {
+        calls.save.push(content);
+      },
+    };
+    return { stub, calls };
+  }
+
+  // --- chat.message: hook is registered ---
+
+  {
+    const { stub: steward } = makeStewardStub();
+    const { stub: memory } = makeMemoryStub();
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } },
+      directory: '/tmp',
+    });
+    assert.strictEqual(typeof plugin['chat.message'], 'function', 'chat.message hook must be registered');
+    console.log('✅ chat.message hook registered');
+  }
+
+  // --- chat.message: empty user text → no-op ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub();
+    const { stub: memory, calls: memCalls } = makeMemoryStub();
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const output = { message: { id: 'msg1' }, parts: [] };
+    await plugin['chat.message']({ sessionID: 's1' }, output);
+    assert.strictEqual(stewardCalls.rewrite.length, 0, 'no rewrite call on empty text');
+    assert.strictEqual(memCalls.recall.length, 0, 'no recall on empty text');
+    assert.strictEqual(output.parts.length, 0, 'no part injected');
+    console.log('✅ chat.message empty text → no-op');
+  }
+
+  // --- chat.message: rewriteQuery returns null → no recall, no inject ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub({ rewriteResult: null });
+    const { stub: memory, calls: memCalls } = makeMemoryStub();
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const output = { message: { id: 'msg1' }, parts: [{ type: 'text', text: 'thanks!' }] };
+    await plugin['chat.message']({ sessionID: 's1' }, output);
+    assert.strictEqual(stewardCalls.rewrite.length, 1, 'rewrite called once');
+    assert.strictEqual(stewardCalls.rewrite[0], 'thanks!');
+    assert.strictEqual(memCalls.recall.length, 0, 'no recall when rewrite returns null');
+    assert.strictEqual(output.parts.length, 1, 'no extra part injected');
+    console.log('✅ chat.message null rewrite → no recall');
+  }
+
+  // --- chat.message: rewrite ok but recall returns [] → no inject ---
+
+  {
+    const { stub: steward } = makeStewardStub({ rewriteResult: 'test rust' });
+    const { stub: memory } = makeMemoryStub({ recallResult: [] });
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const output = { message: { id: 'msg1' }, parts: [{ type: 'text', text: 'test the rust thing' }] };
+    await plugin['chat.message']({ sessionID: 's1' }, output);
+    assert.strictEqual(output.parts.length, 1, 'no extra part injected when no memories returned');
+    console.log('✅ chat.message empty recall → no inject');
+  }
+
+  // --- chat.message: full happy path stashes recall, doesn't touch parts ---
+  // The recall content is consumed by experimental.chat.system.transform on
+  // the same turn (see the next test). chat.message must NOT mutate
+  // output.parts — that path triggered "System message must be at the
+  // beginning" errors from llama.cpp's Qwen Jinja template when serializing
+  // multi-content user messages.
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub({ rewriteResult: 'rust edition' });
+    const { stub: memory, calls: memCalls } = makeMemoryStub({
+      recallResult: [
+        { id: 'm1', content: 'New Rust projects default to edition 2024', score: 0.9 },
+        { id: 'm2', content: 'Use `cargo new --edition 2024` explicitly', score: 0.8 },
+      ],
+    });
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const output = {
+      message: { id: 'msg-abc' },
+      parts: [{ type: 'text', text: "let's create a new rust project" }],
+    };
+    await plugin['chat.message']({ sessionID: 'sess-1' }, output);
+
+    assert.strictEqual(stewardCalls.rewrite[0], "let's create a new rust project");
+    assert.strictEqual(memCalls.recall[0].query, 'rust edition');
+    // Critical: parts MUST stay untouched. Inserting our content as a TextPart
+    // breaks the Qwen chat template downstream.
+    assert.strictEqual(output.parts.length, 1, 'parts must not be mutated');
+    assert.strictEqual(output.parts[0].text, "let's create a new rust project", 'user text untouched');
+    console.log('✅ chat.message stashes recall, leaves parts untouched');
+  }
+
+  // --- chat.message → experimental.chat.system.transform integration ---
+  // This is the cross-hook flow: chat.message stashes the recall in a
+  // session-keyed map, system.transform reads it on the same turn and
+  // pushes it into output.system alongside the scratchpad. After
+  // consumption, the map slot is cleared so the next turn starts clean.
+
+  {
+    const { stub: steward } = makeStewardStub({ rewriteResult: 'rust edition' });
+    const { stub: memory } = makeMemoryStub({
+      recallResult: [
+        { id: 'm1', content: 'New Rust projects default to edition 2024', score: 0.9 },
+        { id: 'm2', content: 'Use `cargo new --edition 2024` explicitly', score: 0.8 },
+      ],
+    });
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+
+    // Turn 1: chat.message stashes recall
+    await plugin['chat.message'](
+      { sessionID: 'sess-X' },
+      { message: { id: 'm1' }, parts: [{ type: 'text', text: 'create a rust project' }] },
+    );
+
+    // Same turn: system.transform consumes it.
+    // CRITICAL invariant: we must produce exactly ONE system entry, not
+    // multiple, regardless of how many additions we have. Strict chat
+    // templates (Qwen 3.5) reject more than one system message.
+    const sysOut = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'sess-X' }, sysOut);
+
+    assert.strictEqual(sysOut.system.length, 1, 'must produce exactly one system entry');
+    const entry = sysOut.system[0];
+    assert.ok(entry.includes('Project Scratchpad'), 'scratchpad content present');
+    assert.ok(entry.includes('Relevant prior notes'), 'recall block present');
+    assert.ok(entry.includes('edition 2024'), 'first memory present');
+    assert.ok(entry.includes('cargo new'), 'second memory present');
+
+    // Same single-entry guarantee when there's a pre-existing entry
+    // (e.g. an agent identity opencode put there before our hook).
+    await plugin['chat.message'](
+      { sessionID: 'sess-Y' },
+      { message: { id: 'm2' }, parts: [{ type: 'text', text: 'create a rust project' }] },
+    );
+    const sysOut1 = { system: ['## Identity\nYou are Scout.'] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'sess-Y' }, sysOut1);
+    assert.strictEqual(sysOut1.system.length, 1, 'pre-existing entry preserved as single entry');
+    assert.ok(sysOut1.system[0].startsWith('## Identity'), 'pre-existing identity stays first');
+    assert.ok(sysOut1.system[0].includes('Project Scratchpad'), 'scratchpad appended to existing entry');
+    assert.ok(sysOut1.system[0].includes('Relevant prior notes'), 'recall appended to existing entry');
+
+    // Second system.transform call for the same session must NOT re-inject recall
+    const sysOut2 = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'sess-X' }, sysOut2);
+    assert.strictEqual(sysOut2.system.length, 1, 'still single entry');
+    assert.ok(!sysOut2.system[0].includes('Relevant prior notes'), 'recall consumed, not re-injected');
+
+    console.log('✅ chat.message → system.transform recall injection (single entry invariant)');
+  }
+
+  // --- experimental.chat.system.transform without prior chat.message: no recall, just scratchpad ---
+
+  {
+    const { stub: steward } = makeStewardStub();
+    const { stub: memory } = makeMemoryStub();
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const sysOut = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'sess-quiet' }, sysOut);
+    assert.strictEqual(sysOut.system.length, 1, 'one system entry: scratchpad only');
+    assert.ok(!sysOut.system[0].includes('Relevant prior notes'), 'no recall content present');
+    assert.ok(sysOut.system[0].includes('Project Scratchpad'), 'scratchpad stub present');
+    console.log('✅ system.transform without recall → scratchpad only');
+  }
+
+  // --- chat.message: extracts text from multiple text parts ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub({ rewriteResult: null });
+    const { stub: memory } = makeMemoryStub();
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+    const output = {
+      message: { id: 'msg1' },
+      parts: [
+        { type: 'text', text: 'first line' },
+        { type: 'text', text: 'second line' },
+        { type: 'file', mime: 'text/plain', url: 'x' }, // non-text part ignored
+      ],
+    };
+    await plugin['chat.message']({ sessionID: 's1' }, output);
+    assert.strictEqual(stewardCalls.rewrite[0], 'first line\nsecond line');
+    console.log('✅ chat.message joins multiple text parts');
+  }
+
+  // --- event/session.idle: triggers save path ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub({ judgeResult: 'New Rust projects default to edition 2024' });
+    const { stub: memory, calls: memCalls } = makeMemoryStub();
+
+    const fakeMessages = [
+      { info: { role: 'user', id: 'u1' }, parts: [{ type: 'text', text: 'create a rust project' }] },
+      { info: { role: 'assistant', id: 'a1' }, parts: [{ type: 'text', text: 'Created with edition 2024.' }] },
+    ];
+
+    let messagesCallArg = null;
+    const mockClient = {
+      app: { log: async () => {} },
+      session: {
+        messages: async (arg) => {
+          messagesCallArg = arg;
+          return { data: fakeMessages };
+        },
+      },
+    };
+
+    const plugin = await createErgonPlugin({ steward, memory })({ client: mockClient, directory: '/tmp' });
+    await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'sess-99' } } });
+
+    // session.idle dispatches handler asynchronously via void+catch — give it a tick to settle
+    await new Promise((r) => setImmediate(r));
+
+    assert.deepStrictEqual(messagesCallArg, { path: { id: 'sess-99' } });
+    assert.strictEqual(stewardCalls.judge.length, 1, 'judgeSave called once');
+    assert.strictEqual(stewardCalls.judge[0].userMsg, 'create a rust project');
+    assert.strictEqual(stewardCalls.judge[0].assistantMsg, 'Created with edition 2024.');
+    assert.strictEqual(memCalls.save.length, 1, 'memory.save called once');
+    assert.strictEqual(memCalls.save[0], 'New Rust projects default to edition 2024');
+    console.log('✅ session.idle full save path');
+  }
+
+  // --- event/session.idle: judge returns null → no save ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub({ judgeResult: null });
+    const { stub: memory, calls: memCalls } = makeMemoryStub();
+    const fakeMessages = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'q' }] },
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'a' }] },
+    ];
+    const mockClient = {
+      app: { log: async () => {} },
+      session: { messages: async () => ({ data: fakeMessages }) },
+    };
+    const plugin = await createErgonPlugin({ steward, memory })({ client: mockClient, directory: '/tmp' });
+    await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } });
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(stewardCalls.judge.length, 1);
+    assert.strictEqual(memCalls.save.length, 0, 'no save when judge returns null');
+    console.log('✅ session.idle null judge → no save');
+  }
+
+  // --- event/session.idle: messages fetch fails → silent no-op ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub();
+    const { stub: memory } = makeMemoryStub();
+    const mockClient = {
+      app: { log: async () => {} },
+      session: { messages: async () => { throw new Error('boom'); } },
+    };
+    const plugin = await createErgonPlugin({ steward, memory })({ client: mockClient, directory: '/tmp' });
+    // Must not throw
+    await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } });
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(stewardCalls.judge.length, 0, 'no judge call when fetch fails');
+    console.log('✅ session.idle fetch failure swallowed');
+  }
+
+  // --- event/session.idle: no user/assistant pair yet → no-op ---
+
+  {
+    const { stub: steward, calls: stewardCalls } = makeStewardStub();
+    const { stub: memory } = makeMemoryStub();
+    const fakeMessages = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'just a question' }] },
+      // no assistant response yet
+    ];
+    const mockClient = {
+      app: { log: async () => {} },
+      session: { messages: async () => ({ data: fakeMessages }) },
+    };
+    const plugin = await createErgonPlugin({ steward, memory })({ client: mockClient, directory: '/tmp' });
+    await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } });
+    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(stewardCalls.judge.length, 0, 'no judge when only user message exists');
+    console.log('✅ session.idle without assistant response → no-op');
+  }
+
+  // --- session.created still works after refactor (regression check) ---
+
+  {
+    let logCalled = false;
+    const { stub: steward } = makeStewardStub();
+    const { stub: memory } = makeMemoryStub();
+    const mockClient = { app: { log: async () => { logCalled = true; } } };
+    const plugin = await createErgonPlugin({ steward, memory })({ client: mockClient, directory: '/tmp' });
+    await plugin.event({ event: { type: 'session.created' } });
+    assert.ok(logCalled, 'session.created still logs after refactor');
+    console.log('✅ session.created regression');
+  }
+
+  console.log('\n✅ All memory steward integration tests passed');
 })();

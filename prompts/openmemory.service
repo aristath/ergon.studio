@@ -1,0 +1,22 @@
+[Unit]
+Description=openmemory-js HTTP API server (memory backend for ergon)
+After=default.target
+
+[Service]
+Type=simple
+Environment=OM_PORT=8082
+Environment=OM_DB_PATH=/home/aristath/.local/share/openmemory/openmemory.sqlite
+Environment=OM_TIER=hybrid
+Environment=OM_EMBEDDINGS=synthetic
+ExecStart=/usr/bin/env npx -y openmemory-js serve
+# All stdout/stderr (the noisy [CONFIG]/[SERVER]/[Vector]/[DB] lines)
+# go to a log file instead of inheriting any terminal. This is the
+# whole point of running openmemory as its own service: it lets us
+# capture every byte of its output cleanly.
+StandardOutput=append:/tmp/openmemory.log
+StandardError=append:/tmp/openmemory.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

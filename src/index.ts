@@ -227,12 +227,25 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
         run_parallel: tool({
           description:
             "Run multiple agents in parallel and return their combined output. " +
-            "Each task specifies an agent and a brief. All tasks execute concurrently. " +
+            "Each task specifies an agent name and a brief. All tasks execute concurrently. " +
+            "Valid agent names: architect, coder, critic, orchestrator, researcher, reviewer, scout, tester. " +
+            "This tool delegates to LLM agents — it is NOT a way to run shell commands or built-in tools. " +
             "Avoid using write-capable agents (e.g. coder) in parallel — they may conflict on shared files.",
           args: {
             tasks: tool.schema.array(
               tool.schema.object({
-                agent: tool.schema.string().describe("Agent name to run"),
+                agent: tool.schema
+                  .enum([
+                    "architect",
+                    "coder",
+                    "critic",
+                    "orchestrator",
+                    "researcher",
+                    "reviewer",
+                    "scout",
+                    "tester",
+                  ])
+                  .describe("Agent name to run"),
                 brief: tool.schema.string().describe("Full brief to send to the agent"),
               })
             ).describe("List of agent+brief pairs to run in parallel"),

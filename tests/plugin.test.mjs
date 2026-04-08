@@ -173,6 +173,46 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   console.log('✅ run_parallel error handling test passed');
 
+  // --- run_parallel rejects invalid agent names at schema layer ---
+  // The LLM occasionally hallucinates agent names like "bash" (confusing the
+  // tool with the bash built-in) or "general" (an opencode built-in agent).
+  // Without schema-level validation those calls reach opencode's session.prompt
+  // and surface as `Agent not found: "bash"...` JSON errors. Constrain the
+  // schema to known subagent names so the LLM gets a clear validation error
+  // it can self-correct from, before the call ever leaves the harness.
+
+  {
+    const { z } = await import('zod');
+    const argsSchema = z.object(pluginWithFailure.tool.run_parallel.args);
+
+    // Valid agent names (every real file in agents/) must parse cleanly.
+    for (const name of [
+      'architect',
+      'coder',
+      'critic',
+      'orchestrator',
+      'researcher',
+      'reviewer',
+      'scout',
+      'tester',
+    ]) {
+      assert.doesNotThrow(
+        () => argsSchema.parse({ tasks: [{ agent: name, brief: 'x' }] }),
+        `valid agent "${name}" must pass schema validation`,
+      );
+    }
+
+    // Hallucinated names (LLM confusing tools/built-ins for agents) must be rejected.
+    for (const bad of ['bash', 'general', 'plan', 'build', 'explore', '']) {
+      assert.throws(
+        () => argsSchema.parse({ tasks: [{ agent: bad, brief: 'x' }] }),
+        `invalid agent "${bad}" must be rejected by schema`,
+      );
+    }
+
+    console.log('✅ run_parallel schema rejects invalid agent names');
+  }
+
   // --- auto-inject conventions via experimental hooks ---
 
   const tmpConventionsDir = path.resolve(__dirname, '..', 'tmp-conventions-test');

@@ -95,17 +95,36 @@ Name each friction point explicitly. Re-examine them:
 Don't paper over friction. If something is genuinely uncertain, say so and
 surface the decision to the user.
 
-### Phase 7: Final Plan
-Produce the final plan. It should be:
+### Phase 7: Plan
+Produce the plan. It should be:
 - Concrete enough for the orchestrator and coder to act on
 - Scoped correctly — not too broad, not too narrow
 - Honest about what's uncertain or deferred
 
-Write this plan to `.ergon.studio/HANDOFF.md`. The orchestrator will read it
-first in the next session and brief the team from it.
+Don't write anything to disk yet. The plan goes through one more phase
+before it's final.
 
-Tell the user the plan is ready. Tell them what the natural next step is —
-usually switching to the orchestrator to execute.
+### Phase 8: Assume You're Wrong
+Now assume the plan is broken. Don't defend it. Approach it like a senior
+dev just told you "this won't work" and you have to figure out why before
+they explain.
+
+Read the project holistically — not just the area you're changing. The
+plan can be internally consistent and still wrong because it ignored
+something elsewhere. Look for what doesn't fit, what conflicts, what
+assumes a world that doesn't match the actual codebase. Your job in this
+phase isn't to be fair to the plan — it's to be hard on it.
+
+If you find issues:
+- Name them clearly. Don't hedge.
+- Surface them to the user. Don't silently revise.
+- Ask how they want to handle each one.
+- Update the plan based on their input.
+- Re-enter this phase with the revised plan.
+
+If you can't find issues, or the user says the plan is good as-is, the
+plan is final. Write it to `.ergon.studio/HANDOFF.md` and tell the user
+the natural next step is usually switching to the orchestrator to execute.
 
 ## Project Knowledge
 

@@ -174,43 +174,248 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
   console.log('✅ run_parallel error handling test passed');
 
   // --- run_parallel rejects invalid agent names at schema layer ---
-  // The LLM occasionally hallucinates agent names like "bash" (confusing the
-  // tool with the bash built-in) or "general" (an opencode built-in agent).
-  // Without schema-level validation those calls reach opencode's session.prompt
-  // and surface as `Agent not found: "bash"...` JSON errors. Constrain the
-  // schema to known subagent names so the LLM gets a clear validation error
-  // it can self-correct from, before the call ever leaves the harness.
+  // The LLM occasionally hallucinates agent names like "bash" (confusing
+  // the tool with the bash built-in) or "general" (an opencode built-in
+  // agent). Without schema-level validation those calls reach opencode's
+  // session.prompt and surface as `Agent not found: "bash"...` JSON errors.
+  // The plugin queries opencode's GET /agent endpoint at init and builds
+  // the enum from the live list, so the schema mirrors whatever opencode
+  // would actually accept — no hardcoded names.
+
+  {
+    const { z } = await import('zod');
+
+    const dynamicAgents = [
+      { name: 'alpha', mode: 'subagent' },
+      { name: 'beta', mode: 'primary' },
+      { name: 'gamma', mode: 'subagent' },
+    ];
+    const dynamicClient = {
+      app: {
+        log: async () => {},
+        agents: async () => ({ data: dynamicAgents }),
+      },
+      session: {
+        create: async () => ({ data: { id: 'x' } }),
+        prompt: async () => ({ data: { parts: [] } }),
+        delete: async () => ({ data: true }),
+      },
+    };
+    const dynamicPlugin = await ErgonPlugin({ client: dynamicClient, directory: '/tmp' });
+    const argsSchema = z.object(dynamicPlugin.tool.run_parallel.args);
+
+    // Names returned by opencode must parse cleanly.
+    for (const name of ['alpha', 'beta', 'gamma']) {
+      assert.doesNotThrow(
+        () => argsSchema.parse({ tasks: [{ agent: name, brief: 'x' }] }),
+        `agent "${name}" from live list must pass schema validation`,
+      );
+    }
+
+    // Anything opencode wouldn't accept must be rejected at the harness
+    // boundary. Includes the actual hallucinations seen in the wild
+    // (bash, general) plus names that look real but aren't in this
+    // mock's list, to prove the schema is dynamic, not hardcoded.
+    for (const bad of ['bash', 'general', 'researcher', 'orchestrator', '']) {
+      assert.throws(
+        () => argsSchema.parse({ tasks: [{ agent: bad, brief: 'x' }] }),
+        `agent "${bad}" not in live list must be rejected by schema`,
+      );
+    }
+
+    // Description must surface the live names so the LLM sees them at the call site.
+    const desc = dynamicPlugin.tool.run_parallel.description;
+    assert.ok(desc.includes('alpha'), 'description should list live agent names');
+    assert.ok(desc.includes('beta'), 'description should list live agent names');
+    assert.ok(desc.includes('gamma'), 'description should list live agent names');
+
+    console.log('✅ run_parallel schema is built from live agent list');
+  }
+
+  // --- run_parallel falls back to string schema when agents lookup unavailable ---
+  // The mock clients used by other tests don't expose client.app.agents.
+  // The plugin must still load (just without validation) so existing tests
+  // and any non-opencode harness keep working.
 
   {
     const { z } = await import('zod');
     const argsSchema = z.object(pluginWithFailure.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'fallback string schema must accept any agent name',
+    );
+    console.log('✅ run_parallel falls back to string schema without app.agents');
+  }
 
-    // Valid agent names (every real file in agents/) must parse cleanly.
-    for (const name of [
-      'architect',
-      'coder',
-      'critic',
-      'orchestrator',
-      'researcher',
-      'reviewer',
-      'scout',
-      'tester',
-    ]) {
-      assert.doesNotThrow(
-        () => argsSchema.parse({ tasks: [{ agent: name, brief: 'x' }] }),
-        `valid agent "${name}" must pass schema validation`,
-      );
-    }
+  // --- run_parallel falls back when app.agents() throws ---
+  // A flaky transport, transient server hiccup, or any other thrown error
+  // during the lookup must not crash plugin init — degrade to permissive
+  // string schema instead.
 
-    // Hallucinated names (LLM confusing tools/built-ins for agents) must be rejected.
-    for (const bad of ['bash', 'general', 'plan', 'build', 'explore', '']) {
-      assert.throws(
-        () => argsSchema.parse({ tasks: [{ agent: bad, brief: 'x' }] }),
-        `invalid agent "${bad}" must be rejected by schema`,
-      );
-    }
+  {
+    const { z } = await import('zod');
+    const throwingClient = {
+      app: {
+        log: async () => {},
+        agents: async () => { throw new Error('boom'); },
+      },
+    };
+    const p = await ErgonPlugin({ client: throwingClient, directory: '/tmp' });
+    const argsSchema = z.object(p.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'thrown agents() must fall back to string schema',
+    );
+    assert.ok(
+      !p.tool.run_parallel.description.includes('Valid agent names:'),
+      'description should omit the live-list line when fallback is used',
+    );
+    console.log('✅ run_parallel falls back when app.agents() throws');
+  }
 
-    console.log('✅ run_parallel schema rejects invalid agent names');
+  // --- run_parallel falls back when app.agents() returns non-array data ---
+  // Defensive against API drift: if opencode ever changes the response shape,
+  // we degrade gracefully instead of crashing.
+
+  {
+    const { z } = await import('zod');
+    const weirdClient = {
+      app: {
+        log: async () => {},
+        agents: async () => ({ data: { not: 'an array' } }),
+      },
+    };
+    const p = await ErgonPlugin({ client: weirdClient, directory: '/tmp' });
+    const argsSchema = z.object(p.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'non-array data must fall back to string schema',
+    );
+    console.log('✅ run_parallel falls back on non-array agents response');
+  }
+
+  // --- run_parallel falls back when filtered list is empty ---
+  // Zod's enum requires a non-empty tuple. If every entry is unusable
+  // (missing name, wrong type, empty string), we must not try to build
+  // an empty enum — fall back to string instead.
+
+  {
+    const { z } = await import('zod');
+    const emptyClient = {
+      app: {
+        log: async () => {},
+        agents: async () => ({ data: [{}, { name: null }, { name: '' }, { name: 42 }] }),
+      },
+    };
+    const p = await ErgonPlugin({ client: emptyClient, directory: '/tmp' });
+    const argsSchema = z.object(p.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'all-invalid agent list must fall back to string schema',
+    );
+    console.log('✅ run_parallel falls back when filtered agent list is empty');
+  }
+
+  // --- run_parallel does not hang plugin init when agents() is slow ---
+  // Real availability bug class: opencode loads plugins synchronously at
+  // startup. If our init blocks forever on a hung HTTP call, opencode's
+  // entire startup blocks with it — no TUI, no error, just a frozen
+  // process. Plugin init must bound the agents() lookup with a timeout
+  // and fall back to the permissive string schema if it expires.
+  //
+  // We model the hang with a Promise that never resolves, then assert
+  // init returns within a generous wall-clock window. If init hangs past
+  // that window the test runner will hard-timeout and the failure will
+  // be obvious.
+
+  {
+    const { z } = await import('zod');
+    let logged = null;
+    const hangingClient = {
+      app: {
+        log: async ({ body }) => { logged = body; },
+        agents: () => new Promise(() => { /* never resolves */ }),
+      },
+    };
+
+    // Inject a small timeout so the test stays fast while still exercising
+    // the real timeout path. Production default is 15000ms.
+    const start = Date.now();
+    const p = await Promise.race([
+      createErgonPlugin({ agentLookupTimeoutMs: 200 })({ client: hangingClient, directory: '/tmp' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('plugin init hung')), 3000)),
+    ]);
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed < 3000, `init must complete within 3s even when agents() hangs (took ${elapsed}ms)`);
+    assert.ok(elapsed >= 150, `init must actually wait the configured timeout (took ${elapsed}ms)`);
+
+    // After timeout, the plugin must still be usable with the permissive
+    // fallback schema — not crashed, not partially constructed.
+    const argsSchema = z.object(p.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'after timeout, schema must fall back to permissive string',
+    );
+
+    // The fallback should be observable in opencode logs so a user can
+    // understand why their schema isn't constraining what they expect.
+    assert.ok(
+      logged && /agent.*lookup.*timeout|timed out|fallback/i.test(logged.message ?? ''),
+      'timeout fallback must be logged so the user can diagnose it',
+    );
+
+    console.log('✅ run_parallel does not hang init when agents() is slow');
+  }
+
+  // --- run_parallel filters invalid entries from a mixed list ---
+  // When the live list contains a mix of usable and unusable entries, the
+  // enum must include only the usable ones — no crash on the bad entries,
+  // and no leakage of empty strings or null into the schema.
+
+  {
+    const { z } = await import('zod');
+    const mixedClient = {
+      app: {
+        log: async () => {},
+        agents: async () => ({
+          data: [
+            { name: 'good-one' },
+            { name: '' },              // empty string — drop
+            { name: null },            // null — drop
+            { name: 42 },              // wrong type — drop
+            {},                        // missing name — drop
+            { name: 'good-two' },
+          ],
+        }),
+      },
+    };
+    const p = await ErgonPlugin({ client: mixedClient, directory: '/tmp' });
+    const argsSchema = z.object(p.tool.run_parallel.args);
+
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'good-one', brief: 'x' }] }),
+      'good-one must be accepted',
+    );
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'good-two', brief: 'x' }] }),
+      'good-two must be accepted',
+    );
+    assert.throws(
+      () => argsSchema.parse({ tasks: [{ agent: '', brief: 'x' }] }),
+      'empty string must be rejected (not silently included)',
+    );
+    assert.throws(
+      () => argsSchema.parse({ tasks: [{ agent: 'unknown', brief: 'x' }] }),
+      'name not in filtered list must be rejected',
+    );
+
+    const desc = p.tool.run_parallel.description;
+    assert.ok(desc.includes('good-one'), 'description includes good-one');
+    assert.ok(desc.includes('good-two'), 'description includes good-two');
+    assert.ok(!desc.includes('null'), 'description excludes null entries');
+
+    console.log('✅ run_parallel filters invalid entries from mixed agent list');
   }
 
   // --- auto-inject conventions via experimental hooks ---
@@ -483,6 +688,224 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     assert.ok(!sysOut.system[0].includes('Relevant prior notes'), 'no recall content present');
     assert.ok(sysOut.system[0].includes('Project Scratchpad'), 'scratchpad stub present');
     console.log('✅ system.transform without recall → scratchpad only');
+  }
+
+  // --- session.idle must not re-judge the same exchange twice ---
+  // session.idle fires once per turn in normal flow (Runner.onIdle in
+  // sst/opencode prompt.ts), but a defensive idle re-fire (e.g. on session
+  // resume, or a future opencode behaviour change) would cause the
+  // steward to re-judge the SAME (user, assistant) pair. Each judge is an
+  // LLM call, so duplicates are wasted cost AND risk duplicate memory
+  // saves if judgeSave ever returns the same content twice on the same
+  // input. Dedup by per-session "last judged assistant message id".
+
+  {
+    const judgeCalls = [];
+    const stewardSpy = {
+      async rewriteQuery() { return null; },
+      async judgeSave(u, a) {
+        judgeCalls.push({ u, a });
+        return null;
+      },
+    };
+    const memoryNoop = { async recall() { return []; }, async save() {} };
+
+    const fakeMessages = [
+      { info: { role: 'user', id: 'u1' }, parts: [{ type: 'text', text: 'a question' }] },
+      { info: { role: 'assistant', id: 'a1' }, parts: [{ type: 'text', text: 'an answer' }] },
+    ];
+    const mockClient = {
+      app: { log: async () => {} },
+      session: { messages: async () => ({ data: fakeMessages }) },
+    };
+
+    const plugin = await createErgonPlugin({ steward: stewardSpy, memory: memoryNoop })({
+      client: mockClient,
+      directory: '/tmp',
+    });
+
+    // Fire session.idle three times for the same exchange.
+    for (let i = 0; i < 3; i++) {
+      await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'sX' } } });
+      await new Promise((r) => setImmediate(r));
+    }
+
+    assert.strictEqual(
+      judgeCalls.length,
+      1,
+      `judgeSave must be called exactly once per unique exchange (got ${judgeCalls.length})`,
+    );
+
+    // After a NEW assistant message, dedup must release: the new exchange
+    // gets judged.
+    fakeMessages.push(
+      { info: { role: 'user', id: 'u2' }, parts: [{ type: 'text', text: 'follow-up' }] },
+      { info: { role: 'assistant', id: 'a2' }, parts: [{ type: 'text', text: 'follow-up answer' }] },
+    );
+    await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'sX' } } });
+    await new Promise((r) => setImmediate(r));
+
+    assert.strictEqual(
+      judgeCalls.length,
+      2,
+      `new exchange must be judged (got ${judgeCalls.length})`,
+    );
+
+    console.log('✅ session.idle dedups by last judged assistant message id');
+  }
+
+  // --- run_parallel must reject empty tasks array ---
+  // An empty tasks array currently passes schema validation, execute()
+  // returns "" (Promise.all([]) → []), and the LLM sees nothing came back.
+  // The model has no signal to course-correct and may either hallucinate
+  // success or infinite-loop trying to figure out what happened. Reject
+  // at the schema layer with a meaningful error.
+
+  {
+    const { z } = await import('zod');
+    const argsSchema = z.object(pluginWithFailure.tool.run_parallel.args);
+    assert.throws(
+      () => argsSchema.parse({ tasks: [] }),
+      'empty tasks array must be rejected by schema',
+    );
+    console.log('✅ run_parallel rejects empty tasks array');
+  }
+
+  // --- pendingRecall map must not leak when session ends without system.transform ---
+  // The chat.message hook stashes a recall block in pendingRecall keyed by
+  // sessionID; system.transform consumes and clears it. If a session is
+  // aborted, errors out, or is deleted before system.transform runs (e.g.
+  // user cancels mid-turn), the entry is orphaned. Over many sessions in a
+  // long-lived process this is an unbounded memory leak.
+  //
+  // The plugin must clean up the entry when opencode publishes session.deleted.
+
+  {
+    const stewardOK = {
+      async rewriteQuery() { return 'a query'; },
+      async judgeSave() { return null; },
+    };
+    const memoryWithHits = {
+      async recall() { return [{ id: 'm1', content: 'note', score: 0.9 }]; },
+      async save() {},
+    };
+    const plugin = await createErgonPlugin({
+      steward: stewardOK,
+      memory: memoryWithHits,
+    })({
+      client: { app: { log: async () => {} } },
+      directory: '/tmp',
+    });
+
+    // Simulate 50 distinct sessions: each one fires chat.message (which
+    // populates pendingRecall) but never reaches system.transform, then
+    // gets a session.deleted event (which should clean up).
+    for (let i = 0; i < 50; i++) {
+      const sessionID = `leaky-session-${i}`;
+      await plugin['chat.message'](
+        { sessionID },
+        { message: { id: `m${i}` }, parts: [{ type: 'text', text: 'hello' }] },
+      );
+      // session ends without ever calling system.transform
+      await plugin.event({ event: { type: 'session.deleted', properties: { sessionID } } });
+    }
+
+    // The internal map is private. Probe it indirectly: if we re-enter
+    // system.transform for any of those sessionIDs, no recall block should
+    // be injected (because session.deleted should have cleared it).
+    const sysOut = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'leaky-session-0' }, sysOut);
+    assert.strictEqual(sysOut.system.length, 1, 'one entry: scratchpad only');
+    assert.ok(
+      !sysOut.system[0].includes('Relevant prior notes'),
+      'session.deleted must purge orphaned recall — no leak into a later transform',
+    );
+
+    console.log('✅ pendingRecall is purged on session.deleted (no leak)');
+  }
+
+  // --- chat.message must not hang the user's turn when steward stalls ---
+  // chat.message is awaited by opencode (unlike the fire-and-forget event
+  // hook), so a hung steward.rewriteQuery() stalls every user message in
+  // the session. The hook must bound external calls with a timeout and
+  // fall through gracefully when they exceed it.
+
+  {
+    let logged = null;
+    const stewardThatHangs = {
+      async rewriteQuery() { return new Promise(() => {}); /* never */ },
+      async judgeSave() { return null; },
+    };
+    const memoryStub = {
+      async recall() { return []; },
+      async save() {},
+    };
+    const plugin = await createErgonPlugin({
+      steward: stewardThatHangs,
+      memory: memoryStub,
+      chatMessageTimeoutMs: 200,
+    })({
+      client: { app: { log: async ({ body }) => { logged = body; } } },
+      directory: '/tmp',
+    });
+
+    const start = Date.now();
+    const output = { message: { id: 'm1' }, parts: [{ type: 'text', text: 'hello' }] };
+    await Promise.race([
+      plugin['chat.message']({ sessionID: 's1' }, output),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('chat.message hung')), 3000)),
+    ]);
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed < 3000, `chat.message must complete even when steward hangs (took ${elapsed}ms)`);
+    assert.ok(elapsed >= 150, `chat.message must wait at least the configured timeout (took ${elapsed}ms)`);
+    assert.strictEqual(output.parts.length, 1, 'parts must remain untouched on timeout');
+    assert.ok(
+      logged && /steward.*timeout|recall.*timeout|fallback|disabled/i.test(logged.message ?? ''),
+      'timeout must be logged so the user can diagnose silent recall failures',
+    );
+    console.log('✅ chat.message bounds steward calls with a timeout');
+  }
+
+  // --- chat.message must not hang when memory.recall stalls ---
+  // Same bug class as above but for the second external call. A working
+  // steward followed by a hung memory backend must still bound the hook.
+
+  {
+    let logged = null;
+    const stewardOK = {
+      async rewriteQuery() { return 'a query'; },
+      async judgeSave() { return null; },
+    };
+    const memoryThatHangs = {
+      async recall() { return new Promise(() => {}); /* never */ },
+      async save() {},
+    };
+    const plugin = await createErgonPlugin({
+      steward: stewardOK,
+      memory: memoryThatHangs,
+      chatMessageTimeoutMs: 200,
+    })({
+      client: { app: { log: async ({ body }) => { logged = body; } } },
+      directory: '/tmp',
+    });
+
+    const start = Date.now();
+    await Promise.race([
+      plugin['chat.message'](
+        { sessionID: 's2' },
+        { message: { id: 'm2' }, parts: [{ type: 'text', text: 'hello' }] },
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('chat.message hung on memory')), 3000)),
+    ]);
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed < 3000, `chat.message must complete even when memory hangs (took ${elapsed}ms)`);
+    assert.ok(
+      logged && /memory.*timeout|recall.*timeout|fallback|disabled/i.test(logged.message ?? ''),
+      'memory timeout must be logged',
+    );
+    console.log('✅ chat.message bounds memory.recall with a timeout');
   }
 
   // --- chat.message: extracts text from multiple text parts ---

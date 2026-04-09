@@ -8,7 +8,52 @@ import { createMemoryClient, type MemoryClient } from "./memory.js"
 export interface ErgonPluginDeps {
   steward?: StewardClient
   memory?: MemoryClient
+  /**
+   * Maximum time (ms) to wait for opencode's GET /agent endpoint at plugin
+   * init before falling back to a permissive run_parallel schema. Defaults
+   * to 15000ms. Tests inject small values to keep the suite fast.
+   */
+  agentLookupTimeoutMs?: number
+  /**
+   * Maximum time (ms) to wait for an external recall call (steward rewrite +
+   * memory recall) inside the chat.message hook. Defaults to 5000ms. The
+   * hook is awaited by opencode, so an unbounded call stalls the user's
+   * turn — this timeout protects against a hung steward or memory backend.
+   */
+  chatMessageTimeoutMs?: number
 }
+
+/**
+ * Race a promise against a timeout. Resolves with `{ ok: true, value }` if
+ * the inner promise wins, or `{ ok: false, reason }` if the timer fires.
+ * Always clears the timer so it doesn't keep the event loop alive on the
+ * happy path.
+ */
+async function raceWithTimeout<T>(
+  inner: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const value = await Promise.race<T | typeof TIMEOUT_SENTINEL>([
+      inner,
+      new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
+        timer = setTimeout(() => resolve(TIMEOUT_SENTINEL), timeoutMs)
+      }),
+    ])
+    if (value === TIMEOUT_SENTINEL) {
+      return { ok: false, reason: `${label} timeout after ${timeoutMs}ms` }
+    }
+    return { ok: true, value: value as T }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+const TIMEOUT_SENTINEL = Symbol("ergon-plugin-timeout")
 
 function extractText(parts: any[]): string {
   if (!Array.isArray(parts)) return ""
@@ -24,6 +69,7 @@ async function handleSessionIdle(
   client: any,
   steward: StewardClient,
   memory: MemoryClient,
+  lastJudgedAssistantId: Map<string, string>,
 ): Promise<void> {
   let result: any
   try {
@@ -51,6 +97,17 @@ async function handleSessionIdle(
   }
   if (lastUserIdx === -1 || lastAssistantIdx === -1) return
   if (lastAssistantIdx < lastUserIdx) return
+
+  // Dedup: skip if this exact assistant message has already been judged
+  // for this session. session.idle normally fires once per turn, but a
+  // defensive re-fire (or any future opencode change) would otherwise
+  // re-submit the same pair to the steward — wasted LLM cost and risk
+  // of duplicate memory writes.
+  const assistantId = messages[lastAssistantIdx]?.info?.id
+  if (typeof assistantId === "string" && assistantId.length > 0) {
+    if (lastJudgedAssistantId.get(sessionID) === assistantId) return
+    lastJudgedAssistantId.set(sessionID, assistantId)
+  }
 
   const userText = extractText(messages[lastUserIdx].parts)
   const assistantText = extractText(messages[lastAssistantIdx].parts)
@@ -87,10 +144,94 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
     // alongside the scratchpad, where they actually belong.
     const pendingRecall = new Map<string, string>()
 
+    // Per-session memo of the assistant message id we most recently judged.
+    // session.idle can re-fire for the same exchange (defensive idle set in
+    // opencode); without this, the steward LLM would be called repeatedly
+    // for identical input. Cleared on session.deleted with pendingRecall.
+    const lastJudgedAssistantId = new Map<string, string>()
+
     function readScratchpad(): string | null {
       const p = join(directory, ".ergon.studio", "scratchpad.md")
       return existsSync(p) ? readFileSync(p, "utf8") : null
     }
+
+    // Fetch the live agent list once at plugin init so the run_parallel
+    // schema can constrain to whatever opencode would actually accept.
+    // Without this, the LLM hallucinates names like "bash" (confusing
+    // run_parallel with the bash built-in tool) and the call surfaces as
+    // an `Agent not found: "bash"` error from inside opencode. By querying
+    // GET /agent up front and building a Zod enum from the result, the
+    // bad call gets rejected at the harness boundary with a schema error
+    // the LLM can self-correct from.
+    //
+    // CRITICAL: opencode loads plugins synchronously at startup. If this
+    // call hangs (server still warming up, slow MCP, network hiccup),
+    // opencode's entire startup blocks with it — the user sees a frozen
+    // process with no error. Always bound the lookup with a timeout and
+    // fall back to the permissive string schema if it expires, fails, or
+    // the harness doesn't expose app.agents at all.
+    const AGENT_LOOKUP_TIMEOUT_MS = deps.agentLookupTimeoutMs ?? 15000
+    const chatMessageTimeoutMs = deps.chatMessageTimeoutMs ?? 5000
+    let agentNames: string[] | null = null
+    let fallbackReason: string | null = null
+    try {
+      const anyClient = client as any
+      if (typeof anyClient?.app?.agents !== "function") {
+        fallbackReason = "client.app.agents unavailable"
+      } else {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`agent lookup timeout after ${AGENT_LOOKUP_TIMEOUT_MS}ms`)),
+            AGENT_LOOKUP_TIMEOUT_MS,
+          )
+        })
+        try {
+          const res: any = await Promise.race([anyClient.app.agents(), timeoutPromise])
+          const list = res?.data
+          if (Array.isArray(list)) {
+            const names = list
+              .map((a: any) => a?.name)
+              .filter((n: any): n is string => typeof n === "string" && n.length > 0)
+            if (names.length > 0) agentNames = names
+            else fallbackReason = "agent lookup returned no usable names"
+          } else {
+            fallbackReason = "agent lookup returned non-array data"
+          }
+        } finally {
+          if (timer) clearTimeout(timer)
+        }
+      }
+    } catch (err) {
+      fallbackReason = err instanceof Error ? err.message : String(err)
+    }
+
+    if (fallbackReason) {
+      // Make the fallback observable. Without this the user sees an
+      // unconstrained schema and has no idea why — silent degradation
+      // is the worst kind.
+      try {
+        await client.app.log({
+          body: {
+            service: "ergon-plugin",
+            level: "warn",
+            message: `run_parallel agent enum disabled (fallback to string): ${fallbackReason}`,
+          },
+        })
+      } catch {
+        /* logging itself is best-effort */
+      }
+    }
+
+    const agentArg = agentNames
+      ? tool.schema
+          .enum(agentNames as [string, ...string[]])
+          .describe("Agent name to run")
+      : tool.schema.string().describe("Agent name to run")
+
+    const validAgentList = agentNames
+      ? `Valid agent names: ${agentNames.join(", ")}. `
+      : ""
 
     return {
       event: async ({ event }) => {
@@ -109,7 +250,20 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
           // Failures are intentionally swallowed inside handleSessionIdle.
           const { sessionID } = (event as any).properties ?? {}
           if (typeof sessionID === "string" && sessionID.length > 0) {
-            void handleSessionIdle(sessionID, client, steward, getMemory()).catch(() => {})
+            void handleSessionIdle(sessionID, client, steward, getMemory(), lastJudgedAssistantId).catch(() => {})
+          }
+        }
+
+        if (event.type === "session.deleted") {
+          // pendingRecall is populated by chat.message and consumed by
+          // experimental.chat.system.transform on the same turn. If a turn
+          // is aborted/errored before transform runs, the entry is orphaned.
+          // Purge on session.deleted so the maps can't grow unbounded across
+          // a long-lived opencode process. Same goes for the dedup memo.
+          const { sessionID } = (event as any).properties ?? {}
+          if (typeof sessionID === "string" && sessionID.length > 0) {
+            pendingRecall.delete(sessionID)
+            lastJudgedAssistantId.delete(sessionID)
           }
         }
       },
@@ -119,15 +273,56 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
       // pendingRecall. The actual prompt injection happens in
       // experimental.chat.system.transform below — see the comment on
       // pendingRecall above for why we can't push directly here.
+      //
+      // CRITICAL: opencode awaits this hook (per sst/opencode#16879 the
+      // session.idle path is fire-and-forget but chat.message is awaited),
+      // so a hung steward or memory backend stalls every user turn. Both
+      // external calls are bounded with chatMessageTimeoutMs (default 5s).
+      // On timeout we log and skip recall — losing one turn's memory is
+      // strictly better than blocking the user indefinitely.
       "chat.message": async (input, output) => {
         const userText = extractText(output.parts as any[])
         if (!userText) return
 
-        const query = await steward.rewriteQuery(userText)
+        const queryResult = await raceWithTimeout(
+          steward.rewriteQuery(userText),
+          chatMessageTimeoutMs,
+          "steward.rewriteQuery",
+        )
+        if (!queryResult.ok) {
+          try {
+            await client.app.log({
+              body: {
+                service: "ergon-plugin",
+                level: "warn",
+                message: `chat.message recall disabled (fallback): ${queryResult.reason}`,
+              },
+            })
+          } catch { /* logging is best-effort */ }
+          return
+        }
+        const query = queryResult.value
         if (!query) return
 
         const memory = getMemory()
-        const memories = await memory.recall(query)
+        const recallResult = await raceWithTimeout(
+          memory.recall(query),
+          chatMessageTimeoutMs,
+          "memory.recall",
+        )
+        if (!recallResult.ok) {
+          try {
+            await client.app.log({
+              body: {
+                service: "ergon-plugin",
+                level: "warn",
+                message: `chat.message recall disabled (fallback): ${recallResult.reason}`,
+              },
+            })
+          } catch { /* logging is best-effort */ }
+          return
+        }
+        const memories = recallResult.value
         if (memories.length === 0) return
 
         const block =
@@ -228,27 +423,19 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
           description:
             "Run multiple agents in parallel and return their combined output. " +
             "Each task specifies an agent name and a brief. All tasks execute concurrently. " +
-            "Valid agent names: architect, coder, critic, orchestrator, researcher, reviewer, scout, tester. " +
+            validAgentList +
             "This tool delegates to LLM agents — it is NOT a way to run shell commands or built-in tools. " +
             "Avoid using write-capable agents (e.g. coder) in parallel — they may conflict on shared files.",
           args: {
-            tasks: tool.schema.array(
-              tool.schema.object({
-                agent: tool.schema
-                  .enum([
-                    "architect",
-                    "coder",
-                    "critic",
-                    "orchestrator",
-                    "researcher",
-                    "reviewer",
-                    "scout",
-                    "tester",
-                  ])
-                  .describe("Agent name to run"),
-                brief: tool.schema.string().describe("Full brief to send to the agent"),
-              })
-            ).describe("List of agent+brief pairs to run in parallel"),
+            tasks: tool.schema
+              .array(
+                tool.schema.object({
+                  agent: agentArg,
+                  brief: tool.schema.string().describe("Full brief to send to the agent"),
+                })
+              )
+              .min(1)
+              .describe("List of agent+brief pairs to run in parallel (at least one)"),
           },
           async execute(args, context) {
             const results = await Promise.all(

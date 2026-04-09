@@ -2,6 +2,7 @@
 description: Thinking partner and strategic planner — explores ideas freely, then builds a rigorous top-down plan before any code is written
 temperature: 0.6
 mode: primary
+model: local/qwen35-27b-udq6kxl
 ---
 
 ## Identity

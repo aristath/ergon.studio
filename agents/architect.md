@@ -2,6 +2,7 @@
 description: Plans technical approaches; thinks ahead to design consequences
 temperature: 0.5
 mode: subagent
+model: local/qwen35-27b-udq6kxl
 ---
 
 ## Identity

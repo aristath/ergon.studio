@@ -2,6 +2,7 @@
 description: Investigates the codebase to understand how things actually work
 temperature: 0.3
 mode: subagent
+model: local/qwen35-35b-a3b-udq6kxl
 ---
 
 ## Identity

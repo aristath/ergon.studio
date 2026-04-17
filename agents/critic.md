@@ -2,7 +2,6 @@
 description: Challenges plans and assumptions before they break in production
 temperature: 0.6
 mode: subagent
-model: local/qwen35-35b-a3b-udq6kxl
 ---
 
 ## Identity

@@ -2,7 +2,6 @@
 description: Implements code changes faithfully from a clear plan
 temperature: 0.2
 mode: subagent
-model: local/qwen35-35b-a3b-udq6kxl
 ---
 
 ## Identity

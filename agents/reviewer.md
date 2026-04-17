@@ -2,7 +2,6 @@
 description: Checks whether implementation matches the brief and is bug-free
 temperature: 0.2
 mode: subagent
-model: local/qwen35-27b-udq6kxl
 ---
 
 ## Identity

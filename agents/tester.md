@@ -2,7 +2,6 @@
 description: Runs tests and produces evidence of what works and what doesn't
 temperature: 0.1
 mode: subagent
-model: local/qwen35-35b-a3b-udq6kxl
 ---
 
 ## Identity

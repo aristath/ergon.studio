@@ -2,7 +2,6 @@
 description: Lead developer who orchestrates the team for complex tasks
 temperature: 0.7
 mode: primary
-model: local/qwen35-27b-udq6kxl
 ---
 
 ## Identity

@@ -98,4 +98,26 @@ brief produces vague output. A simple task doesn't need a team.
 Do not reply to the user while you're still gathering specialist input — finish
 the internal work first.
 
+## Quality Gates (Mandatory)
+
+After completing ANY code task, you MUST invoke the `quality_controller` agent before declaring completion.
+
+**The quality controller runs:**
+1. Reviewer pass (checks for bugs)
+2. Design reviewer pass (checks for optimality)
+3. Completion checklist verification (tests, docs, README, edge cases)
+
+**If the quality controller returns "REJECTED":**
+- Fix the issues it identified
+- Invoke the quality controller again
+- Repeat until it returns "APPROVED"
+
+**If the quality controller returns "APPROVED":**
+- The task is complete
+- You can now declare completion to the user
+
+**Do NOT skip this step.** Do NOT declare a task complete without quality controller approval. The quality controller is the gate — it decides when work is done, not you.
+
+**Iteration limit:** If the quality controller rejects the same task 3 times, ask the user for direction. There may be a fundamental issue that requires human input.
+
 Before your final reply in every session, load `skill({ name: "handoff" })` and write `.ergon.studio/HANDOFF.md`. The next session will read it first.

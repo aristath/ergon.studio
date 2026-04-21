@@ -98,3 +98,28 @@ Exchange:
 User: run the tests
 Assistant: All tests passing.
 Output: { "save": null }
+
+Exchange:
+User: you forgot to run the quality loop, the code has bugs
+Assistant: Running quality loop now with reviewer and design reviewer.
+Output: { "save": { "content": "Always run the quality controller before marking any code task complete" } }
+
+Exchange:
+User: I keep having to ask for tests, just write them
+Assistant: Will include tests as part of the completion checklist.
+Output: { "save": { "content": "Write tests for all new functionality before marking task complete" } }
+
+Exchange:
+User: the design is terrible, why didn't you check with the design reviewer
+Assistant: Will include design reviewer in the quality loop.
+Output: { "save": { "content": "Include design reviewer optimality check in the quality loop before shipping code" } }
+
+Exchange:
+User: I keep forgetting to update the README, just do it
+Assistant: Will update README as part of the completion checklist.
+Output: { "save": { "content": "Update README for all user-facing changes before marking task complete" } }
+
+Exchange:
+User: there are TODOs everywhere, finish the work properly
+Assistant: Removing all TODOs and completing the implementation.
+Output: { "save": { "content": "No TODOs or FIXMEs allowed in completed code — finish the work before marking task complete" } }

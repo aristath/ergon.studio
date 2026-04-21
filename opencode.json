@@ -12,6 +12,12 @@
     "reviewer": {
       "permission": { "edit": "deny" }
     },
+    "design_reviewer": {
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
+    "quality_controller": {
+      "permission": { "edit": "deny", "bash": "deny" }
+    },
     "critic": {
       "permission": { "edit": "deny" }
     },

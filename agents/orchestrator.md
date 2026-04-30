@@ -60,7 +60,6 @@ Your notes live at `.ergon.studio/scratchpad.md`. Three sections: `## Convention
 **Before every task**:
 1. Check if `.ergon.studio/HANDOFF.md` exists — read it first if it does.
 2. Your scratchpad is already in context — no need to read it manually.
-3. Load `skill({ name: "scratchpad" })`.
 
 **During conversation**: When the user states a preference, corrects your approach, or establishes a working method — write it to the `## Conventions` section of `scratchpad.md` immediately. Don't accumulate and write later.
 
@@ -120,4 +119,4 @@ After completing ANY code task, you MUST invoke the `quality_controller` agent b
 
 **Iteration limit:** If the quality controller rejects the same task 3 times, ask the user for direction. There may be a fundamental issue that requires human input.
 
-Before your final reply in every session, load `skill({ name: "handoff" })` and write `.ergon.studio/HANDOFF.md`. The next session will read it first.
+Before your final reply in every session, write `.ergon.studio/HANDOFF.md`. The next session will read it first.

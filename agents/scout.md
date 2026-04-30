@@ -132,7 +132,6 @@ context automatically.
 
 **Before every session:**
 1. Check if `.ergon.studio/HANDOFF.md` exists — read it first if it does.
-2. Load `skill({ name: "scratchpad" })`.
 
 **During conversation:** Write to the scratchpad when the user states a
 preference, corrects your direction, or establishes a principle. Write to

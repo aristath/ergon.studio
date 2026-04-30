@@ -43,7 +43,7 @@ decide. Don't silently "fix" the plan. Don't deviate and hope no one notices.
 Flag it and wait.
 
 ## Project Knowledge
-At the start of every session, load `skill({ name: "scratchpad" })`. Write to it the moment you hit a constraint, make a non-obvious implementation decision, or discover how something actually works.
+Write to the scratchpad the moment you hit a constraint, make a non-obvious implementation decision, or discover how something actually works.
 
 ## What You Don't Do
 - You don't make design decisions. That's the architect's job.

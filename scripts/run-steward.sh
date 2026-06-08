@@ -77,9 +77,18 @@ fi
 # chain-of-thought output. The steward's job is classification, not
 # reasoning — we want it to go straight to the answer. `--reasoning-format
 # none` only controls formatting of think blocks, not whether the model
-# produces them; `--chat-template-kwargs '{"enable_thinking":false}'`
-# actually disables the thinking phase in the chat template.
-CHAT_TEMPLATE_KWARGS="{\"enable_thinking\":${ENABLE_THINKING}}"
+# produces them. llama.cpp now maps `--reasoning off` to the Qwen
+# `enable_thinking=false` chat-template variable, replacing the older
+# `--chat-template-kwargs '{"enable_thinking":false}'` form.
+case "${ENABLE_THINKING,,}" in
+  true|on) REASONING_MODE=on ;;
+  false|off) REASONING_MODE=off ;;
+  auto) REASONING_MODE=auto ;;
+  *)
+    echo "run-steward.sh: enable_thinking must be true, false, on, off, or auto" >&2
+    exit 1
+    ;;
+esac
 
 exec "$LLAMA_SERVER_BIN" \
   --host 127.0.0.1 --port "$PORT" \
@@ -90,6 +99,6 @@ exec "$LLAMA_SERVER_BIN" \
   --ctx-size "$CTX_SIZE" \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   --flash-attn true --jinja \
-  --chat-template-kwargs "$CHAT_TEMPLATE_KWARGS" \
+  --reasoning "$REASONING_MODE" \
   --temperature "$TEMPERATURE" --top-k "$TOP_K" --top-p "$TOP_P" \
   --reasoning-format none

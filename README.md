@@ -77,6 +77,19 @@ Ergon ships with seven agents:
 - **Primary agents** (`orchestrator`): Can communicate directly with the user
 - **Subagents** (all others): Run under orchestration, focused on specific tasks
 
+### Agent Models
+
+OpenCode supports per-agent models through `agent.<name>.model` in `opencode.json`.
+Ergon preserves that behavior, but validates configured agent model references
+before agents run by asking each provider directly. For a reference like
+`local/foo`, Ergon resolves the `local` provider from your config
+(`provider.local.options.baseURL`) and queries its `/models` endpoint to see
+whether `foo` is actually served. If the model is malformed or the provider
+doesn't have it, Ergon removes only that agent's `model` setting so OpenCode
+falls back to its normal default/inherited model instead of raising
+`ProviderModelNotFoundError`. Providers it can't reach are left untouched
+rather than guessed at.
+
 ## Memory Steward
 
 The memory steward is a small (2B) LLM running alongside your main coding model in a **separate** `llama-server` process. It gives OpenCode durable, cross-session memory without relying on the main model to decide when to consult or update that memory.

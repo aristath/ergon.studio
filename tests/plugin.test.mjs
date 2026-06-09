@@ -173,63 +173,37 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   console.log('✅ run_parallel error handling test passed');
 
-  // --- run_parallel rejects invalid agent names at schema layer ---
-  // The LLM occasionally hallucinates agent names like "bash" (confusing
-  // the tool with the bash built-in) or "general" (an opencode built-in
-  // agent). Without schema-level validation those calls reach opencode's
-  // session.prompt and surface as `Agent not found: "bash"...` JSON errors.
-  // The plugin queries opencode's GET /agent endpoint at init and builds
-  // the enum from the live list, so the schema mirrors whatever opencode
-  // would actually accept — no hardcoded names.
+  // --- run_parallel does not call app.agents during plugin init ---
+  // Calling OpenCode's /agent endpoint while OpenCode is itself building the
+  // agent list causes recursive plugin initialization and long startup hangs.
+  // Keep run_parallel's agent argument permissive at schema level; OpenCode
+  // remains the source of truth when session.prompt executes.
 
   {
     const { z } = await import('zod');
-
-    const dynamicAgents = [
-      { name: 'alpha', mode: 'subagent' },
-      { name: 'beta', mode: 'primary' },
-      { name: 'gamma', mode: 'subagent' },
-    ];
-    const dynamicClient = {
+    let agentsCalled = false;
+    const clientWithAgents = {
       app: {
         log: async () => {},
-        agents: async () => ({ data: dynamicAgents }),
-      },
-      session: {
-        create: async () => ({ data: { id: 'x' } }),
-        prompt: async () => ({ data: { parts: [] } }),
-        delete: async () => ({ data: true }),
+        agents: async () => {
+          agentsCalled = true;
+          return { data: [{ name: 'researcher' }] };
+        },
       },
     };
-    const dynamicPlugin = await ErgonPlugin({ client: dynamicClient, directory: '/tmp' });
-    const argsSchema = z.object(dynamicPlugin.tool.run_parallel.args);
 
-    // Names returned by opencode must parse cleanly.
-    for (const name of ['alpha', 'beta', 'gamma']) {
-      assert.doesNotThrow(
-        () => argsSchema.parse({ tasks: [{ agent: name, brief: 'x' }] }),
-        `agent "${name}" from live list must pass schema validation`,
-      );
-    }
+    const start = Date.now();
+    const p = await ErgonPlugin({ client: clientWithAgents, directory: '/tmp' });
+    const elapsed = Date.now() - start;
 
-    // Anything opencode wouldn't accept must be rejected at the harness
-    // boundary. Includes the actual hallucinations seen in the wild
-    // (bash, general) plus names that look real but aren't in this
-    // mock's list, to prove the schema is dynamic, not hardcoded.
-    for (const bad of ['bash', 'general', 'researcher', 'orchestrator', '']) {
-      assert.throws(
-        () => argsSchema.parse({ tasks: [{ agent: bad, brief: 'x' }] }),
-        `agent "${bad}" not in live list must be rejected by schema`,
-      );
-    }
-
-    // Description must surface the live names so the LLM sees them at the call site.
-    const desc = dynamicPlugin.tool.run_parallel.description;
-    assert.ok(desc.includes('alpha'), 'description should list live agent names');
-    assert.ok(desc.includes('beta'), 'description should list live agent names');
-    assert.ok(desc.includes('gamma'), 'description should list live agent names');
-
-    console.log('✅ run_parallel schema is built from live agent list');
+    assert.strictEqual(agentsCalled, false, 'plugin init must not call app.agents');
+    assert.ok(elapsed < 1000, `plugin init should be immediate (took ${elapsed}ms)`);
+    const argsSchema = z.object(p.tool.run_parallel.args);
+    assert.doesNotThrow(
+      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
+      'run_parallel keeps a permissive string schema',
+    );
+    console.log('✅ run_parallel does not call app.agents during plugin init');
   }
 
   // --- run_parallel falls back to string schema when agents lookup unavailable ---
@@ -316,106 +290,136 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     console.log('✅ run_parallel falls back when filtered agent list is empty');
   }
 
-  // --- run_parallel does not hang plugin init when agents() is slow ---
-  // Real availability bug class: opencode loads plugins synchronously at
-  // startup. If our init blocks forever on a hung HTTP call, opencode's
-  // entire startup blocks with it — no TUI, no error, just a frozen
-  // process. Plugin init must bound the agents() lookup with a timeout
-  // and fall back to the permissive string schema if it expires.
-  //
-  // We model the hang with a Promise that never resolves, then assert
-  // init returns within a generous wall-clock window. If init hangs past
-  // that window the test runner will hard-timeout and the failure will
-  // be obvious.
+  // --- config hook drops agent models the provider doesn't actually have ---
+  // An agent pins local/foo. We resolve "local" from the config (its baseURL)
+  // and ask THAT provider what it serves. local/good-model is there → keep it;
+  // local/foo is not → drop it so opencode uses the default. Same for any
+  // other provider, looked up the same way from the config.
 
   {
-    const { z } = await import('zod');
-    let logged = null;
-    const hangingClient = {
-      app: {
-        log: async ({ body }) => { logged = body; },
-        agents: () => new Promise(() => { /* never resolves */ }),
-      },
+    const logs = [];
+    const client = { app: { log: async ({ body }) => { logs.push(body); } } };
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u === 'http://local.test/v1/models') return { ok: true, json: async () => ({ data: [{ id: 'good-model' }] }) };
+      if (u === 'http://other.test/v1/models') return { ok: true, json: async () => ({ data: [{ id: 'default-model' }] }) };
+      return { ok: false, json: async () => ({}) };
     };
 
-    // Inject a small timeout so the test stays fast while still exercising
-    // the real timeout path. Production default is 15000ms.
-    const start = Date.now();
-    const p = await Promise.race([
-      createErgonPlugin({ agentLookupTimeoutMs: 200 })({ client: hangingClient, directory: '/tmp' }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('plugin init hung')), 3000)),
-    ]);
-    const elapsed = Date.now() - start;
+    try {
+      const p = await ErgonPlugin({ client, directory: '/tmp' });
+      assert.strictEqual(typeof p.config, 'function', 'config hook must be registered');
 
-    assert.ok(elapsed < 3000, `init must complete within 3s even when agents() hangs (took ${elapsed}ms)`);
-    assert.ok(elapsed >= 150, `init must actually wait the configured timeout (took ${elapsed}ms)`);
+      const config = {
+        provider: {
+          local: { options: { baseURL: 'http://local.test/v1' } },
+          other: { options: { baseURL: 'http://other.test/v1' } },
+        },
+        agent: {
+          coder: { model: 'local/good-model', temperature: 0.2 },
+          reviewer: { model: 'local/foo', permission: { edit: 'deny' } },
+          critic: { model: 'not-a-model-ref', mode: 'subagent' },
+        },
+        mode: {
+          legacy: { model: 'other/missing-model' },
+        },
+      };
 
-    // After timeout, the plugin must still be usable with the permissive
-    // fallback schema — not crashed, not partially constructed.
-    const argsSchema = z.object(p.tool.run_parallel.args);
-    assert.doesNotThrow(
-      () => argsSchema.parse({ tasks: [{ agent: 'literally-anything', brief: 'x' }] }),
-      'after timeout, schema must fall back to permissive string',
-    );
+      await p.config(config);
 
-    // The fallback should be observable in opencode logs so a user can
-    // understand why their schema isn't constraining what they expect.
-    assert.ok(
-      logged && /agent.*lookup.*timeout|timed out|fallback/i.test(logged.message ?? ''),
-      'timeout fallback must be logged so the user can diagnose it',
-    );
+      assert.strictEqual(config.agent.coder.model, 'local/good-model', 'model the provider has must be preserved');
+      assert.strictEqual(config.agent.coder.temperature, 0.2, 'other agent config must be preserved');
+      assert.strictEqual(config.agent.reviewer.model, undefined, 'model the provider lacks must be removed');
+      assert.deepStrictEqual(config.agent.reviewer.permission, { edit: 'deny' }, 'other invalid-agent fields preserved');
+      assert.strictEqual(config.agent.critic.model, undefined, 'malformed model ref must be removed');
+      assert.strictEqual(config.agent.critic.mode, 'subagent', 'malformed model removal preserves other fields');
+      assert.strictEqual(config.mode.legacy.model, undefined, 'every provider gets the same check');
+      assert.ok(
+        logs.some((l) => /local\/foo.*not found/i.test(l.message ?? '')),
+        'dropping a missing model should be logged',
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
 
-    console.log('✅ run_parallel does not hang init when agents() is slow');
+    console.log('✅ config hook drops models the provider does not have');
   }
 
-  // --- run_parallel filters invalid entries from a mixed list ---
-  // When the live list contains a mix of usable and unusable entries, the
-  // enum must include only the usable ones — no crash on the bad entries,
-  // and no leakage of empty strings or null into the schema.
+  // --- config hook does not guess when the provider can't be reached ---
+  // No baseURL / unreachable provider → we can't ask, so we don't touch a
+  // syntactically valid reference. Only malformed strings are removed.
 
   {
-    const { z } = await import('zod');
-    const mixedClient = {
-      app: {
-        log: async () => {},
-        agents: async () => ({
-          data: [
-            { name: 'good-one' },
-            { name: '' },              // empty string — drop
-            { name: null },            // null — drop
-            { name: 42 },              // wrong type — drop
-            {},                        // missing name — drop
-            { name: 'good-two' },
-          ],
-        }),
+    const logs = [];
+    const client = { app: { log: async ({ body }) => { logs.push(body); } } };
+    const p = await ErgonPlugin({ client, directory: '/tmp' });
+    const config = {
+      // 'local' has no provider entry → no baseURL → cannot be probed.
+      agent: {
+        coder: { model: 'local/foo' },
+        critic: { model: 'broken' },
       },
     };
-    const p = await ErgonPlugin({ client: mixedClient, directory: '/tmp' });
-    const argsSchema = z.object(p.tool.run_parallel.args);
 
-    assert.doesNotThrow(
-      () => argsSchema.parse({ tasks: [{ agent: 'good-one', brief: 'x' }] }),
-      'good-one must be accepted',
-    );
-    assert.doesNotThrow(
-      () => argsSchema.parse({ tasks: [{ agent: 'good-two', brief: 'x' }] }),
-      'good-two must be accepted',
-    );
-    assert.throws(
-      () => argsSchema.parse({ tasks: [{ agent: '', brief: 'x' }] }),
-      'empty string must be rejected (not silently included)',
-    );
-    assert.throws(
-      () => argsSchema.parse({ tasks: [{ agent: 'unknown', brief: 'x' }] }),
-      'name not in filtered list must be rejected',
+    await p.config(config);
+
+    assert.strictEqual(config.agent.coder.model, 'local/foo', 'unverifiable model is left alone');
+    assert.strictEqual(config.agent.critic.model, undefined, 'malformed model still removed');
+    assert.ok(
+      logs.some((l) => /not validated|returned no model list/i.test(l.message ?? '')),
+      'inability to validate should be logged',
     );
 
-    const desc = p.tool.run_parallel.description;
-    assert.ok(desc.includes('good-one'), 'description includes good-one');
-    assert.ok(desc.includes('good-two'), 'description includes good-two');
-    assert.ok(!desc.includes('null'), 'description excludes null entries');
+    console.log('✅ config hook does not guess when provider is unreachable');
+  }
 
-    console.log('✅ run_parallel filters invalid entries from mixed agent list');
+  // --- config hook does not hang startup when the provider's endpoint stalls ---
+  // The config hook runs inside opencode's awaited startup. If the provider's
+  // /models request never resolves, opencode's entire launch would block with
+  // it — a frozen process, no TUI, no error (the bug that actually shipped).
+  // The probe MUST be bounded; on timeout we leave the reference untouched.
+
+  {
+    const logs = [];
+    const client = { app: { log: async ({ body }) => { logs.push(body); } } };
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = () => new Promise(() => { /* never resolves */ });
+
+    try {
+      // Small timeout so the suite stays fast while exercising the real path.
+      const p = await createErgonPlugin({ providerLookupTimeoutMs: 200 })({
+        client,
+        directory: '/tmp',
+      });
+      const config = {
+        provider: { local: { options: { baseURL: 'http://stall.test/v1' } } },
+        agent: {
+          coder: { model: 'local/foo' },
+          critic: { model: 'broken' },
+        },
+      };
+
+      const start = Date.now();
+      await Promise.race([
+        p.config(config),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('config hook hung')), 3000)),
+      ]);
+      const elapsed = Date.now() - start;
+
+      assert.ok(elapsed < 3000, `config hook must complete even when the provider stalls (took ${elapsed}ms)`);
+      assert.ok(elapsed >= 150, `config hook must actually wait the configured timeout (took ${elapsed}ms)`);
+      assert.strictEqual(config.agent.coder.model, 'local/foo', 'unverifiable model preserved when probe times out');
+      assert.strictEqual(config.agent.critic.model, undefined, 'malformed model still removed on timeout');
+      assert.ok(
+        logs.some((l) => /not validated|returned no model list/i.test(l.message ?? '')),
+        'probe timeout must be logged so the user can diagnose it',
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+
+    console.log('✅ config hook does not hang startup when the provider endpoint stalls');
   }
 
   // --- auto-inject conventions via experimental hooks ---

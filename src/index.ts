@@ -9,18 +9,20 @@ export interface ErgonPluginDeps {
   steward?: StewardClient
   memory?: MemoryClient
   /**
-   * Maximum time (ms) to wait for opencode's GET /agent endpoint at plugin
-   * init before falling back to a permissive run_parallel schema. Defaults
-   * to 15000ms. Tests inject small values to keep the suite fast.
-   */
-  agentLookupTimeoutMs?: number
-  /**
    * Maximum time (ms) to wait for an external recall call (steward rewrite +
    * memory recall) inside the chat.message hook. Defaults to 5000ms. The
    * hook is awaited by opencode, so an unbounded call stalls the user's
    * turn — this timeout protects against a hung steward or memory backend.
    */
   chatMessageTimeoutMs?: number
+  /**
+   * Maximum time (ms) to wait for a provider's models endpoint when
+   * validating agent model references in the config hook. Defaults to 3000ms.
+   * The config hook is awaited during opencode startup, so a slow or dead
+   * provider must not stall the launch — on timeout we leave the reference
+   * untouched. Tests inject small values to keep the suite fast.
+   */
+  providerLookupTimeoutMs?: number
 }
 
 /**
@@ -54,6 +56,145 @@ async function raceWithTimeout<T>(
 }
 
 const TIMEOUT_SENTINEL = Symbol("ergon-plugin-timeout")
+
+function parseModelRef(model: unknown): { providerID: string; modelID: string } | null {
+  if (typeof model !== "string") return null
+  const slashIdx = model.indexOf("/")
+  if (slashIdx <= 0 || slashIdx === model.length - 1) return null
+  return {
+    providerID: model.slice(0, slashIdx),
+    modelID: model.slice(slashIdx + 1),
+  }
+}
+
+async function logBestEffort(client: any, level: "info" | "warn", message: string): Promise<void> {
+  try {
+    await client.app.log({
+      body: {
+        service: "ergon-plugin",
+        level,
+        message,
+      },
+    })
+  } catch {
+    /* logging itself is best-effort */
+  }
+}
+
+// Ask a provider's own endpoint which models it actually serves. The
+// provider's coordinates (baseURL, optional apiKey) come straight from the
+// opencode config we're handed — so this works for any OpenAI-compatible
+// provider and never calls back into opencode. (Asking opencode's own
+// provider API from the config hook re-enters its boot and deadlocks the
+// launch.) Returns the set of model ids the provider reports, or null if we
+// couldn't reach it / it answered with something unusable.
+async function fetchProviderModels(
+  config: any,
+  providerID: string,
+  timeoutMs: number,
+): Promise<Set<string> | null> {
+  const provider = config?.provider?.[providerID]
+  const baseURL = provider?.options?.baseURL
+  if (typeof baseURL !== "string" || baseURL.length === 0) return null
+
+  const url = `${baseURL.replace(/\/+$/, "")}/models`
+  const headers: Record<string, string> = { accept: "application/json" }
+  const apiKey = provider?.options?.apiKey
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    headers.authorization = `Bearer ${apiKey}`
+  }
+
+  const r = await raceWithTimeout(
+    fetch(url, { headers }).then((res) => (res.ok ? res.json() : null)),
+    timeoutMs,
+    `models@${providerID}`,
+  )
+  if (!r.ok) return null
+
+  // OpenAI-compatible shape: { data: [{ id }, ...] }. Tolerate a bare array
+  // and bare string ids too.
+  const value = r.value as any
+  const list = Array.isArray(value) ? value : value?.data
+  if (!Array.isArray(list)) return null
+
+  const ids = new Set<string>()
+  for (const m of list) {
+    const id = typeof m === "string" ? m : m?.id
+    if (typeof id === "string" && id.length > 0) ids.add(id)
+  }
+  return ids
+}
+
+async function sanitizeAgentModels(
+  config: any,
+  client: any,
+  timeoutMs: number,
+): Promise<void> {
+  const agentGroups = [
+    ["agent", config?.agent],
+    ["mode", config?.mode],
+  ] as const
+
+  // Collect every agent/mode that pins a model. A reference that isn't even
+  // "provider/model" can't be checked against any provider, so drop it now —
+  // opencode falls back to the default model.
+  const refs: Array<{
+    group: string
+    agent: string
+    model: string
+    parsed: { providerID: string; modelID: string }
+    target: any
+  }> = []
+
+  for (const [group, agents] of agentGroups) {
+    if (!agents || typeof agents !== "object") continue
+    for (const [agent, target] of Object.entries(agents)) {
+      if (!target || typeof target !== "object") continue
+      if (!Object.prototype.hasOwnProperty.call(target, "model")) continue
+      const model = (target as any).model
+      const parsed = parseModelRef(model)
+      if (!parsed) {
+        delete (target as any).model
+        await logBestEffort(
+          client,
+          "warn",
+          `agent "${agent}" ${group}.model ignored (invalid model reference); using default model`,
+        )
+        continue
+      }
+      refs.push({ group, agent, model, parsed, target })
+    }
+  }
+
+  if (refs.length === 0) return
+
+  // One probe per distinct provider — ask each provider what it actually has.
+  const modelsByProvider = new Map<string, Set<string> | null>()
+  for (const providerID of new Set(refs.map((r) => r.parsed.providerID))) {
+    modelsByProvider.set(providerID, await fetchProviderModels(config, providerID, timeoutMs))
+  }
+
+  for (const ref of refs) {
+    const available = modelsByProvider.get(ref.parsed.providerID)
+    if (!available) {
+      // Provider unreachable / no usable list — don't guess. Only act when we
+      // actually know the model isn't there.
+      await logBestEffort(
+        client,
+        "warn",
+        `agent "${ref.agent}" ${ref.group}.model "${ref.model}" not validated; provider "${ref.parsed.providerID}" returned no model list`,
+      )
+      continue
+    }
+    if (available.has(ref.parsed.modelID)) continue
+    delete ref.target.model
+    await logBestEffort(
+      client,
+      "warn",
+      `agent "${ref.agent}" ${ref.group}.model "${ref.model}" not found on provider; using default model`,
+    )
+  }
+}
 
 function extractText(parts: any[]): string {
   if (!Array.isArray(parts)) return ""
@@ -155,85 +296,15 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
       return existsSync(p) ? readFileSync(p, "utf8") : null
     }
 
-    // Fetch the live agent list once at plugin init so the run_parallel
-    // schema can constrain to whatever opencode would actually accept.
-    // Without this, the LLM hallucinates names like "bash" (confusing
-    // run_parallel with the bash built-in tool) and the call surfaces as
-    // an `Agent not found: "bash"` error from inside opencode. By querying
-    // GET /agent up front and building a Zod enum from the result, the
-    // bad call gets rejected at the harness boundary with a schema error
-    // the LLM can self-correct from.
-    //
-    // CRITICAL: opencode loads plugins synchronously at startup. If this
-    // call hangs (server still warming up, slow MCP, network hiccup),
-    // opencode's entire startup blocks with it — the user sees a frozen
-    // process with no error. Always bound the lookup with a timeout and
-    // fall back to the permissive string schema if it expires, fails, or
-    // the harness doesn't expose app.agents at all.
-    const AGENT_LOOKUP_TIMEOUT_MS = deps.agentLookupTimeoutMs ?? 15000
     const chatMessageTimeoutMs = deps.chatMessageTimeoutMs ?? 5000
-    let agentNames: string[] | null = null
-    let fallbackReason: string | null = null
-    try {
-      const anyClient = client as any
-      if (typeof anyClient?.app?.agents !== "function") {
-        fallbackReason = "client.app.agents unavailable"
-      } else {
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`agent lookup timeout after ${AGENT_LOOKUP_TIMEOUT_MS}ms`)),
-            AGENT_LOOKUP_TIMEOUT_MS,
-          )
-        })
-        try {
-          const res: any = await Promise.race([anyClient.app.agents(), timeoutPromise])
-          const list = res?.data
-          if (Array.isArray(list)) {
-            const names = list
-              .map((a: any) => a?.name)
-              .filter((n: any): n is string => typeof n === "string" && n.length > 0)
-            if (names.length > 0) agentNames = names
-            else fallbackReason = "agent lookup returned no usable names"
-          } else {
-            fallbackReason = "agent lookup returned non-array data"
-          }
-        } finally {
-          if (timer) clearTimeout(timer)
-        }
-      }
-    } catch (err) {
-      fallbackReason = err instanceof Error ? err.message : String(err)
-    }
-
-    if (fallbackReason) {
-      // Make the fallback observable. Without this the user sees an
-      // unconstrained schema and has no idea why — silent degradation
-      // is the worst kind.
-      try {
-        await client.app.log({
-          body: {
-            service: "ergon-plugin",
-            level: "warn",
-            message: `run_parallel agent enum disabled (fallback to string): ${fallbackReason}`,
-          },
-        })
-      } catch {
-        /* logging itself is best-effort */
-      }
-    }
-
-    const agentArg = agentNames
-      ? tool.schema
-          .enum(agentNames as [string, ...string[]])
-          .describe("Agent name to run")
-      : tool.schema.string().describe("Agent name to run")
-
-    const validAgentList = agentNames
-      ? `Valid agent names: ${agentNames.join(", ")}. `
-      : ""
+    const providerLookupTimeoutMs = deps.providerLookupTimeoutMs ?? 3000
+    const agentArg = tool.schema.string().describe("Agent name to run")
 
     return {
+      config: async (config) => {
+        await sanitizeAgentModels(config, client, providerLookupTimeoutMs)
+      },
+
       event: async ({ event }) => {
         if (event.type === "session.created") {
           await client.app.log({
@@ -423,7 +494,6 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
           description:
             "Run multiple agents in parallel and return their combined output. " +
             "Each task specifies an agent name and a brief. All tasks execute concurrently. " +
-            validAgentList +
             "This tool delegates to LLM agents — it is NOT a way to run shell commands or built-in tools. " +
             "Avoid using write-capable agents (e.g. coder) in parallel — they may conflict on shared files.",
           args: {

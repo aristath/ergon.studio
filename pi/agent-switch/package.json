@@ -1,0 +1,40 @@
+{
+  "name": "@ergon.studio/pi-agent-switch",
+  "version": "0.1.0",
+  "description": "Pi extension: interactive /agent selector and active-agent context persistence",
+  "author": "Aristath Stathopoulos <aristath@gmail.com>",
+  "type": "module",
+  "main": "extensions/agent-switch.ts",
+  "files": [
+    "extensions/"
+  ],
+  "scripts": {
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public",
+    "pack:check": "npm pack --dry-run"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "agent-switch"
+  ],
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aristath/ergon.studio"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

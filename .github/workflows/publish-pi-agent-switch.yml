@@ -1,0 +1,61 @@
+name: Publish pi-agent-switch to npm
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional explicit version (defaults to release tag suffix when run from a release)"
+        required: false
+        type: string
+
+jobs:
+  publish-pi-agent-switch:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'pi-agent-switch-v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+      - name: Resolve release version
+        id: version
+        env:
+          EVENT_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ -n "$EVENT_TAG" ]; then
+            if [[ "$EVENT_TAG" != pi-agent-switch-v* ]]; then
+              echo "Skipping: release tag '$EVENT_TAG' is not a pi-agent-switch release tag"
+              exit 0
+            fi
+            VERSION="${EVENT_TAG#pi-agent-switch-v}"
+          else
+            VERSION=""
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Pack and publish
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+        run: |
+          set -euo pipefail
+          cd pi/agent-switch
+
+          if [ -n "$VERSION" ]; then
+            echo "Setting package version to $VERSION"
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+          fi
+
+          npm run pack:check
+          npm publish --access public
+          echo "Published @ergon.studio/pi-agent-switch${VERSION:+@$VERSION}"

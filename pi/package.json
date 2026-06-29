@@ -1,0 +1,14 @@
+{
+  "name": "ergon.studio-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi agent extensions for ergon.studio — monorepo",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build packages/*/tsconfig.json",
+    "clean": "rm -rf packages/*/dist",
+    "test": "npm --workspaces --if-present test"
+  }
+}

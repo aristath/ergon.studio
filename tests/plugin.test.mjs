@@ -98,6 +98,73 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   console.log('✅ run_parallel unit tests passed');
 
+  // --- debate unit tests ---
+
+  {
+    const debateSessions = new Map();
+    const debatePrompts = [];
+    let debateSessionCounter = 0;
+
+    const debateClient = {
+      app: { log: async () => {} },
+      session: {
+        create: async ({ body }) => {
+          const id = `debate-session-${++debateSessionCounter}`;
+          debateSessions.set(id, { body, deleted: false });
+          return { data: { id } };
+        },
+        prompt: async ({ path: p, body }) => {
+          debatePrompts.push({ path: p, body });
+          if (body.agent === 'coder') {
+            return {
+              data: {
+                parts: [{ type: 'text', text: 'Implemented the first pass.\nVerdict: CONTINUE' }],
+              },
+            };
+          }
+          return {
+            data: {
+              parts: [{ type: 'text', text: 'Reviewed the first pass. This is optimal.\nVerdict: AGREE' }],
+            },
+          };
+        },
+        delete: async ({ path: p }) => {
+          const s = debateSessions.get(p.id);
+          if (s) s.deleted = true;
+          return { data: true };
+        },
+      },
+    };
+
+    const debatePlugin = await ErgonPlugin({ client: debateClient, directory: '/tmp' });
+    assert.ok(debatePlugin.tool?.debate, 'debate tool should be registered');
+    assert.strictEqual(typeof debatePlugin.tool.debate.execute, 'function', 'debate should have execute');
+
+    const debateOutput = await debatePlugin.tool.debate.execute(
+      { agent_a: 'coder', agent_b: 'reviewer', task: 'Improve the parser.' },
+      context,
+    );
+
+    assert.strictEqual(debateSessions.size, 2, 'debate should create one session per participant');
+    for (const [id, session] of debateSessions) {
+      assert.ok(session.deleted, `debate session ${id} should be deleted after use`);
+      assert.strictEqual(session.body.parentID, 'parent-123', 'debate sessions should carry parent ID');
+    }
+
+    assert.strictEqual(debatePrompts.length, 2, 'debate should stop when the second agent agrees');
+    assert.strictEqual(debatePrompts[0].body.agent, 'coder', 'agent A takes the first turn');
+    assert.strictEqual(debatePrompts[1].body.agent, 'reviewer', 'agent B takes the second turn');
+    assert.ok(
+      debatePrompts[1].body.parts[0].text.includes('Implemented the first pass'),
+      'second agent should receive the first agent output',
+    );
+    assert.ok(debateOutput.includes('Status: AGREE'), 'debate output should report agreement');
+    assert.ok(debateOutput.includes('## Latest response'), 'debate output should include latest response');
+    assert.ok(debateOutput.includes('## Transcript'), 'debate output should include transcript');
+
+    console.log('✅ debate unit tests passed');
+  }
+
   // --- scratchpad skill validation ---
 
   const skillPath = path.resolve(__dirname, '..', 'skills', 'scratchpad', 'SKILL.md');

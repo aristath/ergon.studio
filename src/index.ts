@@ -205,6 +205,85 @@ function extractText(parts: any[]): string {
     .trim()
 }
 
+type DebateVerdict = "AGREE" | "CONTINUE" | "BLOCKED"
+
+function parseDebateVerdict(text: string): DebateVerdict {
+  const match = text.match(/(?:^|\n)\s*Verdict:\s*(AGREE|CONTINUE|BLOCKED)\b/i)
+  if (!match) return "CONTINUE"
+  return match[1].toUpperCase() as DebateVerdict
+}
+
+function debatePrompt(
+  task: string,
+  selfAgent: string,
+  peerAgent: string,
+  peerOutput?: string,
+): string {
+  const verdict =
+    "End with exactly one line: Verdict: AGREE, Verdict: CONTINUE, or Verdict: BLOCKED."
+
+  if (!peerOutput) {
+    return [
+      `You are ${selfAgent} in a two-agent coding debate with ${peerAgent}.`,
+      "",
+      "Task:",
+      task,
+      "",
+      "Do the first pass. If code changes are needed, make the changes you believe are right.",
+      "Keep the response focused: what you did or propose, why, and what needs review.",
+      "Use Verdict: CONTINUE unless you cannot proceed without the user.",
+      verdict,
+    ].join("\n")
+  }
+
+  return [
+    `You are ${selfAgent} in a two-agent coding debate with ${peerAgent}.`,
+    "",
+    "Task:",
+    task,
+    "",
+    `${peerAgent}'s latest response:`,
+    peerOutput,
+    "",
+    "Review it directly. If you agree it is optimal, say why and use Verdict: AGREE.",
+    "If it needs work and you can improve it, make the changes or propose the correction, then use Verdict: CONTINUE.",
+    "If the user needs to decide something before progress is possible, use Verdict: BLOCKED and name the decision.",
+    verdict,
+  ].join("\n")
+}
+
+function renderDebateTranscript(input: {
+  status: DebateVerdict | "FAILED" | "MAX_TURNS"
+  agentA: string
+  agentB: string
+  entries: Array<{ turn: number; agent: string; text: string; verdict: DebateVerdict }>
+  error?: string
+}): string {
+  const lines = [
+    "# Debate result",
+    "",
+    `Status: ${input.status}`,
+    `Participants: ${input.agentA}, ${input.agentB}`,
+    `Turns: ${input.entries.length}`,
+  ]
+
+  if (input.error) {
+    lines.push("", "## Error", "", input.error)
+  }
+
+  const latest = input.entries.at(-1)
+  if (latest) {
+    lines.push("", "## Latest response", "", `### ${latest.agent}`, "", latest.text)
+  }
+
+  lines.push("", "## Transcript")
+  for (const entry of input.entries) {
+    lines.push("", `### Turn ${entry.turn} - ${entry.agent}`, "", entry.text)
+  }
+
+  return lines.join("\n")
+}
+
 async function handleSessionIdle(
   sessionID: string,
   client: any,
@@ -490,6 +569,96 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
       },
 
       tool: {
+        debate: tool({
+          description:
+            "Run two agents in an alternating coding debate. " +
+            "Agent A does the first pass, Agent B reviews or improves it, then they alternate until one agrees, blocks, or max_turns is reached. " +
+            "Use this when you want intentional cross-review and convergence, not isolated parallel opinions.",
+          args: {
+            agent_a: agentArg.describe("First agent. This agent takes the first turn."),
+            agent_b: agentArg.describe("Second agent. This agent reviews or improves the first turn."),
+            task: tool.schema.string().describe("Short, specific task or question for the debate"),
+            max_turns: tool.schema
+              .number()
+              .int()
+              .min(2)
+              .max(12)
+              .optional()
+              .describe("Maximum total agent turns, including the first turn. Defaults to 6."),
+          },
+          async execute(args, context) {
+            const maxTurns = args.max_turns ?? 6
+            const entries: Array<{ turn: number; agent: string; text: string; verdict: DebateVerdict }> = []
+            const sessions: Array<{ id: string; agent: string }> = []
+
+            try {
+              for (const agent of [args.agent_a, args.agent_b]) {
+                const created = await client.session.create({
+                  body: {
+                    title: `${agent} (debate)`,
+                    parentID: context.sessionID,
+                  },
+                })
+                const id = created.data?.id
+                if (!id) throw new Error(`Failed to create debate session for ${agent}`)
+                sessions.push({ id, agent })
+              }
+
+              let latestText = ""
+              let status: DebateVerdict | "MAX_TURNS" = "MAX_TURNS"
+
+              for (let turn = 1; turn <= maxTurns; turn++) {
+                const current = sessions[(turn - 1) % 2]
+                const peer = sessions[turn % 2]
+                const prompt = debatePrompt(
+                  args.task,
+                  current.agent,
+                  peer.agent,
+                  turn === 1 ? undefined : latestText,
+                )
+
+                const response = await client.session.prompt({
+                  path: { id: current.id },
+                  body: {
+                    agent: current.agent,
+                    parts: [{ type: "text", text: prompt }],
+                  },
+                })
+
+                const text = extractText(response.data?.parts as any[])
+                const verdict = parseDebateVerdict(text)
+                entries.push({ turn, agent: current.agent, text, verdict })
+                latestText = text
+
+                if (turn > 1 && (verdict === "AGREE" || verdict === "BLOCKED")) {
+                  status = verdict
+                  break
+                }
+              }
+
+              return renderDebateTranscript({
+                status,
+                agentA: args.agent_a,
+                agentB: args.agent_b,
+                entries,
+              })
+            } catch (err) {
+              return renderDebateTranscript({
+                status: "FAILED",
+                agentA: args.agent_a,
+                agentB: args.agent_b,
+                entries,
+                error: err instanceof Error ? err.message : String(err),
+              })
+            } finally {
+              await Promise.all(
+                sessions.map(async ({ id }) => {
+                  try { await client.session.delete({ path: { id } }) } catch {}
+                })
+              )
+            }
+          },
+        }),
         run_parallel: tool({
           description:
             "Run multiple agents in parallel and return their combined output. " +

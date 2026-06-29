@@ -1,0 +1,14 @@
+[Unit]
+Description=Granite Embedding Server (memory backend for ergon)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/ergon-memory-steward.env
+Environment=HOME=%h
+ExecStart=/usr/bin/env bash -lc 'exec "${ERGON_MEMORY_STEWARD_DIR:?Set ERGON_MEMORY_STEWARD_DIR in ~/.config/ergon-memory-steward.env}/scripts/run-embedder.sh"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

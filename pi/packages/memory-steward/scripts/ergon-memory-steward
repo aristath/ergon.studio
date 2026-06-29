@@ -1,0 +1,421 @@
+#!/usr/bin/env bash
+# Self-contained setup and operations for @ergon.studio/pi-memory-steward.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ergon-memory-steward"
+MODEL_DIR="$DATA_DIR/models"
+SYSTEMD_DIR="$CONFIG_DIR/systemd/user"
+ENV_FILE="$CONFIG_DIR/ergon-memory-steward.env"
+PROMPTS_FILE="$PACKAGE_DIR/prompts/steward.md"
+OLD_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/ergon-memory/memory.sqlite"
+
+STEWARD_SERVICE=ergon-steward.service
+EMBEDDER_SERVICE=ergon-embedder.service
+
+usage() {
+	cat <<'EOF'
+Usage: ergon-memory-steward <command> [options]
+
+Commands:
+  setup [--start] [--enable-linger]
+      Generate config, provision model files, install services, and optionally start them.
+
+  doctor
+      Verify config, model files, systemd units, HTTP endpoints, embeddings, and SQLite state.
+
+  install-services [--start]
+      Install only the user systemd units and env file. Kept for script compatibility.
+
+  start | stop | restart | status | logs | env
+      Operate on the dedicated user services and generated env file.
+
+Setup options:
+  --llama-server PATH
+  --steward-model PATH
+  --embedder-model PATH
+  --data-dir PATH
+  --db-path PATH
+  --start
+  --enable-linger
+
+Reserved ports:
+  steward:  18091
+  embedder: 18092
+EOF
+}
+
+die() {
+	echo "ERROR: $*" >&2
+	exit 1
+}
+
+warn() {
+	echo "WARN: $*" >&2
+}
+
+info() {
+	echo "$*"
+}
+
+fm_get() {
+	local key="$1"
+	awk -F': *' -v k="$key" '
+		/^---[[:space:]]*$/ { c++; next }
+		c == 1 && /^[[:space:]]*#/ { next }
+		c == 1 && /^[[:space:]]*$/ { next }
+		c == 1 && $1 == k { sub(/^[^:]*:[[:space:]]*/, ""); print; exit }
+	' "$PROMPTS_FILE"
+}
+
+expand_home() {
+	local path="$1"
+	if [ "$path" = "~" ]; then
+		printf '%s\n' "$HOME"
+	elif [[ "$path" == "~/"* ]]; then
+		printf '%s/%s\n' "$HOME" "${path#~/}"
+	else
+		printf '%s\n' "$path"
+	fi
+}
+
+env_escape() {
+	local value="$1"
+	value="${value//\\/\\\\}"
+	value="${value//\"/\\\"}"
+	printf '"%s"' "$value"
+}
+
+systemd_value() {
+	local value="$1"
+	value="${value//\\/\\\\}"
+	value="${value// /\\x20}"
+	value="${value//%/%%}"
+	printf '%s' "$value"
+}
+
+source_env() {
+	if [ -f "$ENV_FILE" ]; then
+		set -a
+		# shellcheck disable=SC1090
+		. "$ENV_FILE"
+		set +a
+	fi
+}
+
+resolve_executable() {
+	local candidate="$1"
+	shift || true
+
+	if [ -n "$candidate" ]; then
+		candidate="$(expand_home "$candidate")"
+		if [ -x "$candidate" ]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+		if command -v "$candidate" >/dev/null 2>&1; then
+			command -v "$candidate"
+			return 0
+		fi
+	fi
+
+	for candidate in "$@"; do
+		candidate="$(expand_home "$candidate")"
+		if [ -x "$candidate" ]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+first_existing_file() {
+	local candidate
+	for candidate in "$@"; do
+		[ -n "$candidate" ] || continue
+		candidate="$(expand_home "$candidate")"
+		if [ -f "$candidate" ]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+provision_model() {
+	local source="$1"
+	local target="$2"
+	[ -f "$source" ] || die "model source not found: $source"
+	mkdir -p "$(dirname "$target")"
+	if [ -f "$target" ]; then
+		info "Model already present: $target"
+		return 0
+	fi
+	if ln "$source" "$target" 2>/dev/null; then
+		info "Hardlinked model: $target"
+	else
+		info "Copying model to: $target"
+		cp -p "$source" "$target"
+	fi
+}
+
+write_env() {
+	local llama_server="$1"
+	local steward_model="$2"
+	local embedder_model="$3"
+	local db_path="$4"
+
+	mkdir -p "$CONFIG_DIR" "$(dirname "$db_path")"
+	cat >"$ENV_FILE" <<EOF
+ERGON_MEMORY_STEWARD_DIR=$(env_escape "$PACKAGE_DIR")
+ERGON_LLAMA_SERVER_BIN=$(env_escape "$llama_server")
+ERGON_STEWARD_URL="http://127.0.0.1:18091"
+ERGON_STEWARD_PORT="18091"
+ERGON_STEWARD_MODEL="ergon-studio-memory-steward"
+ERGON_STEWARD_MODEL_PATH=$(env_escape "$steward_model")
+ERGON_STEWARD_DEVICE=$(env_escape "${ERGON_STEWARD_DEVICE:-$(fm_get device)}")
+ERGON_STEWARD_N_GPU_LAYERS=$(env_escape "${ERGON_STEWARD_N_GPU_LAYERS:-$(fm_get n_gpu_layers)}")
+ERGON_STEWARD_CTX_SIZE=$(env_escape "${ERGON_STEWARD_CTX_SIZE:-$(fm_get ctx_size)}")
+ERGON_STEWARD_TEMPERATURE=$(env_escape "${ERGON_STEWARD_TEMPERATURE:-$(fm_get temperature)}")
+ERGON_STEWARD_TOP_K=$(env_escape "${ERGON_STEWARD_TOP_K:-$(fm_get top_k)}")
+ERGON_STEWARD_TOP_P=$(env_escape "${ERGON_STEWARD_TOP_P:-$(fm_get top_p)}")
+ERGON_STEWARD_ENABLE_THINKING=$(env_escape "${ERGON_STEWARD_ENABLE_THINKING:-$(fm_get enable_thinking)}")
+ERGON_EMBEDDER_URL="http://127.0.0.1:18092"
+ERGON_EMBEDDER_PORT="18092"
+ERGON_EMBEDDER_MODEL=$(env_escape "${ERGON_EMBEDDER_MODEL:-$(fm_get embedder_model)}")
+ERGON_EMBEDDER_MODEL_PATH=$(env_escape "$embedder_model")
+ERGON_EMBEDDER_DIMENSIONS=$(env_escape "${ERGON_EMBEDDER_DIMENSIONS:-$(fm_get embedder_dimensions)}")
+ERGON_EMBEDDER_CTX_SIZE=$(env_escape "${ERGON_EMBEDDER_CTX_SIZE:-8192}")
+ERGON_EMBEDDER_N_GPU_LAYERS=$(env_escape "${ERGON_EMBEDDER_N_GPU_LAYERS:-$(fm_get n_gpu_layers)}")
+ERGON_MEMORY_DB_PATH=$(env_escape "$db_path")
+ERGON_RECALL_LIMIT=$(env_escape "${ERGON_RECALL_LIMIT:-$(fm_get recall_limit)}")
+EOF
+	info "Wrote $ENV_FILE"
+}
+
+install_services() {
+	mkdir -p "$SYSTEMD_DIR"
+	local env_file_unit
+	env_file_unit="$(systemd_value "$ENV_FILE")"
+
+	cat >"$SYSTEMD_DIR/$STEWARD_SERVICE" <<EOF
+[Unit]
+Description=Ergon Memory Steward llama.cpp Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$env_file_unit
+Environment=HOME=%h
+ExecStart=/usr/bin/env bash -lc 'exec "\${ERGON_MEMORY_STEWARD_DIR:?Set ERGON_MEMORY_STEWARD_DIR in the generated env file}/scripts/run-steward.sh"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+	cat >"$SYSTEMD_DIR/$EMBEDDER_SERVICE" <<EOF
+[Unit]
+Description=Granite Embedding Server (memory backend for ergon)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$env_file_unit
+Environment=HOME=%h
+ExecStart=/usr/bin/env bash -lc 'exec "\${ERGON_MEMORY_STEWARD_DIR:?Set ERGON_MEMORY_STEWARD_DIR in the generated env file}/scripts/run-embedder.sh"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+	systemctl --user daemon-reload
+	info "Installed $STEWARD_SERVICE and $EMBEDDER_SERVICE"
+}
+
+enable_linger() {
+	if loginctl enable-linger "$USER" 2>/dev/null; then
+		info "Enabled linger for $USER"
+	else
+		warn "Could not enable linger automatically. Run: loginctl enable-linger \"$USER\""
+	fi
+}
+
+setup() {
+	local start=0
+	local linger=0
+	source_env
+
+	local llama_server="${ERGON_LLAMA_SERVER_BIN:-}"
+	local steward_model="${ERGON_STEWARD_MODEL_PATH:-}"
+	local embedder_model="${ERGON_EMBEDDER_MODEL_PATH:-}"
+	local db_path="${ERGON_MEMORY_DB_PATH:-}"
+	local cli_data_dir=0
+	local cli_steward_model=0
+	local cli_embedder_model=0
+	local cli_db_path=0
+
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--start) start=1 ;;
+			--enable-linger) linger=1 ;;
+			--llama-server) shift; llama_server="${1:-}" ;;
+			--steward-model) shift; steward_model="${1:-}"; cli_steward_model=1 ;;
+			--embedder-model) shift; embedder_model="${1:-}"; cli_embedder_model=1 ;;
+			--data-dir) shift; DATA_DIR="$(expand_home "${1:-}")"; MODEL_DIR="$DATA_DIR/models"; cli_data_dir=1 ;;
+			--db-path) shift; db_path="$(expand_home "${1:-}")"; cli_db_path=1 ;;
+			*) die "unknown setup option: $1" ;;
+		esac
+		shift
+	done
+
+	if [ "$cli_data_dir" -eq 1 ]; then
+		if [ "$cli_steward_model" -eq 0 ]; then
+			steward_model=""
+		fi
+		if [ "$cli_embedder_model" -eq 0 ]; then
+			embedder_model=""
+		fi
+		if [ "$cli_db_path" -eq 0 ]; then
+			db_path=""
+		fi
+	fi
+
+	llama_server="$(resolve_executable \
+		"${llama_server:-$(fm_get llama_server_bin)}" \
+		"$HOME/llama.cpp/build-vulkan/bin/llama-server" \
+		"$HOME/llama.cpp-rocm/extracted/llama-server")" ||
+		die "could not find llama-server; pass --llama-server PATH"
+
+	local steward_source
+	steward_source="$(first_existing_file \
+		"$steward_model" \
+		"$(fm_get model_path)" \
+		"$HOME/models/qwen3.5/4b/UD-Q8_K_XL/Qwen3.5-4B-UD-Q8_K_XL.gguf")" ||
+		die "could not find steward GGUF; pass --steward-model PATH"
+
+	local embedder_source
+	embedder_source="$(first_existing_file \
+		"$embedder_model" \
+		"$(fm_get embedder_model_path)" \
+		"$HOME/models/granite/granite-embedding-311m-multilingual-r2-Q4_K_M.gguf" \
+		"/mnt/models/rpi-backup/home-aristath/.cache/qmd/models/granite-embedding-311M-multilingual-r2-Q4_K_M.gguf")" ||
+		die "could not find embedder GGUF; pass --embedder-model PATH"
+
+	local steward_target="$MODEL_DIR/$(basename "$steward_source")"
+	local embedder_target="$MODEL_DIR/granite-embedding-311m-multilingual-r2-Q4_K_M.gguf"
+	provision_model "$steward_source" "$steward_target"
+	provision_model "$embedder_source" "$embedder_target"
+
+	db_path="${db_path:-$DATA_DIR/memory.sqlite}"
+	if [ ! -f "$db_path" ] && [ -f "$OLD_DB_PATH" ]; then
+		mkdir -p "$(dirname "$db_path")"
+		cp -p "$OLD_DB_PATH" "$db_path"
+		info "Copied existing memory DB to: $db_path"
+	fi
+
+	write_env "$llama_server" "$steward_target" "$embedder_target" "$db_path"
+	install_services
+
+	if [ "$linger" -eq 1 ]; then
+		enable_linger
+	fi
+
+	if [ "$start" -eq 1 ]; then
+		systemctl --user enable "$STEWARD_SERVICE" "$EMBEDDER_SERVICE"
+		systemctl --user restart "$STEWARD_SERVICE" "$EMBEDDER_SERVICE"
+		info "Started services"
+	fi
+}
+
+doctor() {
+	source_env
+	local failed=0
+
+	check() {
+		local label="$1"
+		shift
+		if "$@" >/tmp/ergon-memory-steward-doctor.out 2>&1; then
+			echo "ok: $label"
+		else
+			failed=1
+			echo "fail: $label"
+			sed 's/^/  /' /tmp/ergon-memory-steward-doctor.out
+		fi
+	}
+
+	check "env file exists" test -f "$ENV_FILE"
+	check "llama-server executable" test -x "${ERGON_LLAMA_SERVER_BIN:-}"
+	check "steward model exists" test -f "${ERGON_STEWARD_MODEL_PATH:-}"
+	check "embedder model exists" test -f "${ERGON_EMBEDDER_MODEL_PATH:-}"
+	check "memory DB directory exists" test -d "$(dirname "${ERGON_MEMORY_DB_PATH:-$DATA_DIR/memory.sqlite}")"
+	check "steward service active" systemctl --user is-active --quiet "$STEWARD_SERVICE"
+	check "embedder service active" systemctl --user is-active --quiet "$EMBEDDER_SERVICE"
+	check "steward models endpoint" curl -fsS --max-time 5 "${ERGON_STEWARD_URL:-http://127.0.0.1:18091}/v1/models"
+	check "embedder models endpoint" curl -fsS --max-time 5 "${ERGON_EMBEDDER_URL:-http://127.0.0.1:18092}/v1/models"
+	check "embedding dimensions" bash -c '
+		json="$(curl -fsS --max-time 10 "${ERGON_EMBEDDER_URL:-http://127.0.0.1:18092}/v1/embeddings" \
+			-H "Content-Type: application/json" \
+			-d "{\"model\":\"${ERGON_EMBEDDER_MODEL:-granite-embedding-311m}\",\"input\":\"doctor\"}")"
+		dims="$(node -e "const data=JSON.parse(process.argv[1]); console.log(data.data?.[0]?.embedding?.length ?? 0)" "$json")"
+		test "$dims" = "${ERGON_EMBEDDER_DIMENSIONS:-768}"
+	'
+
+	rm -f /tmp/ergon-memory-steward-doctor.out
+	if [ "$failed" -eq 0 ]; then
+		echo "memory steward doctor passed"
+	else
+		exit 1
+	fi
+}
+
+install_services_only() {
+	local start=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--start) start=1 ;;
+			*) die "unknown install-services option: $1" ;;
+		esac
+		shift
+	done
+	[ -f "$ENV_FILE" ] || die "$ENV_FILE does not exist; run setup first"
+	install_services
+	if [ "$start" -eq 1 ]; then
+		systemctl --user enable "$STEWARD_SERVICE" "$EMBEDDER_SERVICE"
+		systemctl --user restart "$STEWARD_SERVICE" "$EMBEDDER_SERVICE"
+	fi
+}
+
+show_env() {
+	if [ -f "$ENV_FILE" ]; then
+		cat "$ENV_FILE"
+	else
+		die "$ENV_FILE does not exist; run setup first"
+	fi
+}
+
+command="${1:-}"
+if [ -n "$command" ]; then
+	shift
+fi
+
+case "$command" in
+	setup) setup "$@" ;;
+	doctor) doctor ;;
+	install-services) install_services_only "$@" ;;
+	start) systemctl --user start "$STEWARD_SERVICE" "$EMBEDDER_SERVICE" ;;
+	stop) systemctl --user stop "$STEWARD_SERVICE" "$EMBEDDER_SERVICE" ;;
+	restart) systemctl --user restart "$STEWARD_SERVICE" "$EMBEDDER_SERVICE" ;;
+	status) systemctl --user status "$STEWARD_SERVICE" "$EMBEDDER_SERVICE" --no-pager ;;
+	logs) journalctl --user -u "$STEWARD_SERVICE" -u "$EMBEDDER_SERVICE" -f ;;
+	env) show_env ;;
+	-h | --help | help | "") usage ;;
+	*) die "unknown command: $command" ;;
+esac

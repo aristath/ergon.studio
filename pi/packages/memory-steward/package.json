@@ -1,0 +1,67 @@
+{
+	"name": "@ergon.studio/pi-memory-steward",
+	"version": "0.1.0",
+	"description": "Pi extension: cross-session memory via SQLite vector search, Granite embeddings, and a small steward LLM",
+	"author": "Aristath Stathopoulos <aristath@gmail.com>",
+	"type": "module",
+	"main": "extensions/index.ts",
+	"bin": {
+		"ergon-memory-steward": "./scripts/ergon-memory-steward"
+	},
+	"files": [
+		"src/",
+		"extensions/",
+		"prompts/",
+		"scripts/ergon-memory-steward",
+		"scripts/install-systemd-services.sh",
+		"scripts/llama-server-supervisor.sh",
+		"scripts/run-embedder.sh",
+		"scripts/run-steward.sh"
+	],
+	"scripts": {
+		"build": "tsc --build tsconfig.json",
+		"test": "npm run build && node --test tests/*.test.mjs",
+		"setup": "./scripts/ergon-memory-steward setup",
+		"doctor": "./scripts/ergon-memory-steward doctor",
+		"release:patch": "npm version patch && npm publish --access public",
+		"release:minor": "npm version minor && npm publish --access public",
+		"release:major": "npm version major && npm publish --access public",
+		"pack:check": "npm pack --dry-run"
+	},
+	"pi": {
+		"extensions": [
+			"./extensions"
+		]
+	},
+	"keywords": [
+		"pi-package",
+		"pi",
+		"extension",
+		"memory",
+		"vector-search"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/aristath/ergon.studio"
+	},
+	"dependencies": {
+		"better-sqlite3": "^11.0.0",
+		"sqlite-vec": "^0.1.6"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "latest",
+		"@types/better-sqlite3": "^7.6.0",
+		"prettier": "^3.9.1",
+		"typescript": "^5.0.0"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

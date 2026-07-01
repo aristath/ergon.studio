@@ -10,7 +10,9 @@ OpenCode plugin; Pi work stays separate here.
 
 | Package                                                       | Description                                                                                             | Runtime needs                                                 |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`@ergon.studio/pi-brainstormer`](packages/brainstormer/)     | Freeform `/brainstorm` mode for exploratory thinking before planning                                    | none                                                          |
 | [`@ergon.studio/pi-memory-steward`](packages/memory-steward/) | Cross-session memory with SQLite vector search, Granite embeddings, and a small steward LLM             | two local user services on reserved ports `18091` and `18092` |
+| [`@ergon.studio/pi-orchestrator`](packages/orchestrator-mode/) | Legacy Ergon `/orchestrator` mode with bundled specialist agents and agent-owned quality gate           | none                                                          |
 | [`@ergon.studio/pi-plan`](packages/plan-mode/)                | Scout-inspired `/plan` mode for read-only architecture planning and `.ergon.studio/HANDOFF.md` creation | none                                                          |
 | [`@ergon.studio/pi-scratchpad`](packages/scratchpad/)         | Injects and maintains `.ergon.studio/scratchpad.md` when a project opts in                              | none                                                          |
 
@@ -34,7 +36,9 @@ Local development install:
 
 ```bash
 cd /path/to/ergon.studio
+pi install ./pi/packages/brainstormer
 pi install ./pi/packages/memory-steward
+pi install ./pi/packages/orchestrator-mode
 pi install ./pi/packages/plan-mode
 pi install ./pi/packages/scratchpad
 ```
@@ -42,7 +46,9 @@ pi install ./pi/packages/scratchpad
 After publishing:
 
 ```bash
+pi install npm:@ergon.studio/pi-brainstormer
 pi install npm:@ergon.studio/pi-memory-steward
+pi install npm:@ergon.studio/pi-orchestrator
 pi install npm:@ergon.studio/pi-plan
 pi install npm:@ergon.studio/pi-scratchpad
 ```
@@ -128,7 +134,13 @@ cd pi
 npm test
 npm run build
 
+cd packages/brainstormer
+npm pack --dry-run
+
 cd packages/memory-steward
+npm pack --dry-run
+
+cd ../orchestrator-mode
 npm pack --dry-run
 
 cd ../plan-mode

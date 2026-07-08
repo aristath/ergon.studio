@@ -1,16 +1,17 @@
 ---
 name: steward
 description: Memory steward — small background LLM for query rewriting and save judgment
-purpose: Loaded by src/steward.ts (client config + prompts) and scripts/run-steward.sh (service runtime config)
+purpose: Loaded by src/steward.ts for root ergon client config and prompts. Service runtime is owned by the Pi memory-steward package.
 
 # === Steward client config (read by src/steward.ts) ===
-url: http://127.0.0.1:8081
+url: http://127.0.0.1:18091
 model: ergon-studio-memory-steward
 temperature: 0.3
 
-# === Service runtime config (read by scripts/run-steward.sh) ===
-# Edit these to change which binary, model, or GPU device the steward uses.
-# Restart llama-steward.service after changes.
+# === Legacy standalone runner config (read only by scripts/run-steward.sh) ===
+# The active steward is ergon-steward.service from pi/packages/memory-steward.
+# Keep llama-steward.service disabled unless you are intentionally testing the
+# old standalone runner on this legacy port.
 port: 8081
 llama_server_bin: /home/aristath/llama.cpp/build-vulkan/bin/llama-server
 model_path: /home/aristath/models/qwen3.5/4b/UD-Q8_K_XL/Qwen3.5-4B-UD-Q8_K_XL.gguf

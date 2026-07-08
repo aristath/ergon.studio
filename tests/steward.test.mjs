@@ -26,7 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   // --- defaults are sensible ---
 
-  assert.strictEqual(DEFAULT_STEWARD_URL, 'http://127.0.0.1:8081');
+  assert.strictEqual(DEFAULT_STEWARD_URL, 'http://127.0.0.1:18091');
   assert.strictEqual(DEFAULT_STEWARD_MODEL, 'ergon-studio-memory-steward');
   assert.strictEqual(DEFAULT_TEMPERATURE, 0.3);
 
@@ -55,7 +55,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   // verify the request shape
   assert.ok(lastRequest, 'fetch should have been called');
-  assert.strictEqual(lastRequest.url, 'http://127.0.0.1:8081/v1/chat/completions');
+  assert.strictEqual(lastRequest.url, 'http://127.0.0.1:18091/v1/chat/completions');
   assert.strictEqual(lastRequest.init.method, 'POST');
   const body = JSON.parse(lastRequest.init.body);
   assert.strictEqual(body.model, 'ergon-studio-memory-steward');

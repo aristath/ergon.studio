@@ -10,13 +10,9 @@
 //      and decide whether anything durable is worth remembering. Returns the
 //      content to save, or null.
 //
-// Both the client config (URL, model, temperature) and the two prompts live
-// in a single file: `prompts/steward.md`. Its YAML frontmatter holds the
-// configuration, and its body has `## rewrite` and `## judge` sections with
-// the prompts. A companion bash script `scripts/run-steward.sh` parses the
-// *same* frontmatter at runtime to invoke llama-server — so editing
-// prompts/steward.md changes both the service runtime and the ergon client
-// in lockstep. That's the single source of truth.
+// Client config (URL, model, temperature) and the two prompts live in
+// `prompts/steward.md`. Runtime service launch is owned by the Pi
+// memory-steward package; this module is only the root ergon client.
 //
 // This module is dependency-injectable: callers can pass a custom fetch
 // implementation (for tests) and override prompts.
@@ -102,6 +98,21 @@ function loadDefinition(): StewardDefinition {
 
 const definition = loadDefinition()
 
+function numberConfig(...values: Array<unknown>): number {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value
+    }
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) {
+        return parsed
+      }
+    }
+  }
+  return 0
+}
+
 function requirePrompt(name: string): string {
   const content = definition.prompts[name]
   if (!content) {
@@ -129,13 +140,20 @@ export interface StewardOptions {
 // === Defaults loaded from prompts/steward.md frontmatter ===
 
 export const DEFAULT_STEWARD_URL: string = String(
-  definition.config.url ?? "http://127.0.0.1:8081"
+  process.env.ERGON_STEWARD_URL ??
+    definition.config.url ??
+    "http://127.0.0.1:18091"
 )
 export const DEFAULT_STEWARD_MODEL: string = String(
-  definition.config.model ?? "ergon-studio-memory-steward"
+  process.env.ERGON_STEWARD_MODEL ??
+    definition.config.model ??
+    "ergon-studio-memory-steward"
 )
-export const DEFAULT_TEMPERATURE: number =
-  typeof definition.config.temperature === "number" ? definition.config.temperature : 0.3
+export const DEFAULT_TEMPERATURE: number = numberConfig(
+  process.env.ERGON_STEWARD_TEMPERATURE,
+  definition.config.temperature,
+  0.3
+)
 
 // === Prompts loaded from prompts/steward.md body ===
 

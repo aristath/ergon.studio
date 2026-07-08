@@ -124,7 +124,7 @@ user message
 │  ┌────────────┐             │       ┌──────────────┐
 │  │  steward   │──query────▶│───────▶│  openmemory  │
 │  │  (port     │             │       │  (SQLite)    │
-│  │   8081)    │◀──results──────────│              │
+│  │   18091)   │◀──results──────────│              │
 │  └────────────┘             │       └──────────────┘
 │        │                    │
 │        ▼                    │
@@ -150,7 +150,7 @@ user message
 │  ┌────────────┐             │
 │  │  steward   │─judge──────┐│
 │  │  (port     │            ││
-│  │   8081)    │            ▼│
+│  │   18091)   │            ▼│
 │  └────────────┘    ┌──────────────┐
 │                    │  openmemory  │
 │                    │  (SQLite)    │
@@ -183,78 +183,51 @@ Two `llama-server` processes cohabit your GPUs: the large main model (likely row
 
 2. **`openmemory-js` installed** as an optional ergon dependency (this already happens automatically when you `npm install ergon-studio`). If the install fails — e.g. the `sqlite3` native build can't compile on your system — ergon still works, but the memory paths silently no-op.
 
-3. **A steward `llama-server` process** running on `127.0.0.1:8081` serving a small instruct-tuned model. Qwen 3.5 2B is the recommended default — same prompt style as typical main coders, reliable JSON emission, fits in <3 GB VRAM at Q8.
+3. **The Pi memory-steward services** running locally. `ergon-steward.service` serves the small steward model on `127.0.0.1:18091`; `ergon-embedder.service` serves embeddings on `127.0.0.1:18092`.
 
 ### Single source of truth: `prompts/steward.md`
 
-Everything about the steward — endpoint, model, temperature, GPU device, model file path, and both prompts — lives in **one file**: `prompts/steward.md`. That file is read by two different things that must stay in lockstep:
+The root ergon plugin reads steward client defaults and prompts from **one file**: `prompts/steward.md`.
 
 1. **`src/steward.ts`** — the ergon plugin's steward HTTP client. Reads the YAML frontmatter for URL/model/temperature defaults, and reads the `## rewrite` and `## judge` body sections for the two prompts.
-2. **`scripts/run-steward.sh`** — the bash wrapper that actually launches `llama-server`. Parses the same YAML frontmatter to extract `port`, `model_path`, `device`, `llama_server_bin`, etc., then execs `llama-server` with the right args.
+2. **`pi/packages/memory-steward`** — owns the actual service runtime, model paths, database path, and embedding service through its installer and env file.
 
-Both parse the same file, so editing `prompts/steward.md` changes the steward's service runtime *and* ergon's client-side config at the same time. No config duplication, nowhere to forget to update.
+The old root-level `scripts/run-steward.sh` and `prompts/steward.service` files are legacy standalone tooling. Do not enable `llama-steward.service` when the Pi memory-steward services are active.
 
-### Setting up the steward llama-server
+### Setting up the steward services
 
-1. **Edit `prompts/steward.md`** to match your paths. At minimum, update the `llama_server_bin`, `model_path`, and `device` fields in the frontmatter to point to your actual llama.cpp build, your downloaded Qwen 3.5 2B GGUF, and the GPU you want to dedicate to the steward.
+Use the Pi memory-steward package as the only active steward runtime:
 
-   ```yaml
-   ---
-   port: 8081
-   llama_server_bin: /home/aristath/llama.cpp/build-vulkan/bin/llama-server
-   model_path: /home/aristath/models/qwen35-2b/qwen35-2b-instruct-Q8_0.gguf
-   device: Vulkan1
-   temperature: 0.3
-   # ... rest of config + the prompts ...
-   ---
-   ```
+```bash
+npm run build
+systemctl --user enable --now ergon-steward.service ergon-embedder.service
+systemctl --user disable --now llama-steward.service
+```
 
-2. **Install the systemd unit.** A template lives at `prompts/steward.service`. It assumes your ergon.studio checkout is at `/home/aristath/ergon.studio/` — if it's elsewhere, edit the `ExecStart` path before copying:
+Verify the steward is responding:
 
-   ```bash
-   cp prompts/steward.service ~/.config/systemd/user/llama-steward.service
-   systemctl --user daemon-reload
-   systemctl --user enable --now llama-steward.service
-   systemctl --user status llama-steward.service
-   ```
+```bash
+curl -s http://127.0.0.1:18091/v1/models
+```
 
-3. **Verify it's responding:**
+Runtime service configuration lives in `~/.config/ergon-memory-steward.env`, not in the root plugin prompt file. Restart the Pi services after runtime changes:
 
-   ```bash
-   curl -s http://127.0.0.1:8081/v1/models
-   ```
-
-The unit does nothing other than run `scripts/run-steward.sh`, which is the file that actually parses your frontmatter and invokes `llama-server`. That means you can tune the model, device, or any inference flag by editing `prompts/steward.md` and running `systemctl --user restart llama-steward.service` — no `systemctl daemon-reload` needed, no touching the unit file.
-
-Key choices baked into the launch command (all configurable via `steward.md`):
-
-- **`temperature: 0.3`**, not zero. Judgment tasks need a little sampling slack; greedy decoding makes small models brittle on edge cases.
-- **`device: Vulkan1`** pins the steward to one physical card so it doesn't fight the main model's tensor-parallel split across other cards.
-- **`ctx_size: 16384`** — the steward never needs more. It only ever sees one exchange or one rewrite prompt at a time.
-- **No `--models-preset`** — this instance has one job, permanently resident. It must **not** share `llama-router` with the main coder, or it would get evicted on every main-model swap.
+```bash
+systemctl --user restart ergon-steward.service ergon-embedder.service
+```
 
 ### Configuration
 
-All steward config lives in the frontmatter of `prompts/steward.md`:
+Root plugin steward client config lives in the frontmatter of `prompts/steward.md`:
 
 ```yaml
 # Client config (read by src/steward.ts)
-url: http://127.0.0.1:8081
+url: http://127.0.0.1:18091
 model: ergon-studio-memory-steward
 temperature: 0.3
-
-# Service runtime config (read by scripts/run-steward.sh)
-port: 8081
-llama_server_bin: /home/aristath/llama.cpp/build-vulkan/bin/llama-server
-model_path: /home/aristath/models/qwen35-2b/qwen35-2b-instruct-Q8_0.gguf
-device: Vulkan1
-n_gpu_layers: 99
-ctx_size: 16384
-top_k: 40
-top_p: 0.95
 ```
 
-These values become the defaults exported from `src/steward.ts` as `DEFAULT_STEWARD_URL`, `DEFAULT_STEWARD_MODEL`, and `DEFAULT_TEMPERATURE`. If you want to override them programmatically (e.g. for testing, or to run against a different steward instance), pass them via `createErgonPlugin`:
+These values become the defaults exported from `src/steward.ts` as `DEFAULT_STEWARD_URL`, `DEFAULT_STEWARD_MODEL`, and `DEFAULT_TEMPERATURE`. `ERGON_STEWARD_URL`, `ERGON_STEWARD_MODEL`, and `ERGON_STEWARD_TEMPERATURE` override those defaults when present. If you want to override them programmatically (e.g. for testing, or to run against a different steward instance), pass them via `createErgonPlugin`:
 
 ```typescript
 import { createErgonPlugin, createStewardClient } from "ergon-studio"
@@ -277,7 +250,7 @@ The two prompts live as `## rewrite` and `## judge` sections in the body of `pro
 - `REWRITE_PROMPT` — used by `rewriteQuery`. Tells the steward to strip politeness and filler, keep specifics, and emit `NONE` for greetings/acknowledgments.
 - `JUDGE_PROMPT` — used by `judgeSave`. Tells the steward what counts as a durable fact worth saving.
 
-**To tune the steward's behavior, edit `prompts/steward.md` directly.** No TypeScript changes required. Because the prompts and config are loaded from disk at plugin load time (not baked into the compiled JS), you don't even need to rebuild — just restart opencode (or the session) and the new prompt takes effect. For service-runtime changes (model path, device, etc.), `systemctl --user restart llama-steward.service` is enough.
+**To tune the steward's behavior, edit `prompts/steward.md` directly.** No TypeScript changes required. Because the prompts and config are loaded from disk at plugin load time (not baked into the compiled JS), you don't even need to rebuild — just restart opencode (or the session) and the new prompt takes effect. For service-runtime changes (model path, device, database path, etc.), edit `~/.config/ergon-memory-steward.env` and restart the Pi memory-steward services.
 
 - If recalls are missing specifics or over-stripping, tune the `## rewrite` section.
 - If the steward is saving too aggressively (noise) or too conservatively (missing real preferences), tune the `## judge` section.
@@ -306,10 +279,10 @@ The steward should never block a turn, break a plugin load, or crash a session. 
 
 ### Inspecting what the steward is doing
 
-To see the steward actually firing, tail `llama-steward.service`:
+To see the steward actually firing, tail `ergon-steward.service`:
 
 ```bash
-journalctl --user -u llama-steward -f
+journalctl --user -u ergon-steward -f
 ```
 
 Each request logs the prompt and generated text. You can verify both the rewrite output and the save judgments by eye as your conversation progresses.

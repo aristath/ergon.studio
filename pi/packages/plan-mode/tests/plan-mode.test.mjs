@@ -13,7 +13,6 @@ import test from "node:test";
 
 import planExtension, {
   deriveStateFromBranch,
-  getPlanTools,
   SCOUT_PLAN_PROMPT,
   stripAgentFrontmatter,
 } from "../dist/extensions/index.js";
@@ -38,6 +37,7 @@ function makeHarness() {
   const handlers = new Map();
   const branch = [];
   let activeTools = ["read", "find", "grep", "bash", "edit", "write"];
+  const toolApiCalls = [];
   const notifications = [];
   const widgets = new Map();
   const statuses = new Map();
@@ -64,12 +64,15 @@ function makeHarness() {
       });
     },
     getActiveTools() {
+      toolApiCalls.push("getActiveTools");
       return [...activeTools];
     },
     setActiveTools(toolNames) {
+      toolApiCalls.push("setActiveTools");
       activeTools = [...toolNames];
     },
     getAllTools() {
+      toolApiCalls.push("getAllTools");
       return [
         "read",
         "find",
@@ -132,6 +135,7 @@ function makeHarness() {
     confirms,
     editors,
     statuses,
+    toolApiCalls,
     widgets,
     get activeTools() {
       return activeTools;
@@ -165,7 +169,7 @@ test("derives active and inactive state from session markers", () => {
 
   assert.equal(state.active, true);
   assert.equal(state.topic, "agent packages");
-  assert.deepEqual(state.previousTools, ["read", "bash"]);
+  assert.equal("previousTools" in state, false);
 
   const inactive = deriveStateFromBranch([
     {
@@ -189,17 +193,7 @@ test("derives active and inactive state from session markers", () => {
   assert.equal(inactive.active, false);
 });
 
-test("detects available planning tools", () => {
-  const tools = getPlanTools({
-    getAllTools() {
-      return ["read", "grep", "write", "subagent"].map((name) => ({ name }));
-    },
-  });
-
-  assert.deepEqual(tools, ["read", "grep", "subagent", "write"]);
-});
-
-test("registers /plan and starts read-only plan mode", async () => {
+test("registers /plan and starts without changing tools", async () => {
   const harness = makeHarness();
   try {
     assert.equal(typeof harness.commands.get("plan").handler, "function");
@@ -212,17 +206,50 @@ test("registers /plan and starts read-only plan mode", async () => {
       "read",
       "find",
       "grep",
-      "ls",
-      "ask_user_question",
-      "subagent",
-      "get_subagent_result",
+      "bash",
       "edit",
       "write",
     ]);
+    assert.deepEqual(harness.toolApiCalls, []);
+    assert.equal(harness.handlers.has("tool_call"), false);
     assert.equal(harness.branch[0].customType, "ergon-plan-state");
     assert.equal(harness.branch[0].data.action, "start");
     assert.equal(harness.branch[0].data.topic, "Pi package architecture");
+    assert.equal("previousTools" in harness.branch[0].data, false);
     assert.match(harness.statuses.get("plan"), /plan/);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("restores plan state without changing tools", async () => {
+  const harness = makeHarness();
+  try {
+    harness.branch.push({
+      type: "custom",
+      customType: "ergon-plan-state",
+      id: "plan",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      data: {
+        action: "start",
+        topic: "restored plan",
+        previousTools: ["read"],
+      },
+    });
+
+    await harness.handlers.get("session_start")({}, harness.ctx);
+
+    assert.match(harness.statuses.get("plan"), /restored plan/);
+    assert.deepEqual(harness.activeTools, [
+      "read",
+      "find",
+      "grep",
+      "bash",
+      "edit",
+      "write",
+    ]);
+    assert.deepEqual(harness.toolApiCalls, []);
   } finally {
     harness.cleanup();
   }
@@ -244,6 +271,8 @@ test("injects the Scout planning workflow into the system prompt", async () => {
     assert.match(result.systemPrompt, /Optimal Solution/);
     assert.match(result.systemPrompt, /Assume You're Wrong/);
     assert.match(result.systemPrompt, /Current planning topic: memory steward/);
+    assert.match(result.systemPrompt, /active tool selection remains unchanged/);
+    assert.deepEqual(harness.toolApiCalls, []);
   } finally {
     harness.cleanup();
   }
@@ -257,83 +286,19 @@ test("preserves the legacy Scout wording exactly", () => {
   assert.match(SCOUT_PLAN_PROMPT, /Because the user invoked \/plan/);
 });
 
-test("blocks implementation tools and only permits Explore subagents", async () => {
+test("does not install a mode-level tool-call blocker", async () => {
   const harness = makeHarness();
   try {
     await harness.commands.get("plan").handler("", harness.ctx);
 
-    const editResult = await harness.handlers.get("tool_call")(
-      {
-        type: "tool_call",
-        toolName: "edit",
-        input: { path: "src/index.ts", edits: [] },
-        toolCallId: "1",
-      },
-      harness.ctx,
-    );
-    assert.equal(editResult.block, true);
-
-    const coderSubagent = await harness.handlers.get("tool_call")(
-      {
-        type: "tool_call",
-        toolName: "subagent",
-        input: { subagent_type: "Coder" },
-        toolCallId: "2",
-      },
-      harness.ctx,
-    );
-    assert.equal(coderSubagent.block, true);
-
-    const exploreSubagent = await harness.handlers.get("tool_call")(
-      {
-        type: "tool_call",
-        toolName: "subagent",
-        input: { subagent_type: "Explore" },
-        toolCallId: "3",
-      },
-      harness.ctx,
-    );
-    assert.equal(exploreSubagent, undefined);
+    assert.equal(harness.handlers.has("tool_call"), false);
+    assert.deepEqual(harness.toolApiCalls, []);
   } finally {
     harness.cleanup();
   }
 });
 
-test("allows write and edit only for the Scout scratchpad", async () => {
-  const harness = makeHarness();
-  try {
-    await harness.commands.get("plan").handler("", harness.ctx);
-
-    const scratchpadWrite = await harness.handlers.get("tool_call")(
-      {
-        type: "tool_call",
-        toolName: "write",
-        input: {
-          path: ".ergon.studio/scratchpad.md",
-          content: "## Decisions\n\n- Keep the plan lean.",
-        },
-        toolCallId: "1",
-      },
-      harness.ctx,
-    );
-    assert.equal(scratchpadWrite, undefined);
-
-    const outsideWrite = await harness.handlers.get("tool_call")(
-      {
-        type: "tool_call",
-        toolName: "write",
-        input: { path: "HANDOFF.md", content: "nope" },
-        toolCallId: "2",
-      },
-      harness.ctx,
-    );
-    assert.equal(outsideWrite.block, true);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test("finishes by writing HANDOFF and restoring previous tools", async () => {
+test("finishes by writing HANDOFF without changing tools", async () => {
   const harness = makeHarness();
   try {
     await harness.commands.get("plan").handler("handoff test", harness.ctx);
@@ -367,6 +332,7 @@ test("finishes by writing HANDOFF and restoring previous tools", async () => {
       "edit",
       "write",
     ]);
+    assert.deepEqual(harness.toolApiCalls, []);
     assert.equal(harness.branch.at(-1).data.action, "finish");
     assert.equal(
       harness.branch.at(-1).data.handoffPath,

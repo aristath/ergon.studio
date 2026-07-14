@@ -4,7 +4,6 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
   type SessionEntry,
-  type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -25,13 +24,11 @@ type OrchestratorAction = "start" | "finish" | "cancel";
 type OrchestratorMarker = {
   action: OrchestratorAction;
   startedAt?: number;
-  previousTools?: string[];
 };
 
 type OrchestratorState = {
   active: boolean;
   startedAt?: number;
-  previousTools: string[];
   supersededByMode: boolean;
 };
 
@@ -55,24 +52,8 @@ type ChildResult = {
 const ORCHESTRATOR_ENTRY_TYPE = "ergon-orchestrator-state";
 const PLAN_ENTRY_TYPE = "ergon-plan-state";
 const BRAINSTORM_ENTRY_TYPE = "ergon-brainstorm-state";
-const CHILD_AGENT_ENV = "ERGON_PI_ORCHESTRATOR_CHILD";
 
 const DEFAULT_TOOLS = ["read", "find", "grep", "ls", "bash", "edit", "write"];
-const ORCHESTRATOR_TOOLS = [
-  "read",
-  "find",
-  "grep",
-  "ls",
-  "bash",
-  "edit",
-  "write",
-  "ask_user_question",
-  "task",
-  "run_parallel",
-  "subagent",
-  "get_subagent_result",
-];
-const DELEGATION_TOOLS = new Set(["task", "run_parallel"]);
 
 const AGENT_TOOL_OVERRIDES: Record<string, string[]> = {
   architect: ["read", "find", "grep", "ls"],
@@ -169,8 +150,9 @@ const PI_ORCHESTRATOR_BOUNDARY = `## Pi /orchestrator Mode Boundary
 The text above is the authoritative legacy orchestrator workflow. Preserve its wording and behavior.
 
 Pi-specific mechanics:
-- The legacy task tool is available as the \`task\` tool in this package.
-- The legacy run_parallel tool is available as the \`run_parallel\` tool in this package.
+- The legacy task tool is registered as the \`task\` tool in this package.
+- The legacy run_parallel tool is registered as the \`run_parallel\` tool in this package.
+- Pi's active tool selection remains unchanged when this mode starts or ends.
 - These tools run the bundled legacy agent prompts from this package.
 - The quality gate remains agent-owned: invoke \`quality_controller\` after code work, and follow its APPROVED/REJECTED loop exactly.
 - Do not replace the quality controller's judgment with extension state or deterministic parsing.`;
@@ -180,19 +162,12 @@ export const ORCHESTRATOR_SYSTEM_PROMPT = `${ORCHESTRATOR_LEGACY_PROMPT}\n\n${PI
 export function inactiveState(): OrchestratorState {
   return {
     active: false,
-    previousTools: DEFAULT_TOOLS,
     supersededByMode: false,
   };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
 }
 
 function customAction(entry: SessionEntry, customType: string): string | null {
@@ -260,9 +235,6 @@ export function deriveStateFromBranch(
         active: true,
         startedAt:
           typeof marker.startedAt === "number" ? marker.startedAt : Date.now(),
-        previousTools: isStringArray(marker.previousTools)
-          ? marker.previousTools
-          : DEFAULT_TOOLS,
         supersededByMode: false,
       };
     }
@@ -273,21 +245,6 @@ export function deriveStateFromBranch(
   }
 
   return state;
-}
-
-export function getOrchestratorTools(
-  pi: Pick<ExtensionAPI, "getAllTools">,
-): string[] {
-  const available = new Set(pi.getAllTools().map((tool) => tool.name));
-  return ORCHESTRATOR_TOOLS.filter((tool) => available.has(tool));
-}
-
-function isDelegationToolCall(event: ToolCallEvent): boolean {
-  return DELEGATION_TOOLS.has(event.toolName);
-}
-
-function isOrchestratorChildRun(): boolean {
-  return process.env[CHILD_AGENT_ENV] === "1";
 }
 
 function notify(
@@ -316,32 +273,9 @@ function setOrchestratorUi(ctx: ExtensionContext, state: OrchestratorState) {
   ctx.ui.setStatus("orchestrator", "orchestrator");
   ctx.ui.setWidget("orchestrator", [
     "Orchestrator mode active",
-    "delegation tools enabled; quality gate is agent-owned",
+    "delegation workflow; quality gate is agent-owned",
     "after code work: invoke quality_controller",
   ]);
-}
-
-function applyState(
-  pi: Pick<ExtensionAPI, "setActiveTools" | "getAllTools">,
-  ctx: ExtensionContext,
-  currentState: OrchestratorState,
-  nextState: OrchestratorState,
-) {
-  if (nextState.active && !currentState.active) {
-    pi.setActiveTools(getOrchestratorTools(pi));
-  } else if (
-    currentState.active &&
-    !nextState.active &&
-    !nextState.supersededByMode
-  ) {
-    pi.setActiveTools(
-      currentState.previousTools.length > 0
-        ? currentState.previousTools
-        : DEFAULT_TOOLS,
-    );
-  }
-
-  setOrchestratorUi(ctx, nextState);
 }
 
 function writeTempPrompt(agentName: string, prompt: string): string {
@@ -430,10 +364,6 @@ async function runBundledAgent(
     const exitCode = await new Promise<number>((resolve) => {
       const child = spawnProcess(invocation.command, invocation.args, {
         cwd,
-        env: {
-          ...process.env,
-          [CHILD_AGENT_ENV]: "1",
-        },
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -579,8 +509,8 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
 
   const syncStateFromBranch = (ctx: ExtensionContext) => {
     const nextState = deriveStateFromBranch(ctx.sessionManager.getBranch());
-    applyState(pi, ctx, state, nextState);
     state = nextState;
+    setOrchestratorUi(ctx, state);
   };
 
   const otherModeIsActive = (ctx: ExtensionContext) =>
@@ -606,17 +536,14 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
     const nextState: OrchestratorState = {
       active: true,
       startedAt: Date.now(),
-      previousTools: pi.getActiveTools(),
       supersededByMode: false,
     };
 
     pi.appendEntry<OrchestratorMarker>(ORCHESTRATOR_ENTRY_TYPE, {
       action: "start",
       startedAt: nextState.startedAt,
-      previousTools: nextState.previousTools,
     });
 
-    pi.setActiveTools(getOrchestratorTools(pi));
     state = nextState;
     setOrchestratorUi(ctx, state);
     notify(ctx, "Orchestrator mode started.");
@@ -631,16 +558,11 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const previousTools =
-      state.previousTools.length > 0 ? state.previousTools : DEFAULT_TOOLS;
-
     pi.appendEntry<OrchestratorMarker>(ORCHESTRATOR_ENTRY_TYPE, {
       action,
       startedAt: state.startedAt,
-      previousTools,
     });
 
-    pi.setActiveTools(previousTools);
     state = inactiveState();
     setOrchestratorUi(ctx, state);
   };
@@ -697,24 +619,6 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
       systemPrompt: [event.systemPrompt ?? "", ORCHESTRATOR_SYSTEM_PROMPT]
         .filter(Boolean)
         .join("\n\n"),
-    };
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (!isDelegationToolCall(event)) {
-      return;
-    }
-
-    syncStateFromBranch(ctx);
-
-    if (state.active || isOrchestratorChildRun()) {
-      return;
-    }
-
-    return {
-      block: true,
-      reason:
-        "The orchestrator delegation tools are only available inside /orchestrator mode. Run /orchestrator before using task or run_parallel.",
     };
   });
 

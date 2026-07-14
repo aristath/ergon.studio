@@ -5,7 +5,6 @@ import test from "node:test";
 
 import orchestratorExtension, {
   deriveStateFromBranch,
-  getOrchestratorTools,
   loadAgentDefinition,
   ORCHESTRATOR_SYSTEM_PROMPT,
   setChildKillGraceMsForTest,
@@ -42,31 +41,13 @@ function createFakeChild({
   return child;
 }
 
-function withEnv(name, value, callback) {
-  const previous = process.env[name];
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-
-  return Promise.resolve()
-    .then(callback)
-    .finally(() => {
-      if (previous === undefined) {
-        delete process.env[name];
-      } else {
-        process.env[name] = previous;
-      }
-    });
-}
-
 function makeHarness() {
   const commands = new Map();
   const handlers = new Map();
   const tools = new Map();
   const branch = [];
   let activeTools = ["read", "find", "grep", "bash", "edit", "write"];
+  const toolApiCalls = [];
   const notifications = [];
   const widgets = new Map();
   const statuses = new Map();
@@ -94,12 +75,15 @@ function makeHarness() {
       });
     },
     getActiveTools() {
+      toolApiCalls.push("getActiveTools");
       return [...activeTools];
     },
     setActiveTools(toolNames) {
+      toolApiCalls.push("setActiveTools");
       activeTools = [...toolNames];
     },
     getAllTools() {
+      toolApiCalls.push("getAllTools");
       return [
         "read",
         "find",
@@ -152,6 +136,7 @@ function makeHarness() {
     notifications,
     selects,
     statuses,
+    toolApiCalls,
     widgets,
     ctx,
     get activeTools() {
@@ -169,6 +154,8 @@ function makeHarness() {
 test("loads aligned orchestrator and quality agent prompts", () => {
   const orchestrator = loadAgentDefinition("orchestrator");
   const quality = loadAgentDefinition("quality_controller");
+  const reviewer = loadAgentDefinition("reviewer");
+  const coder = loadAgentDefinition("coder");
 
   assert.match(orchestrator.prompt, /changes executable behavior/);
   assert.match(orchestrator.prompt, /`quality_controller` agent/);
@@ -180,6 +167,10 @@ test("loads aligned orchestrator and quality agent prompts", () => {
   assert.doesNotMatch(quality.prompt, /COMPLETION\.md/);
   assert.match(ORCHESTRATOR_SYSTEM_PROMPT, /Pi \/orchestrator Mode Boundary/);
   assert.match(ORCHESTRATOR_SYSTEM_PROMPT, /quality gate remains agent-owned/);
+  assert.deepEqual(quality.tools, ["read", "find", "grep", "ls", "task"]);
+  assert.deepEqual(reviewer.tools, ["read", "find", "grep", "ls", "bash"]);
+  assert.ok(coder.tools.includes("edit"));
+  assert.ok(coder.tools.includes("write"));
 });
 
 test("derives mode state around plan and brainstorm markers", () => {
@@ -195,7 +186,7 @@ test("derives mode state around plan and brainstorm markers", () => {
   ]);
 
   assert.equal(active.active, true);
-  assert.deepEqual(active.previousTools, ["read", "bash"]);
+  assert.equal("previousTools" in active, false);
 
   const supersededByPlan = deriveStateFromBranch([
     {
@@ -242,47 +233,32 @@ test("derives mode state around plan and brainstorm markers", () => {
   assert.equal(ignoredWhileBrainstormActive.supersededByMode, true);
 });
 
-test("detects available orchestrator tools", () => {
-  const tools = getOrchestratorTools({
-    getAllTools() {
-      return ["read", "write", "task", "run_parallel"].map((name) => ({
-        name,
-      }));
-    },
-  });
-
-  assert.deepEqual(tools, ["read", "write", "task", "run_parallel"]);
-});
-
 test("registers command and delegation tools", () => {
   const harness = makeHarness();
 
   assert.deepEqual([...harness.commands.keys()], ["orchestrator"]);
   assert.equal(typeof harness.tools.get("task").execute, "function");
   assert.equal(typeof harness.tools.get("run_parallel").execute, "function");
+  assert.equal(harness.handlers.has("tool_call"), false);
 });
 
-test("starts orchestrator mode and injects prompt", async () => {
+test("starts orchestrator mode without changing tools and injects prompt", async () => {
   const harness = makeHarness();
 
   await harness.commands.get("orchestrator").handler("", harness.ctx);
 
   assert.equal(harness.branch[0].customType, "ergon-orchestrator-state");
   assert.equal(harness.branch[0].data.action, "start");
+  assert.equal("previousTools" in harness.branch[0].data, false);
   assert.deepEqual(harness.activeTools, [
     "read",
     "find",
     "grep",
-    "ls",
     "bash",
     "edit",
     "write",
-    "ask_user_question",
-    "task",
-    "run_parallel",
-    "subagent",
-    "get_subagent_result",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.equal(harness.statuses.get("orchestrator"), "orchestrator");
 
   const result = await harness.handlers.get("before_agent_start")(
@@ -296,7 +272,7 @@ test("starts orchestrator mode and injects prompt", async () => {
   assert.match(result.systemPrompt, /changes executable behavior/);
 });
 
-test("active /orchestrator opens menu and finish restores tools", async () => {
+test("active /orchestrator opens menu and finish leaves tools unchanged", async () => {
   const harness = makeHarness();
 
   await harness.commands.get("orchestrator").handler("", harness.ctx);
@@ -313,6 +289,7 @@ test("active /orchestrator opens menu and finish restores tools", async () => {
     "edit",
     "write",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
 });
 
 test("/orchestrator refuses to start while /plan is active", async () => {
@@ -332,7 +309,33 @@ test("/orchestrator refuses to start while /plan is active", async () => {
 
   assert.equal(harness.branch.length, 1);
   assert.deepEqual(harness.activeTools, ["read", "edit", "write"]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.equal(harness.notifications.at(-1).level, "warning");
+});
+
+test("a later mode marker supersedes orchestrator without changing tools", async () => {
+  const harness = makeHarness();
+
+  await harness.commands.get("orchestrator").handler("", harness.ctx);
+  harness.branch.push({
+    type: "custom",
+    customType: "ergon-brainstorm-state",
+    id: "brainstorm",
+    parentId: harness.branch.at(-1)?.id ?? null,
+    timestamp: new Date().toISOString(),
+    data: { action: "start" },
+  });
+  harness.setActiveToolsForTest(["read", "edit", "write"]);
+
+  const result = await harness.handlers.get("before_agent_start")(
+    { systemPrompt: "Base system prompt" },
+    harness.ctx,
+  );
+
+  assert.equal(result, undefined);
+  assert.deepEqual(harness.activeTools, ["read", "edit", "write"]);
+  assert.deepEqual(harness.toolApiCalls, []);
+  assert.equal(harness.statuses.get("orchestrator"), undefined);
 });
 
 test("task tool reports unknown bundled agents without spawning", async () => {
@@ -353,45 +356,14 @@ test("task tool reports unknown bundled agents without spawning", async () => {
   assert.match(result.content[0].text, /quality_controller/);
 });
 
-test("blocks delegation tools outside orchestrator mode", async () => {
+test("does not mode-scope delegation tools with a tool-call blocker", () => {
   const harness = makeHarness();
 
-  const result = await harness.handlers.get("tool_call")(
-    { toolName: "task", input: { agent: "reviewer", brief: "Review" } },
-    harness.ctx,
-  );
-
-  assert.equal(result.block, true);
-  assert.match(result.reason, /only available inside \/orchestrator mode/);
+  assert.equal(harness.handlers.has("tool_call"), false);
+  assert.deepEqual(harness.toolApiCalls, []);
 });
 
-test("allows delegation tools while orchestrator mode is active", async () => {
-  const harness = makeHarness();
-
-  await harness.commands.get("orchestrator").handler("", harness.ctx);
-
-  const result = await harness.handlers.get("tool_call")(
-    { toolName: "task", input: { agent: "reviewer", brief: "Review" } },
-    harness.ctx,
-  );
-
-  assert.equal(result, undefined);
-});
-
-test("allows delegation tools in orchestrator child runs", async () => {
-  const harness = makeHarness();
-
-  await withEnv("ERGON_PI_ORCHESTRATOR_CHILD", "1", async () => {
-    const result = await harness.handlers.get("tool_call")(
-      { toolName: "task", input: { agent: "reviewer", brief: "Review" } },
-      harness.ctx,
-    );
-
-    assert.equal(result, undefined);
-  });
-});
-
-test("task tool runs bundled agents through child pi with orchestrator child env", async () => {
+test("task tool runs bundled agents through child pi with specialist tools", async () => {
   const harness = makeHarness();
   const calls = [];
 
@@ -424,7 +396,7 @@ test("task tool runs bundled agents through child pi with orchestrator child env
     assert.equal(result.isError, false);
     assert.match(result.content[0].text, /Review complete/);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].options.env.ERGON_PI_ORCHESTRATOR_CHILD, "1");
+    assert.equal(calls[0].options.env, undefined);
     assert.equal(calls[0].options.cwd, "/tmp/orchestrator");
     assert.ok(calls[0].args.includes("--mode"));
     assert.ok(calls[0].args.includes("json"));

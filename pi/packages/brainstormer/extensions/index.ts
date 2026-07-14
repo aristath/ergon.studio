@@ -4,7 +4,6 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
   type SessionEntry,
-  type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -15,7 +14,6 @@ type BrainstormAction = "start" | "done" | "cancel";
 type BrainstormMarker = {
   action: BrainstormAction;
   startedAt?: number;
-  previousTools?: string[];
 };
 
 type PlanAction = "start" | "finish" | "cancel";
@@ -27,22 +25,11 @@ type PlanMarker = {
 type BrainstormState = {
   active: boolean;
   startedAt?: number;
-  previousTools: string[];
   supersededByPlan: boolean;
 };
 
 const BRAINSTORM_ENTRY_TYPE = "ergon-brainstorm-state";
 const PLAN_ENTRY_TYPE = "ergon-plan-state";
-const DEFAULT_TOOLS = ["read", "find", "grep", "ls", "bash", "edit", "write"];
-const BRAINSTORM_TOOLS = [
-  "read",
-  "find",
-  "grep",
-  "ls",
-  "ask_user_question",
-  "subagent",
-  "get_subagent_result",
-];
 
 const CONTINUE_OPTION = "Continue brainstorming";
 const DONE_OPTION = "Done brainstorming";
@@ -71,7 +58,7 @@ Because the user invoked /brainstorm, stay in freeform brainstorm mode.
 Pi-specific mechanics:
 - There is no required topic. Treat the session as open-ended exploration.
 - Do not write implementation code or artifacts.
-- Use only read-only exploration tools allowed by this extension.
+- Pi's active tool selection remains unchanged. Use available tools only for read-only exploration, and do not delegate implementation work.
 - If the idea converges into something concrete enough to plan, suggest that the user run /plan. Do not switch modes yourself.`;
 
 export const BRAINSTORM_SYSTEM_PROMPT = `${BRAINSTORM_PROMPT}\n\n${PI_BRAINSTORM_BOUNDARY}`;
@@ -79,19 +66,12 @@ export const BRAINSTORM_SYSTEM_PROMPT = `${BRAINSTORM_PROMPT}\n\n${PI_BRAINSTORM
 export function inactiveState(): BrainstormState {
   return {
     active: false,
-    previousTools: DEFAULT_TOOLS,
     supersededByPlan: false,
   };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
 }
 
 function getBrainstormMarker(entry: SessionEntry): BrainstormMarker | null {
@@ -149,9 +129,6 @@ export function deriveStateFromBranch(branch: SessionEntry[]): BrainstormState {
         active: true,
         startedAt:
           typeof marker.startedAt === "number" ? marker.startedAt : Date.now(),
-        previousTools: isStringArray(marker.previousTools)
-          ? marker.previousTools
-          : DEFAULT_TOOLS,
         supersededByPlan: false,
       };
     }
@@ -162,13 +139,6 @@ export function deriveStateFromBranch(branch: SessionEntry[]): BrainstormState {
   }
 
   return state;
-}
-
-export function getBrainstormTools(
-  pi: Pick<ExtensionAPI, "getAllTools">,
-): string[] {
-  const available = new Set(pi.getAllTools().map((tool) => tool.name));
-  return BRAINSTORM_TOOLS.filter((tool) => available.has(tool));
 }
 
 function notify(
@@ -197,50 +167,9 @@ function setBrainstormUi(ctx: ExtensionContext, state: BrainstormState) {
   ctx.ui.setStatus("brainstorm", "brainstorm");
   ctx.ui.setWidget("brainstorm", [
     "Brainstorm mode active",
-    "freeform exploration; no implementation tools",
+    "freeform exploration; no implementation work",
     "when ready, run /plan",
   ]);
-}
-
-function applyState(
-  pi: Pick<ExtensionAPI, "setActiveTools" | "getAllTools">,
-  ctx: ExtensionContext,
-  currentState: BrainstormState,
-  nextState: BrainstormState,
-) {
-  if (nextState.active && !currentState.active) {
-    pi.setActiveTools(getBrainstormTools(pi));
-  } else if (
-    currentState.active &&
-    !nextState.active &&
-    !nextState.supersededByPlan
-  ) {
-    pi.setActiveTools(
-      currentState.previousTools.length > 0
-        ? currentState.previousTools
-        : DEFAULT_TOOLS,
-    );
-  }
-
-  setBrainstormUi(ctx, nextState);
-}
-
-function isAllowedToolCall(
-  event: ToolCallEvent,
-  allowedTools: string[],
-): boolean {
-  if (!allowedTools.includes(event.toolName)) {
-    return false;
-  }
-
-  if (event.toolName !== "subagent") {
-    return true;
-  }
-
-  const subagentType = (event.input as Record<string, unknown>).subagent_type;
-  return (
-    typeof subagentType === "string" && subagentType.toLowerCase() === "explore"
-  );
 }
 
 export default function brainstormExtension(pi: ExtensionAPI): void {
@@ -248,8 +177,8 @@ export default function brainstormExtension(pi: ExtensionAPI): void {
 
   const syncStateFromBranch = (ctx: ExtensionContext) => {
     const nextState = deriveStateFromBranch(ctx.sessionManager.getBranch());
-    applyState(pi, ctx, state, nextState);
     state = nextState;
+    setBrainstormUi(ctx, state);
   };
 
   const planIsActive = (ctx: ExtensionContext) =>
@@ -275,17 +204,14 @@ export default function brainstormExtension(pi: ExtensionAPI): void {
     const nextState: BrainstormState = {
       active: true,
       startedAt: Date.now(),
-      previousTools: pi.getActiveTools(),
       supersededByPlan: false,
     };
 
     pi.appendEntry<BrainstormMarker>(BRAINSTORM_ENTRY_TYPE, {
       action: "start",
       startedAt: nextState.startedAt,
-      previousTools: nextState.previousTools,
     });
 
-    pi.setActiveTools(getBrainstormTools(pi));
     state = nextState;
     setBrainstormUi(ctx, state);
     notify(ctx, "Brainstorm mode started. Explore freely; run /plan when the idea is ready.");
@@ -300,16 +226,11 @@ export default function brainstormExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const previousTools =
-      state.previousTools.length > 0 ? state.previousTools : DEFAULT_TOOLS;
-
     pi.appendEntry<BrainstormMarker>(BRAINSTORM_ENTRY_TYPE, {
       action,
       startedAt: state.startedAt,
-      previousTools,
     });
 
-    pi.setActiveTools(previousTools);
     state = inactiveState();
     setBrainstormUi(ctx, state);
   };
@@ -370,33 +291,6 @@ export default function brainstormExtension(pi: ExtensionAPI): void {
       systemPrompt: [event.systemPrompt ?? "", BRAINSTORM_SYSTEM_PROMPT]
         .filter(Boolean)
         .join("\n\n"),
-    };
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    syncStateFromBranch(ctx);
-
-    if (!state.active) {
-      return;
-    }
-
-    const allowedTools = getBrainstormTools(pi);
-    if (isAllowedToolCall(event, allowedTools)) {
-      return;
-    }
-
-    if (event.toolName === "subagent") {
-      return {
-        block: true,
-        reason:
-          '/brainstorm only allows subagent with subagent_type: "Explore". Continue brainstorming or run /brainstorm to exit before using implementation agents.',
-      };
-    }
-
-    const allowed = allowedTools.map((tool) => `\`${tool}\``).join(", ");
-    return {
-      block: true,
-      reason: `/brainstorm mode is for read-only exploration and only permits ${allowed}. Run /brainstorm to exit before using implementation tools.`,
     };
   });
 

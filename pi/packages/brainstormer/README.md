@@ -19,13 +19,13 @@ conversation converges on something concrete enough to plan, the agent suggests
 switching to `/plan`. The user chooses when to run `/plan`.
 
 If the user starts `/plan` while brainstorm mode is active, brainstorm mode gets
-out of the way automatically. Plan mode owns the next prompt and tool policy.
+out of the way automatically. Plan mode owns the next prompt and workflow.
 If plan mode is already active, `/brainstorm` refuses to start until `/plan` is
 finished or cancelled.
 
 The brainstorm prompt is stored in `prompts/brainstorm.md`. The extension injects
 that prompt only while brainstorm mode is active, then appends a small Pi-specific
-boundary for tool behavior.
+behavioral boundary.
 
 ## Command
 
@@ -48,21 +48,16 @@ Non-UI fallback:
 - A second `/brainstorm` exits as `Done brainstorming`.
 - No extra command or topic argument is required.
 
-## Tool Policy
+## Tool Behavior
 
-While active, `/brainstorm` allows read-only exploration tools available in the
-current Pi environment:
+`/brainstorm` does not inspect, replace, restore, or block Pi tools. Entering and
+leaving the mode preserves the active tool selection established by Pi, the user,
+and other extensions.
 
-- `read`
-- `find`
-- `grep`
-- `ls`
-- `ask_user_question`
-- `subagent` with `subagent_type: "Explore"` only
-- `get_subagent_result`
-
-Everything else is blocked until brainstorm mode ends. In particular, brainstorm
-mode does not allow `bash`, `edit`, `write`, or implementation subagents.
+The injected prompt tells the model to use available tools only for read-only
+exploration, avoid implementation work and artifacts, and avoid delegating
+implementation work. This is a behavioral instruction rather than an additional
+permission layer.
 
 ## Development
 

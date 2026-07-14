@@ -1,7 +1,7 @@
 {
   "name": "@ergon.studio/pi-plan",
   "version": "0.1.0",
-  "description": "Pi package: Scout-inspired /plan mode for read-only architecture planning and HANDOFF creation",
+  "description": "Pi package: Scout-inspired /plan workflow for architecture planning and HANDOFF creation",
   "author": "Aristath Stathopoulos <aristath@gmail.com>",
   "type": "module",
   "main": "extensions/index.ts",

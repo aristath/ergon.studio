@@ -3,20 +3,21 @@
 Self-contained Pi extension that adds a Scout-inspired `/plan` mode.
 
 The package is modeled after `pi-brainstorm`: it registers a slash command,
-stores mode state in the session, adjusts active tools while the mode is
-running, injects mode-specific instructions into the system prompt, blocks
-implementation tools, and restores the previous tool set when the mode ends.
+stores mode state in the session, injects mode-specific instructions into the
+system prompt, and produces a reviewed handoff without changing Pi's active
+tools.
 
 ## What It Does
 
 `/plan` starts a planning session with read-only project investigation plus the
-legacy Scout scratchpad exception. The agent can inspect the project and discuss
-architecture, but it cannot edit implementation files or run shell commands.
+legacy Scout scratchpad exception. The prompt directs the agent to inspect the
+project and discuss architecture without editing implementation files or running
+implementation commands.
 
 The legacy Ergon Scout prompt is stored verbatim in `prompts/scout.md`. The
 extension strips only the old OpenCode frontmatter before injecting it into Pi,
-then appends the minimal Pi-specific boundary required for `/plan` mode and
-tool restrictions.
+then appends the minimal Pi-specific behavioral boundary required for `/plan`
+mode.
 
 The workflow remains the original Scout process:
 
@@ -41,23 +42,17 @@ it is written.
 | `/plan finish`  | Review and save `.ergon.studio/HANDOFF.md`                                     |
 | `/plan cancel`  | Exit planning mode without writing a handoff                                   |
 
-## Tool Policy
+## Tool Behavior
 
-While active, `/plan` allows investigation tools that are available in the
-current Pi environment:
+`/plan` does not inspect, replace, restore, or block Pi tools. Entering and
+leaving the mode preserves the active tool selection established by Pi, the user,
+and other extensions.
 
-- `read`
-- `find`
-- `grep`
-- `ls`
-- `ask_user_question`
-- `subagent` with `subagent_type: "Explore"` only
-- `get_subagent_result`
-- `write` and `edit`, only for `.ergon.studio/scratchpad.md`
-
-Everything else is blocked until planning mode ends. This keeps the mode honest:
-it can produce an implementation-ready plan and preserve Scout's project notes,
-but it cannot quietly become the implementation.
+The injected prompt tells the model to use available tools for read-only
+investigation and to limit direct writes to `.ergon.studio/scratchpad.md`. The
+extension itself writes `.ergon.studio/HANDOFF.md` only after the user reviews the
+draft. These are workflow instructions rather than an additional permission
+layer.
 
 ## Handoff
 

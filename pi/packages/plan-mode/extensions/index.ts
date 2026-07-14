@@ -5,11 +5,10 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
   type SessionEntry,
-  type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type PlanAction = "start" | "finish" | "cancel";
@@ -18,7 +17,6 @@ type PlanMarker = {
   action: PlanAction;
   topic?: string;
   startedAt?: number;
-  previousTools?: string[];
   handoffPath?: string;
 };
 
@@ -26,25 +24,11 @@ type PlanState = {
   active: boolean;
   topic?: string;
   startedAt?: number;
-  previousTools: string[];
   startIndex: number;
 };
 
 const PLAN_ENTRY_TYPE = "ergon-plan-state";
-const DEFAULT_TOOLS = ["read", "find", "grep", "ls", "bash", "edit", "write"];
-const PLAN_TOOLS = [
-  "read",
-  "find",
-  "grep",
-  "ls",
-  "ask_user_question",
-  "subagent",
-  "get_subagent_result",
-  "edit",
-  "write",
-];
 const HANDOFF_PATH = ".ergon.studio/HANDOFF.md";
-const SCRATCHPAD_PATH = ".ergon.studio/scratchpad.md";
 
 const CONTINUE_OPTION = "Continue planning";
 const FINISH_OPTION = "Finish and write HANDOFF";
@@ -77,7 +61,7 @@ The text above is the authoritative legacy Scout workflow. Preserve its wording 
 Because the user invoked /plan, treat that as the explicit shift into Planning Mode.
 
 Pi-specific mechanics:
-- You may inspect the project only through the read-only tools allowed by this extension.
+- Pi's active tool selection remains unchanged. Use available tools only for read-only project investigation.
 - You may edit or write only .ergon.studio/scratchpad.md when the legacy Scout workflow tells you to record conventions or decisions.
 - Do not use implementation tools or write any other files directly during planning.
 - The extension writes .ergon.studio/HANDOFF.md only when the user runs /plan finish and reviews the handoff.`;
@@ -87,19 +71,12 @@ export const SCOUT_PLAN_PROMPT = `${stripAgentFrontmatter(LEGACY_SCOUT_PROMPT)}\
 export function inactiveState(): PlanState {
   return {
     active: false,
-    previousTools: DEFAULT_TOOLS,
     startIndex: -1,
   };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
 }
 
 function getPlanMarker(entry: SessionEntry): PlanMarker | null {
@@ -127,9 +104,6 @@ export function deriveStateFromBranch(branch: SessionEntry[]): PlanState {
             : undefined,
         startedAt:
           typeof marker.startedAt === "number" ? marker.startedAt : Date.now(),
-        previousTools: isStringArray(marker.previousTools)
-          ? marker.previousTools
-          : DEFAULT_TOOLS,
         startIndex: i,
       };
     }
@@ -140,11 +114,6 @@ export function deriveStateFromBranch(branch: SessionEntry[]): PlanState {
   }
 
   return state;
-}
-
-export function getPlanTools(pi: Pick<ExtensionAPI, "getAllTools">): string[] {
-  const available = new Set(pi.getAllTools().map((tool) => tool.name));
-  return PLAN_TOOLS.filter((tool) => available.has(tool));
 }
 
 function notify(
@@ -178,25 +147,6 @@ function setPlanUi(ctx: ExtensionContext, state: PlanState) {
     "read-only investigation; scratchpad writes only",
     "finish: /plan finish   cancel: /plan cancel",
   ]);
-}
-
-function applyState(
-  pi: Pick<ExtensionAPI, "setActiveTools" | "getAllTools">,
-  ctx: ExtensionContext,
-  currentState: PlanState,
-  nextState: PlanState,
-) {
-  if (nextState.active) {
-    pi.setActiveTools(getPlanTools(pi));
-  } else if (currentState.active) {
-    pi.setActiveTools(
-      currentState.previousTools.length > 0
-        ? currentState.previousTools
-        : DEFAULT_TOOLS,
-    );
-  }
-
-  setPlanUi(ctx, nextState);
 }
 
 function textFromContent(content: unknown): string {
@@ -350,44 +300,13 @@ async function writeHandoff(
   return HANDOFF_PATH;
 }
 
-function isScratchpadPath(cwd: string, rawPath: unknown): boolean {
-  if (typeof rawPath !== "string" || !rawPath.trim()) {
-    return false;
-  }
-
-  return resolve(cwd, rawPath) === resolve(cwd, SCRATCHPAD_PATH);
-}
-
-function isAllowedToolCall(
-  event: ToolCallEvent,
-  allowedTools: string[],
-  cwd: string,
-): boolean {
-  if (!allowedTools.includes(event.toolName)) {
-    return false;
-  }
-
-  if (event.toolName === "write" || event.toolName === "edit") {
-    return isScratchpadPath(cwd, (event.input as Record<string, unknown>).path);
-  }
-
-  if (event.toolName !== "subagent") {
-    return true;
-  }
-
-  const subagentType = (event.input as Record<string, unknown>).subagent_type;
-  return (
-    typeof subagentType === "string" && subagentType.toLowerCase() === "explore"
-  );
-}
-
 export default function planExtension(pi: ExtensionAPI): void {
   let state = inactiveState();
 
   const syncStateFromBranch = (ctx: ExtensionContext) => {
     const nextState = deriveStateFromBranch(ctx.sessionManager.getBranch());
-    applyState(pi, ctx, state, nextState);
     state = nextState;
+    setPlanUi(ctx, state);
   };
 
   const startPlan = (topic: string | undefined, ctx: ExtensionContext) => {
@@ -400,7 +319,6 @@ export default function planExtension(pi: ExtensionAPI): void {
       active: true,
       topic,
       startedAt: Date.now(),
-      previousTools: pi.getActiveTools(),
       startIndex: ctx.sessionManager.getBranch().length,
     };
 
@@ -408,10 +326,8 @@ export default function planExtension(pi: ExtensionAPI): void {
       action: "start",
       topic,
       startedAt: nextState.startedAt,
-      previousTools: nextState.previousTools,
     });
 
-    pi.setActiveTools(getPlanTools(pi));
     state = nextState;
     setPlanUi(ctx, state);
     notify(
@@ -430,18 +346,13 @@ export default function planExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const previousTools =
-      state.previousTools.length > 0 ? state.previousTools : DEFAULT_TOOLS;
-
     pi.appendEntry<PlanMarker>(PLAN_ENTRY_TYPE, {
       action,
       topic: state.topic,
       startedAt: state.startedAt,
-      previousTools,
       handoffPath,
     });
 
-    pi.setActiveTools(previousTools);
     state = inactiveState();
     setPlanUi(ctx, state);
   };
@@ -547,38 +458,6 @@ export default function planExtension(pi: ExtensionAPI): void {
       ]
         .filter(Boolean)
         .join("\n\n"),
-    };
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (!state.active) {
-      return;
-    }
-
-    const allowedTools = getPlanTools(pi);
-    if (isAllowedToolCall(event, allowedTools, ctx.cwd)) {
-      return;
-    }
-
-    const allowed = allowedTools.map((tool) => `\`${tool}\``).join(", ");
-    if (event.toolName === "subagent") {
-      return {
-        block: true,
-        reason:
-          '/plan only allows subagent with subagent_type: "Explore". Finish or cancel /plan to use implementation agents.',
-      };
-    }
-
-    if (event.toolName === "write" || event.toolName === "edit") {
-      return {
-        block: true,
-        reason: `/plan only allows ${event.toolName} for ${SCRATCHPAD_PATH}. Finish or cancel /plan to edit other files.`,
-      };
-    }
-
-    return {
-      block: true,
-      reason: `/plan mode is read-only and only permits ${allowed}. Finish or cancel /plan to use implementation tools.`,
     };
   });
 

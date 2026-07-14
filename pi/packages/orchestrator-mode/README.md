@@ -26,19 +26,23 @@ and does not decide whether work is complete.
 The delegation tools are infrastructure only. The quality workflow remains in
 `agents/orchestrator.md` and `agents/quality_controller.md`.
 
-## Delegation Boundary
+## Delegation Tools
 
 The `task` and `run_parallel` tools are registered as Pi tools so the
 orchestrator prompt and `quality_controller` can invoke bundled specialists, but
-they are mode-scoped:
+the extension does not mode-scope or block them:
 
-- Outside `/orchestrator`, direct calls to `task` and `run_parallel` are blocked.
-- Inside active `/orchestrator`, both tools are available to the orchestrator.
-- In orchestrator-spawned child agents, nested `task` calls remain available so
-  `quality_controller` can invoke `reviewer` and `design_reviewer`.
+- Their parent-session availability follows Pi's active tool selection.
+- Entering or leaving `/orchestrator` does not change that selection.
+- Bundled specialist subprocesses still receive explicit tool allowlists. For
+  example, the coder receives edit and write tools while planning and design
+  specialists do not. Reviewer and tester roles retain their existing shell
+  access for inspection and verification.
+- `quality_controller` receives `task` so it can invoke `reviewer` and
+  `design_reviewer`.
 
-This keeps delegation as infrastructure for the legacy workflow without making
-specialist spawning part of normal Pi sessions.
+This keeps parent tool ownership with Pi while preserving narrow, isolated
+specialist capabilities.
 
 ## Command
 
@@ -106,5 +110,5 @@ Ask the reviewer agent to say exactly: orchestrator smoke ok
 ```
 
 Expected result: `/orchestrator` starts, the orchestrator can invoke `task`, and
-the delegated reviewer response is returned. A direct `task` call outside
-`/orchestrator` should be blocked.
+the delegated reviewer response is returned. Because delegation tools follow
+Pi's active selection, a direct `task` call can also run outside `/orchestrator`.

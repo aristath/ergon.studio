@@ -4,7 +4,6 @@ import test from "node:test";
 import brainstormExtension, {
   BRAINSTORM_SYSTEM_PROMPT,
   deriveStateFromBranch,
-  getBrainstormTools,
 } from "../dist/extensions/index.js";
 
 function makeHarness(options = {}) {
@@ -12,6 +11,7 @@ function makeHarness(options = {}) {
   const handlers = new Map();
   const branch = [];
   let activeTools = ["read", "find", "grep", "bash", "edit", "write"];
+  const toolApiCalls = [];
   const notifications = [];
   const widgets = new Map();
   const statuses = new Map();
@@ -36,12 +36,15 @@ function makeHarness(options = {}) {
       });
     },
     getActiveTools() {
+      toolApiCalls.push("getActiveTools");
       return [...activeTools];
     },
     setActiveTools(toolNames) {
+      toolApiCalls.push("setActiveTools");
       activeTools = [...toolNames];
     },
     getAllTools() {
+      toolApiCalls.push("getAllTools");
       return [
         "read",
         "find",
@@ -91,6 +94,7 @@ function makeHarness(options = {}) {
     notifications,
     selects,
     statuses,
+    toolApiCalls,
     widgets,
     ctx,
     get activeTools() {
@@ -122,7 +126,7 @@ test("derives active and inactive state from session markers", () => {
   ]);
 
   assert.equal(active.active, true);
-  assert.deepEqual(active.previousTools, ["read", "bash"]);
+  assert.equal("previousTools" in active, false);
 
   const inactive = deriveStateFromBranch([
     {
@@ -220,17 +224,7 @@ test("derives active and inactive state from session markers", () => {
   assert.equal(brainstormAfterPlanEnds.supersededByPlan, false);
 });
 
-test("detects available brainstorm tools", () => {
-  const tools = getBrainstormTools({
-    getAllTools() {
-      return ["read", "grep", "write", "subagent"].map((name) => ({ name }));
-    },
-  });
-
-  assert.deepEqual(tools, ["read", "grep", "subagent"]);
-});
-
-test("registers only /brainstorm and starts freeform mode", async () => {
+test("registers only /brainstorm and starts without changing tools", async () => {
   const harness = makeHarness();
 
   assert.deepEqual([...harness.commands.keys()], ["brainstorm"]);
@@ -239,15 +233,17 @@ test("registers only /brainstorm and starts freeform mode", async () => {
 
   assert.equal(harness.branch[0].customType, "ergon-brainstorm-state");
   assert.equal(harness.branch[0].data.action, "start");
+  assert.equal("previousTools" in harness.branch[0].data, false);
   assert.deepEqual(harness.activeTools, [
     "read",
     "find",
     "grep",
-    "ls",
-    "ask_user_question",
-    "subagent",
-    "get_subagent_result",
+    "bash",
+    "edit",
+    "write",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
+  assert.equal(harness.handlers.has("tool_call"), false);
   assert.equal(harness.statuses.get("brainstorm"), "brainstorm");
   assert.match(harness.notifications[0].message, /Brainstorm mode started/);
 });
@@ -266,18 +262,19 @@ test("injects brainstorm prompt while active", async () => {
   assert.match(result.systemPrompt, /Want to shift into planning/);
   assert.match(result.systemPrompt, /Pi \/brainstorm Mode Boundary/);
   assert.match(BRAINSTORM_SYSTEM_PROMPT, /There is no required topic/);
+  assert.match(BRAINSTORM_SYSTEM_PROMPT, /active tool selection remains unchanged/);
   assert.deepEqual(harness.activeTools, [
     "read",
     "find",
     "grep",
-    "ls",
-    "ask_user_question",
-    "subagent",
-    "get_subagent_result",
+    "bash",
+    "edit",
+    "write",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
 });
 
-test("opens a menu on repeated /brainstorm and done restores tools", async () => {
+test("opens a menu on repeated /brainstorm and leaves tools unchanged", async () => {
   const harness = makeHarness();
 
   await harness.commands.get("brainstorm").handler("", harness.ctx);
@@ -299,6 +296,7 @@ test("opens a menu on repeated /brainstorm and done restores tools", async () =>
     "edit",
     "write",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.match(harness.notifications.at(-1).message, /run \/plan/);
 });
 
@@ -342,6 +340,7 @@ test("repeated /brainstorm exits as done without UI", async () => {
     "edit",
     "write",
   ]);
+  assert.deepEqual(harness.toolApiCalls, []);
 });
 
 test("/brainstorm does not start while /plan is active", async () => {
@@ -361,6 +360,7 @@ test("/brainstorm does not start while /plan is active", async () => {
 
   assert.equal(harness.branch.length, 1);
   assert.deepEqual(harness.activeTools, ["read", "edit", "write"]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.equal(harness.statuses.get("brainstorm"), undefined);
   assert.equal(harness.notifications.at(-1).level, "warning");
   assert.match(harness.notifications.at(-1).message, /Plan mode is active/);
@@ -394,19 +394,11 @@ test("restored branches cannot keep brainstorm active over an active plan", asyn
     { systemPrompt: "Base system prompt" },
     harness.ctx,
   );
-  const toolResult = await harness.handlers.get("tool_call")(
-    {
-      type: "tool_call",
-      toolName: "edit",
-      input: { path: ".ergon.studio/scratchpad.md", edits: [] },
-      toolCallId: "5",
-    },
-    harness.ctx,
-  );
 
   assert.equal(promptResult, undefined);
-  assert.equal(toolResult, undefined);
+  assert.equal(harness.handlers.has("tool_call"), false);
   assert.deepEqual(harness.activeTools, ["read", "edit", "write"]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.equal(harness.statuses.get("brainstorm"), undefined);
 });
 
@@ -421,46 +413,16 @@ test("cancel exits without planning nudge", async () => {
   assert.equal(harness.notifications.at(-1).message, "Brainstorm mode cancelled.");
 });
 
-test("blocks implementation tools and only permits Explore subagents", async () => {
+test("does not install a mode-level tool-call blocker", async () => {
   const harness = makeHarness();
 
   await harness.commands.get("brainstorm").handler("", harness.ctx);
 
-  const editResult = await harness.handlers.get("tool_call")(
-    {
-      type: "tool_call",
-      toolName: "edit",
-      input: { path: "src/index.ts", edits: [] },
-      toolCallId: "1",
-    },
-    harness.ctx,
-  );
-  assert.equal(editResult.block, true);
-
-  const coderSubagent = await harness.handlers.get("tool_call")(
-    {
-      type: "tool_call",
-      toolName: "subagent",
-      input: { subagent_type: "Coder" },
-      toolCallId: "2",
-    },
-    harness.ctx,
-  );
-  assert.equal(coderSubagent.block, true);
-
-  const exploreSubagent = await harness.handlers.get("tool_call")(
-    {
-      type: "tool_call",
-      toolName: "subagent",
-      input: { subagent_type: "Explore" },
-      toolCallId: "3",
-    },
-    harness.ctx,
-  );
-  assert.equal(exploreSubagent, undefined);
+  assert.equal(harness.handlers.has("tool_call"), false);
+  assert.deepEqual(harness.toolApiCalls, []);
 });
 
-test("later /plan marker supersedes brainstorm without restoring tools", async () => {
+test("later /plan marker supersedes brainstorm without changing tools", async () => {
   const harness = makeHarness();
 
   await harness.commands.get("brainstorm").handler("", harness.ctx);
@@ -478,18 +440,10 @@ test("later /plan marker supersedes brainstorm without restoring tools", async (
     { systemPrompt: "Base system prompt" },
     harness.ctx,
   );
-  const toolResult = await harness.handlers.get("tool_call")(
-    {
-      type: "tool_call",
-      toolName: "edit",
-      input: { path: ".ergon.studio/scratchpad.md", edits: [] },
-      toolCallId: "4",
-    },
-    harness.ctx,
-  );
 
   assert.equal(promptResult, undefined);
-  assert.equal(toolResult, undefined);
+  assert.equal(harness.handlers.has("tool_call"), false);
   assert.deepEqual(harness.activeTools, ["read", "edit", "write"]);
+  assert.deepEqual(harness.toolApiCalls, []);
   assert.equal(harness.statuses.get("brainstorm"), undefined);
 });

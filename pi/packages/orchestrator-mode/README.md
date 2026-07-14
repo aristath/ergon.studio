@@ -65,17 +65,19 @@ Orchestrator mode is mutually exclusive with `/brainstorm` and `/plan`.
 
 ## Quality Gate
 
-The legacy gate is preserved:
+The agent-owned gate applies to behavior-changing work:
 
-1. The orchestrator invokes `quality_controller` after code work.
+1. The orchestrator briefs `quality_controller` with the request, changes, and verification evidence.
 2. `quality_controller` invokes `reviewer`.
 3. If accepted, `quality_controller` invokes `design_reviewer`.
-4. If approved, `quality_controller` verifies `.ergon.studio/COMPLETION.md`.
-5. It returns `APPROVED` or `REJECTED`.
+4. If approved, `quality_controller` verifies task-specific test, build, documentation, and scope evidence.
+5. It returns an exact `Verdict: APPROVED` or `Verdict: REJECTED` footer.
 6. The orchestrator fixes rejected issues and invokes it again.
 7. After 3 rejections, the orchestrator asks the user.
 
-Nothing in the extension replaces that judgment.
+Documentation-only, comment-only, formatting-only, discussion, and read-only
+work skip the gate unless the user requests a review. Nothing in the extension
+replaces the controller's judgment.
 
 ## Development
 

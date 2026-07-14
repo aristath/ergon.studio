@@ -248,9 +248,9 @@ A **memory steward** — a small LLM running in its own `llama-server` — watch
 
 1. **Phase 1: Reviewer Pass** — Check for bugs. If issues → REJECTED
 2. **Phase 2: Design Reviewer Pass** — Check for optimality. If improvements → REJECTED
-3. **Phase 3: Checklist Verification** — Verify `.ergon.studio/COMPLETION.md`. If unchecked → REJECTED
+3. **Phase 3: Verification Evidence** — Verify task-specific test, build, documentation, and scope evidence. Missing blocking evidence → REJECTED
 
-**Iteration limit:** After 3 rejections, warns orchestrator to ask user for direction.
+**Iteration limit:** The parent orchestrator tracks rejections and asks the user for direction after 3.
 
 **Permissions:** No edit, no bash.
 
@@ -447,17 +447,12 @@ Every external dependency has a silent fallback:
 - Start here next session
 - Watch out for
 
-### `.ergon.studio/COMPLETION.md`
+### Quality evidence
 
-**Purpose:** Task completion checklist enforced by quality_controller.
-
-**Sections:**
-
-- Code Quality (no bugs, no TODOs, edge cases)
-- Testing (tests written, passing, meaningful)
-- Documentation (inline docs, README, config)
-- Integration (no breaking changes, existing tests pass)
-- Final Verification (quality controller returned APPROVED)
+Quality status is per task rather than mutable project state. The
+`quality_controller` evaluates the original request, reviewer and design-reviewer
+verdicts, relevant verification commands, documentation when applicable, and
+scope integrity. It returns an exact APPROVED or REJECTED footer.
 
 ### `skills/handoff/SKILL.md`
 
@@ -545,29 +540,20 @@ Teaches agents how to use the scratchpad. What goes in each section, what never 
 
 ---
 
-#### 3. Quality Controller → Chain
+#### 3. Quality Controller → Agent-Owned Sequence
 
-The quality controller is essentially a sequential workflow:
+The quality controller owns a sequential workflow:
 
 1. Run reviewer
-2. If passes, run design_reviewer
-3. If passes, verify checklist
+2. If accepted, run design_reviewer
+3. If approved, verify task-specific test, build, documentation, and scope evidence
+4. If evidence is missing, invoke tester once
+5. Return an exact APPROVED or REJECTED footer
 
-This maps perfectly to Pi's **chain** execution:
-
-```
-subagent({
-  chain: [
-    { agent: "reviewer", task: "Review the implementation..." },
-    { agent: "design_reviewer", task: "Review for optimality based on {previous}..." },
-    { agent: "orchestrator", task: "Verify completion checklist based on {previous}..." }
-  ]
-})
-```
-
-Or as a saved chain file (`.pi/chains/quality-check.chain.md`).
-
-The quality controller agent could still exist as a coordinator that knows how to invoke this chain, or we could eliminate it entirely and have the orchestrator invoke the chain directly.
+The parent orchestrator supplies the original request, changes, and verification
+already performed. It also owns retry counting across fresh quality-controller
+invocations. The extension exposes the delegation tools but does not replace the
+quality controller's judgment with deterministic chain state.
 
 ---
 
@@ -594,7 +580,7 @@ Use Pi's `oracle` agent (forked context, advisory review) as a lightweight debat
 | `skills/handoff/SKILL.md` | **Direct port** to `~/.pi/agent/skills/handoff/` — minimal changes needed |
 | `.ergon.studio/scratchpad.md` | Keep as-is — path stays the same |
 | `.ergon.studio/HANDOFF.md` | Keep as-is — path stays the same |
-| `.ergon.studio/COMPLETION.md` | Keep as-is or become part of quality-check chain |
+| Quality evidence | Keep per invocation; do not create a project-level completion file |
 
 ---
 

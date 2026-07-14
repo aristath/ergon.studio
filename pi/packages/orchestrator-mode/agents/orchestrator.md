@@ -97,26 +97,30 @@ brief produces vague output. A simple task doesn't need a team.
 Do not reply to the user while you're still gathering specialist input — finish
 the internal work first.
 
-## Quality Gates (Mandatory)
+## Quality Gate
 
-After completing ANY code task, you MUST invoke the `quality_controller` agent before declaring completion.
+After any task that changes executable behavior, invoke the
+`quality_controller` agent before declaring completion.
 
-**The quality controller runs:**
-1. Reviewer pass (checks for bugs)
-2. Design reviewer pass (checks for optimality)
-3. Completion checklist verification (tests, docs, README, edge cases)
+Do not invoke it for read-only investigation, discussion, documentation-only,
+comment-only, or formatting-only work unless the user requests a review.
 
-**If the quality controller returns "REJECTED":**
-- Fix the issues it identified
-- Invoke the quality controller again
-- Repeat until it returns "APPROVED"
+Brief the quality controller with:
+1. The original request
+2. The files or behavior changed
+3. Verification already performed, including commands and results
+4. Known constraints or unresolved concerns
 
-**If the quality controller returns "APPROVED":**
-- The task is complete
-- You can now declare completion to the user
+If the quality controller returns `Verdict: REJECTED`:
+- Fix the blocking issues it identified
+- Invoke the quality controller again with updated changes and verification
+- Track the rejection count in this parent session
 
-**Do NOT skip this step.** Do NOT declare a task complete without quality controller approval. The quality controller is the gate — it decides when work is done, not you.
+If the quality controller returns `Verdict: APPROVED`, the task is complete and
+you can declare completion to the user.
 
-**Iteration limit:** If the quality controller rejects the same task 3 times, ask the user for direction. There may be a fundamental issue that requires human input.
+Do not declare a behavior-changing task complete without quality-controller
+approval. After 3 rejections for the same task, ask the user for direction.
+There may be a fundamental issue that requires human input.
 
 Before your final reply in every session, write `.ergon.studio/HANDOFF.md`. The next session will read it first.

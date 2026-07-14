@@ -166,14 +166,18 @@ function makeHarness() {
   };
 }
 
-test("loads legacy orchestrator and quality agent prompts", () => {
+test("loads aligned orchestrator and quality agent prompts", () => {
   const orchestrator = loadAgentDefinition("orchestrator");
   const quality = loadAgentDefinition("quality_controller");
 
-  assert.match(orchestrator.prompt, /After completing ANY code task/);
+  assert.match(orchestrator.prompt, /changes executable behavior/);
   assert.match(orchestrator.prompt, /`quality_controller` agent/);
-  assert.match(quality.prompt, /You are the quality gate/);
+  assert.match(orchestrator.prompt, /Track the rejection count in this parent session/);
+  assert.match(quality.prompt, /final quality gate/);
   assert.match(quality.prompt, /Invoke the \*\*reviewer\*\* agent/);
+  assert.match(quality.prompt, /Phase 3: Verification Evidence/);
+  assert.match(quality.prompt, /Verdict: APPROVED/);
+  assert.doesNotMatch(quality.prompt, /COMPLETION\.md/);
   assert.match(ORCHESTRATOR_SYSTEM_PROMPT, /Pi \/orchestrator Mode Boundary/);
   assert.match(ORCHESTRATOR_SYSTEM_PROMPT, /quality gate remains agent-owned/);
 });
@@ -288,7 +292,8 @@ test("starts orchestrator mode and injects prompt", async () => {
 
   assert.match(result.systemPrompt, /Base system prompt/);
   assert.match(result.systemPrompt, /You are the lead dev/);
-  assert.match(result.systemPrompt, /Quality Gates \(Mandatory\)/);
+  assert.match(result.systemPrompt, /## Quality Gate/);
+  assert.match(result.systemPrompt, /changes executable behavior/);
 });
 
 test("active /orchestrator opens menu and finish restores tools", async () => {

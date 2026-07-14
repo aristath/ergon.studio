@@ -210,6 +210,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
   console.log('✅ Handoff skill file validation passed');
 
+  // --- quality gate prompt contract ---
+
+  const rootAgentDir = path.resolve(__dirname, '..', 'agents');
+  const qualityPrompt = readFileSync(path.join(rootAgentDir, 'quality_controller.md'), 'utf8');
+  const orchestratorPrompt = readFileSync(path.join(rootAgentDir, 'orchestrator.md'), 'utf8');
+  const piAgentDir = path.resolve(__dirname, '..', 'pi', 'packages', 'orchestrator-mode', 'agents');
+  const piQualityPrompt = readFileSync(path.join(piAgentDir, 'quality_controller.md'), 'utf8');
+  const piOrchestratorPrompt = readFileSync(path.join(piAgentDir, 'orchestrator.md'), 'utf8');
+
+  assert.strictEqual(piQualityPrompt, qualityPrompt, 'OpenCode and Pi quality-controller prompts must stay in sync');
+  assert.strictEqual(piOrchestratorPrompt, orchestratorPrompt, 'OpenCode and Pi orchestrator prompts must stay in sync');
+  assert.ok(!qualityPrompt.includes('COMPLETION.md'), 'quality gate must not depend on a project-level checklist');
+  assert.ok(qualityPrompt.includes('### Phase 3: Verification Evidence'), 'quality gate must verify per-task evidence');
+  assert.ok(qualityPrompt.includes('exactly `Verdict: APPROVED` or `Verdict: REJECTED`'), 'quality gate must require an exact terminal verdict');
+  assert.ok(qualityPrompt.includes('parent orchestrator owns retry state'), 'quality controller must not own retry state');
+  assert.ok(orchestratorPrompt.includes('changes executable behavior'), 'orchestrator must scope the quality gate to behavior changes');
+  assert.ok(orchestratorPrompt.includes('Track the rejection count in this parent session'), 'orchestrator must own retry state');
+  assert.ok(!existsSync(path.resolve(__dirname, '..', '.ergon.studio', 'COMPLETION.md')), 'legacy completion checklist must be removed');
+
+  console.log('✅ Quality gate prompt contract passed');
+
   // --- run_parallel error handling ---
 
   const mockClientWithFailure = {

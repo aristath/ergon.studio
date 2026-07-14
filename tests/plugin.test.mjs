@@ -782,14 +782,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     console.log('✅ system.transform without recall → scratchpad only');
   }
 
-  // --- session.idle must not re-judge the same exchange twice ---
+  // --- session.idle must not attempt to re-judge the same exchange twice ---
   // session.idle fires once per turn in normal flow (Runner.onIdle in
   // sst/opencode prompt.ts), but a defensive idle re-fire (e.g. on session
   // resume, or a future opencode behaviour change) would cause the
   // steward to re-judge the SAME (user, assistant) pair. Each judge is an
   // LLM call, so duplicates are wasted cost AND risk duplicate memory
   // saves if judgeSave ever returns the same content twice on the same
-  // input. Dedup by per-session "last judged assistant message id".
+  // input. Dedup by per-session "last attempted assistant message id".
 
   {
     const judgeCalls = [];
@@ -843,7 +843,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
       `new exchange must be judged (got ${judgeCalls.length})`,
     );
 
-    console.log('✅ session.idle dedups by last judged assistant message id');
+    console.log('✅ session.idle dedups by last attempted assistant message id');
   }
 
   // --- run_parallel must reject empty tasks array ---

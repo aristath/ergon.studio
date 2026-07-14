@@ -290,7 +290,7 @@ async function handleSessionIdle(
   client: any,
   steward: StewardClient,
   memory: MemoryClient,
-  lastJudgedAssistantId: Map<string, string>,
+  lastAttemptedAssistantId: Map<string, string>,
 ): Promise<void> {
   let result: any
   try {
@@ -319,15 +319,15 @@ async function handleSessionIdle(
   if (lastUserIdx === -1 || lastAssistantIdx === -1) return
   if (lastAssistantIdx < lastUserIdx) return
 
-  // Dedup: skip if this exact assistant message has already been judged
+  // Dedup: skip if this exact assistant message already had a save attempt
   // for this session. session.idle normally fires once per turn, but a
   // defensive re-fire (or any future opencode change) would otherwise
   // re-submit the same pair to the steward — wasted LLM cost and risk
   // of duplicate memory writes.
   const assistantId = messages[lastAssistantIdx]?.info?.id
   if (typeof assistantId === "string" && assistantId.length > 0) {
-    if (lastJudgedAssistantId.get(sessionID) === assistantId) return
-    lastJudgedAssistantId.set(sessionID, assistantId)
+    if (lastAttemptedAssistantId.get(sessionID) === assistantId) return
+    lastAttemptedAssistantId.set(sessionID, assistantId)
   }
 
   const userText = extractText(messages[lastUserIdx].parts)
@@ -365,11 +365,11 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
     // alongside the scratchpad, where they actually belong.
     const pendingRecall = new Map<string, string>()
 
-    // Per-session memo of the assistant message id we most recently judged.
+    // Per-session memo of the assistant message id whose save we last attempted.
     // session.idle can re-fire for the same exchange (defensive idle set in
     // opencode); without this, the steward LLM would be called repeatedly
     // for identical input. Cleared on session.deleted with pendingRecall.
-    const lastJudgedAssistantId = new Map<string, string>()
+    const lastAttemptedAssistantId = new Map<string, string>()
 
     function readScratchpad(): string | null {
       const p = join(directory, ".ergon.studio", "scratchpad.md")
@@ -401,7 +401,7 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
           // Failures are intentionally swallowed inside handleSessionIdle.
           const { sessionID } = (event as any).properties ?? {}
           if (typeof sessionID === "string" && sessionID.length > 0) {
-            void handleSessionIdle(sessionID, client, steward, getMemory(), lastJudgedAssistantId).catch(() => {})
+            void handleSessionIdle(sessionID, client, steward, getMemory(), lastAttemptedAssistantId).catch(() => {})
           }
         }
 
@@ -414,7 +414,7 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
           const { sessionID } = (event as any).properties ?? {}
           if (typeof sessionID === "string" && sessionID.length > 0) {
             pendingRecall.delete(sessionID)
-            lastJudgedAssistantId.delete(sessionID)
+            lastAttemptedAssistantId.delete(sessionID)
           }
         }
       },

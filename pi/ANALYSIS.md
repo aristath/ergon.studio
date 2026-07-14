@@ -290,7 +290,7 @@ A **memory steward** — a small LLM running in its own `llama-server` — watch
 
 ### Hook: `event(session.deleted)`
 
-**Purpose:** Cleans up `pendingRecall` and `lastJudgedAssistantId` maps.
+**Purpose:** Cleans up `pendingRecall` and `lastAttemptedAssistantId` maps.
 
 ### Hook: `chat.message` (Recall Path — Half 1)
 

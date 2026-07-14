@@ -43,8 +43,8 @@ let steward: StewardClient | null = null;
 let embedder: EmbedderClient | null = null;
 let memoryStore: MemoryStore | null = null;
 
-// Per-session dedup: prevents judging the same exchange twice
-const lastJudgedAssistantId = new Map<string, string>();
+// Per-session dedup: prevents repeated save attempts for the same exchange
+const lastAttemptedAssistantId = new Map<string, string>();
 const pendingSaves = new Set<Promise<void>>();
 
 // Component health flags
@@ -147,10 +147,10 @@ async function save(
 	const embedderClient = embedder;
 	const store = memoryStore;
 
-	// Dedup: skip if this exact assistant message was already judged
+	// Dedup: skip if this exact assistant message already had a save attempt
 	if (assistantId) {
-		if (lastJudgedAssistantId.get(sessionID) === assistantId) return;
-		lastJudgedAssistantId.set(sessionID, assistantId);
+		if (lastAttemptedAssistantId.get(sessionID) === assistantId) return;
+		lastAttemptedAssistantId.set(sessionID, assistantId);
 	}
 
 	// 1. Judge
@@ -354,9 +354,9 @@ export default function (pi: ExtensionAPI): void {
 		async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (sessionFile) {
-				lastJudgedAssistantId.delete(sessionFile);
+				lastAttemptedAssistantId.delete(sessionFile);
 			} else {
-				lastJudgedAssistantId.clear();
+				lastAttemptedAssistantId.clear();
 			}
 			await drainPendingSaves();
 			memoryStore?.close();

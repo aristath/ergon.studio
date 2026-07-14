@@ -10,5 +10,8 @@
     "build": "tsc --build packages/*/tsconfig.json",
     "clean": "rm -rf packages/*/dist",
     "test": "npm --workspaces --if-present test"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
   }
 }

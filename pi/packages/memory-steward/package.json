@@ -49,8 +49,11 @@
 		"url": "https://github.com/aristath/ergon.studio"
 	},
 	"dependencies": {
-		"better-sqlite3": "^11.0.0",
+		"better-sqlite3": "^12.11.1",
 		"sqlite-vec": "^0.1.6"
+	},
+	"allowScripts": {
+		"better-sqlite3@12.11.1": true
 	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "latest",

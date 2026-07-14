@@ -59,7 +59,7 @@ const health = {
 
 // ── Timeout utility ──────────────────────────────────────────────────────────
 
-const RECALL_TIMEOUT_MS = 5000;
+const RECALL_STAGE_TIMEOUT_MS = 5000;
 const SAVE_TIMEOUT_MS = 10000;
 const SHUTDOWN_SAVE_DRAIN_MS = SAVE_TIMEOUT_MS * 2 + 2000;
 
@@ -107,7 +107,7 @@ async function recall(prompt: string): Promise<string | null> {
 	// 1. Rewrite
 	const rewriteResult = await runWithTimeout(
 		(signal) => stewardClient.rewriteQuery(prompt, { signal }),
-		RECALL_TIMEOUT_MS,
+		RECALL_STAGE_TIMEOUT_MS,
 		"steward.rewriteQuery",
 	);
 	if (!rewriteResult.ok) return null;
@@ -117,7 +117,7 @@ async function recall(prompt: string): Promise<string | null> {
 	// 2. Embed query
 	const embedResult = await runWithTimeout(
 		(signal) => embedderClient.embed(query, { signal }),
-		RECALL_TIMEOUT_MS,
+		RECALL_STAGE_TIMEOUT_MS,
 		"embedder.embed",
 	);
 	if (!embedResult.ok) return null;

@@ -69,8 +69,11 @@ Save path:
 3. If worth saving, the embedder creates a vector for the memory.
 4. The memory is stored in SQLite with content-hash deduplication.
 
-The recall path is synchronous and timeout bounded. The save path is async and
-best-effort, with shutdown draining so final-turn saves are not casually dropped.
+The recall path is synchronous and bounded to 5 seconds per external stage. The
+steward rewrite and embedding request each receive that full budget, so the
+complete recall path can take about 10 seconds in the worst case. The save path
+is async and best-effort, with shutdown draining so final-turn saves are not
+casually dropped.
 
 The two llama.cpp services are supervised by package-local wrapper scripts. The
 wrappers start `llama-server`, probe the actual HTTP contract, and exit if the

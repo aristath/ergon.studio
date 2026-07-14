@@ -9,10 +9,11 @@ export interface ErgonPluginDeps {
   steward?: StewardClient
   memory?: MemoryClient
   /**
-   * Maximum time (ms) to wait for an external recall call (steward rewrite +
-   * memory recall) inside the chat.message hook. Defaults to 5000ms. The
-   * hook is awaited by opencode, so an unbounded call stalls the user's
-   * turn — this timeout protects against a hung steward or memory backend.
+   * Maximum time (ms) to wait for each external stage in the chat.message
+   * recall path. The steward rewrite and memory recall each receive this full
+   * budget, so the complete path may take about twice this value. Defaults to
+   * 5000ms. The hook is awaited by opencode, so these per-stage timeouts
+   * protect against a hung steward or memory backend.
    */
   chatMessageTimeoutMs?: number
   /**
@@ -427,7 +428,8 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
       // CRITICAL: opencode awaits this hook (per sst/opencode#16879 the
       // session.idle path is fire-and-forget but chat.message is awaited),
       // so a hung steward or memory backend stalls every user turn. Both
-      // external calls are bounded with chatMessageTimeoutMs (default 5s).
+      // external calls are each bounded with chatMessageTimeoutMs (default
+      // 5s per stage, or about 10s for both stages in the worst case).
       // On timeout we log and skip recall — losing one turn's memory is
       // strictly better than blocking the user indefinitely.
       "chat.message": async (input, output) => {

@@ -233,6 +233,7 @@ These values become the defaults exported from `src/steward.ts` as `DEFAULT_STEW
 import { createErgonPlugin, createStewardClient } from "ergon-studio"
 
 export const ErgonPlugin = createErgonPlugin({
+  chatMessageTimeoutMs: 5000,
   steward: createStewardClient({
     baseURL: "http://127.0.0.1:9000",
     model: "my-custom-steward",
@@ -240,6 +241,11 @@ export const ErgonPlugin = createErgonPlugin({
   }),
 })
 ```
+
+`chatMessageTimeoutMs` is a per-stage timeout, not a deadline for the complete
+recall path. The steward rewrite and memory lookup each receive the full budget,
+so two slow stages can take about twice the configured value before the turn
+continues without recalled memory.
 
 The openmemory database path, embedding kind, and tier are picked up automatically from `opencode.json`'s `mcp.openmemory.environment` block via `client.config.get()`. You don't duplicate that config anywhere either.
 

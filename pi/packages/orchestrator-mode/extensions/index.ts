@@ -49,6 +49,13 @@ type ChildResult = {
   error?: string;
 };
 
+type ChildRuntime = {
+  cwd: string;
+  modelRef?: string;
+  thinkingLevel: string;
+  signal?: AbortSignal;
+};
+
 const ORCHESTRATOR_ENTRY_TYPE = "ergon-orchestrator-state";
 const PLAN_ENTRY_TYPE = "ergon-plan-state";
 const BRAINSTORM_ENTRY_TYPE = "ergon-brainstorm-state";
@@ -326,8 +333,7 @@ function extractEventText(event: unknown): string {
 async function runBundledAgent(
   agentName: string,
   brief: string,
-  cwd: string,
-  signal?: AbortSignal,
+  runtime: ChildRuntime,
 ): Promise<ChildResult> {
   const definition = loadAgentDefinition(agentName);
   if (!definition) {
@@ -348,7 +354,9 @@ async function runBundledAgent(
     `${definition.prompt}\n\n${PI_ORCHESTRATOR_BOUNDARY}`,
   );
   const args = ["--mode", "json", "-p", "--no-session"];
-  if (definition.model) args.push("--model", definition.model);
+  const modelRef = definition.model ?? runtime.modelRef;
+  if (modelRef) args.push("--model", modelRef);
+  args.push("--thinking", runtime.thinkingLevel);
   if (definition.tools.length > 0)
     args.push("--tools", definition.tools.join(","));
   args.push("--append-system-prompt", promptPath);
@@ -363,7 +371,7 @@ async function runBundledAgent(
   try {
     const exitCode = await new Promise<number>((resolve) => {
       const child = spawnProcess(invocation.command, invocation.args, {
-        cwd,
+        cwd: runtime.cwd,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -407,8 +415,8 @@ async function runBundledAgent(
         }, childKillGraceMs);
       };
 
-      if (signal?.aborted) abort();
-      else signal?.addEventListener("abort", abort, { once: true });
+      if (runtime.signal?.aborted) abort();
+      else runtime.signal?.addEventListener("abort", abort, { once: true });
     });
 
     return {
@@ -457,6 +465,16 @@ const RunParallelParams = Type.Object({
 export default function orchestratorExtension(pi: ExtensionAPI): void {
   let state = inactiveState();
 
+  const childRuntime = (
+    ctx: ExtensionContext,
+    signal?: AbortSignal,
+  ): ChildRuntime => ({
+    cwd: ctx.cwd,
+    modelRef: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+    thinkingLevel: pi.getThinkingLevel(),
+    signal,
+  });
+
   pi.registerTool({
     name: "task",
     label: "Task",
@@ -467,8 +485,7 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
       const result = await runBundledAgent(
         params.agent,
         params.brief,
-        ctx.cwd,
-        signal,
+        childRuntime(ctx, signal),
       );
       return {
         content: [{ type: "text", text: renderTaskResult(result) }],
@@ -485,9 +502,10 @@ export default function orchestratorExtension(pi: ExtensionAPI): void {
       "Run multiple bundled Ergon legacy specialist agents concurrently. Do not use write-capable agents in parallel.",
     parameters: RunParallelParams,
     execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+      const runtime = childRuntime(ctx, signal);
       const results = await Promise.all(
         params.tasks.map((task) =>
-          runBundledAgent(task.agent, task.brief, ctx.cwd, signal),
+          runBundledAgent(task.agent, task.brief, runtime),
         ),
       );
       return {

@@ -38,6 +38,9 @@ the extension does not mode-scope or block them:
   example, the coder receives edit and write tools while planning and design
   specialists do not. Reviewer and tester roles retain their existing shell
   access for inspection and verification.
+- Bundled specialists inherit the parent session's current model and thinking
+  level. An explicit model in an agent definition takes precedence, so
+  `architect` remains pinned to `local/planner`.
 - `quality_controller` receives `task` so it can invoke `reviewer` and
   `design_reviewer`.
 

@@ -41,7 +41,15 @@ function createFakeChild({
   return child;
 }
 
-function makeHarness() {
+function argValue(args, name) {
+  const index = args.indexOf(name);
+  return index === -1 ? undefined : args[index + 1];
+}
+
+function makeHarness({
+  model = { provider: "local", id: "coder" },
+  thinkingLevel = "high",
+} = {}) {
   const commands = new Map();
   const handlers = new Map();
   const tools = new Map();
@@ -99,11 +107,15 @@ function makeHarness() {
         "get_subagent_result",
       ].map((name) => ({ name }));
     },
+    getThinkingLevel() {
+      return thinkingLevel;
+    },
   };
 
   const ctx = {
     hasUI: true,
     cwd: "/tmp/orchestrator",
+    model,
     sessionManager: {
       getBranch() {
         return branch;
@@ -159,7 +171,10 @@ test("loads aligned orchestrator and quality agent prompts", () => {
 
   assert.match(orchestrator.prompt, /changes executable behavior/);
   assert.match(orchestrator.prompt, /`quality_controller` agent/);
-  assert.match(orchestrator.prompt, /Track the rejection count in this parent session/);
+  assert.match(
+    orchestrator.prompt,
+    /Track the rejection count in this parent session/,
+  );
   assert.match(quality.prompt, /final quality gate/);
   assert.match(quality.prompt, /Invoke the \*\*reviewer\*\* agent/);
   assert.match(quality.prompt, /Phase 3: Verification Evidence/);
@@ -363,7 +378,7 @@ test("does not mode-scope delegation tools with a tool-call blocker", () => {
   assert.deepEqual(harness.toolApiCalls, []);
 });
 
-test("task tool runs bundled agents through child pi with specialist tools", async () => {
+test("task tool inherits the parent runtime and keeps specialist tools", async () => {
   const harness = makeHarness();
   const calls = [];
 
@@ -402,8 +417,54 @@ test("task tool runs bundled agents through child pi with specialist tools", asy
     assert.ok(calls[0].args.includes("json"));
     assert.ok(calls[0].args.includes("--no-session"));
     assert.ok(calls[0].args.includes("--append-system-prompt"));
+    assert.equal(argValue(calls[0].args, "--model"), "local/coder");
+    assert.equal(argValue(calls[0].args, "--thinking"), "high");
     assert.ok(calls[0].args.includes("--tools"));
     assert.ok(calls[0].args.includes("read,find,grep,ls,bash"));
+  } finally {
+    setSpawnProcessForTest();
+  }
+});
+
+test("run_parallel honors explicit agent models over the parent model", async () => {
+  const harness = makeHarness();
+  const calls = [];
+
+  setSpawnProcessForTest((command, args, options) => {
+    calls.push({ command, args, options });
+    return createFakeChild({
+      stdoutLines: [
+        {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Done." }],
+          },
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await harness.tools.get("run_parallel").execute(
+      "tool-1",
+      {
+        tasks: [
+          { agent: "reviewer", brief: "Review" },
+          { agent: "architect", brief: "Plan" },
+        ],
+      },
+      undefined,
+      undefined,
+      harness.ctx,
+    );
+
+    assert.equal(result.isError, false);
+    assert.equal(calls.length, 2);
+    assert.equal(argValue(calls[0].args, "--model"), "local/coder");
+    assert.equal(argValue(calls[1].args, "--model"), "local/planner");
+    assert.equal(argValue(calls[0].args, "--thinking"), "high");
+    assert.equal(argValue(calls[1].args, "--thinking"), "high");
   } finally {
     setSpawnProcessForTest();
   }

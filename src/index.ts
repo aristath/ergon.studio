@@ -209,7 +209,8 @@ function extractText(parts: any[]): string {
 type DebateVerdict = "AGREE" | "CONTINUE" | "BLOCKED"
 
 function parseDebateVerdict(text: string): DebateVerdict {
-  const match = text.match(/(?:^|\n)\s*Verdict:\s*(AGREE|CONTINUE|BLOCKED)\b/i)
+  const lastLine = text.trim().split(/\r?\n/).at(-1)?.trim() ?? ""
+  const match = lastLine.match(/^Verdict:\s*(AGREE|CONTINUE|BLOCKED)$/i)
   if (!match) return "CONTINUE"
   return match[1].toUpperCase() as DebateVerdict
 }

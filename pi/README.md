@@ -11,6 +11,7 @@ OpenCode plugin; Pi work stays separate here.
 | Package                                                       | Description                                                                                             | Runtime needs                                                 |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | [`@ergon.studio/pi-brainstormer`](packages/brainstormer/)     | Freeform `/brainstorm` mode for exploratory thinking before planning                                    | none                                                          |
+| [`@ergon.studio/pi-debate`](packages/debate/)                 | Alternating two-participant coding debate with independent temporary sessions and explicit convergence | none                                                          |
 | [`@ergon.studio/pi-memory-steward`](packages/memory-steward/) | Cross-session memory with SQLite vector search, Granite embeddings, and a small steward LLM             | two local user services on reserved ports `18091` and `18092` |
 | [`@ergon.studio/pi-orchestrator`](packages/orchestrator-mode/) | Legacy Ergon `/orchestrator` mode with bundled specialist agents and agent-owned quality gate           | none                                                          |
 | [`@ergon.studio/pi-plan`](packages/plan-mode/)                | Scout-inspired `/plan` workflow for architecture planning and `.ergon.studio/HANDOFF.md` creation       | none                                                          |
@@ -37,6 +38,7 @@ Local development install:
 ```bash
 cd /path/to/ergon.studio
 pi install ./pi/packages/brainstormer
+pi install ./pi/packages/debate
 pi install ./pi/packages/memory-steward
 pi install ./pi/packages/orchestrator-mode
 pi install ./pi/packages/plan-mode
@@ -47,6 +49,7 @@ After publishing:
 
 ```bash
 pi install npm:@ergon.studio/pi-brainstormer
+pi install npm:@ergon.studio/pi-debate
 pi install npm:@ergon.studio/pi-memory-steward
 pi install npm:@ergon.studio/pi-orchestrator
 pi install npm:@ergon.studio/pi-plan
@@ -137,7 +140,10 @@ npm run build
 cd packages/brainstormer
 npm pack --dry-run
 
-cd packages/memory-steward
+cd ../debate
+npm pack --dry-run
+
+cd ../memory-steward
 npm pack --dry-run
 
 cd ../orchestrator-mode

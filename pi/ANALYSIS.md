@@ -557,18 +557,15 @@ quality controller's judgment with deterministic chain state.
 
 ---
 
-#### 4. Debate Tool → Extension or Prompt Template
+#### 4. Debate Tool → Standalone Pi Package
 
-The debate tool creates two child sessions and alternates turns between two agents. Pi doesn't have this built-in, so options:
+Implemented as `@ergon.studio/pi-debate` under `pi/packages/debate`.
 
-**Option A: Pi Extension Tool**
-Register a custom `debate` tool via `pi.registerTool()` that creates forked sessions and alternates prompts. Most faithful to original.
-
-**Option B: Prompt Template + Chain**
-A prompt template that instructs the orchestrator to use Pi's subagent system to simulate a debate. Less automated but simpler.
-
-**Option C: Pi Chain with oracle**
-Use Pi's `oracle` agent (forked context, advisory review) as a lightweight debate partner. Not the same as two-way debate but covers the "challenge my approach" use case.
+- Registers a global `debate` tool without changing Pi's active tool selection
+- Creates two independent role-based temporary Pi sessions and alternates turns
+- Uses the parent session's current model, thinking level, active tools, and working directory
+- Stops on an exact terminal `AGREE` or `BLOCKED` verdict, or `max_turns`
+- Cleans up both temporary sessions after success, failure, or abort
 
 ---
 
@@ -643,5 +640,5 @@ Use Pi's `oracle` agent (forked context, advisory review) as a lightweight debat
 - [ ] Test orchestrator + subagent delegation
 - [ ] Test memory steward recall/save
 - [ ] Test quality loop
-- [ ] Test debate tool
+- [x] Test debate tool
 - [ ] Iterate on agent prompts based on real usage

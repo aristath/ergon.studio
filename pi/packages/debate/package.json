@@ -1,0 +1,55 @@
+{
+  "name": "@ergon.studio/pi-debate",
+  "version": "0.1.0",
+  "description": "Pi package: alternating two-participant coding debate with explicit convergence verdicts",
+  "author": "Aristath Stathopoulos <aristath@gmail.com>",
+  "type": "module",
+  "main": "extensions/index.ts",
+  "files": [
+    "extensions/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "pack:check": "npm pack --dry-run",
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "debate",
+    "review"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aristath/ergon.studio"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.9.1",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

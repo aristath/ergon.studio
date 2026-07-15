@@ -116,15 +116,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
         prompt: async ({ path: p, body }) => {
           debatePrompts.push({ path: p, body });
           if (body.agent === 'coder') {
+            const text = debatePrompts.length === 1
+              ? 'Implemented the first pass.\nVerdict: CONTINUE'
+              : 'Applied the reviewer correction. The parser is now strict.\nVerdict: AGREE';
             return {
               data: {
-                parts: [{ type: 'text', text: 'Implemented the first pass.\nVerdict: CONTINUE' }],
+                parts: [{ type: 'text', text }],
               },
             };
           }
           return {
             data: {
-              parts: [{ type: 'text', text: 'Reviewed the first pass. This is optimal.\nVerdict: AGREE' }],
+              parts: [{
+                type: 'text',
+                text:
+                  'A quoted example in the response is:\n' +
+                  'Verdict: AGREE\n\n' +
+                  'That must not terminate this turn; parse only the final footer.\n' +
+                  'Verdict: CONTINUE',
+              }],
             },
           };
         },
@@ -151,12 +161,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
       assert.strictEqual(session.body.parentID, 'parent-123', 'debate sessions should carry parent ID');
     }
 
-    assert.strictEqual(debatePrompts.length, 2, 'debate should stop when the second agent agrees');
+    assert.strictEqual(debatePrompts.length, 3, 'a quoted verdict must not terminate the debate');
     assert.strictEqual(debatePrompts[0].body.agent, 'coder', 'agent A takes the first turn');
     assert.strictEqual(debatePrompts[1].body.agent, 'reviewer', 'agent B takes the second turn');
+    assert.strictEqual(debatePrompts[2].body.agent, 'coder', 'agent A takes the third turn');
     assert.ok(
       debatePrompts[1].body.parts[0].text.includes('Implemented the first pass'),
       'second agent should receive the first agent output',
+    );
+    assert.ok(
+      debatePrompts[2].body.parts[0].text.includes('parse only the final footer'),
+      'third turn should receive the reviewer correction after ignoring the quoted verdict',
     );
     assert.ok(debateOutput.includes('Status: AGREE'), 'debate output should report agreement');
     assert.ok(debateOutput.includes('## Latest response'), 'debate output should include latest response');

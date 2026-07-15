@@ -781,6 +781,48 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     console.log('✅ chat.message → system.transform recall injection (single entry invariant)');
   }
 
+  // --- a new user message must invalidate unconsumed recall from an aborted turn ---
+
+  {
+    let rewriteCalls = 0;
+    const steward = {
+      async rewriteQuery() {
+        rewriteCalls++;
+        return rewriteCalls === 1 ? 'first-turn query' : null;
+      },
+      async judgeSave() { return null; },
+    };
+    const memory = {
+      async recall() {
+        return [{ id: 'm1', content: 'first-turn-only note', score: 0.9 }];
+      },
+      async save() {},
+    };
+    const plugin = await createErgonPlugin({ steward, memory })({
+      client: { app: { log: async () => {} } }, directory: '/tmp',
+    });
+
+    // Turn 1 stashes recall, then aborts before system.transform consumes it.
+    await plugin['chat.message'](
+      { sessionID: 'sess-stale' },
+      { message: { id: 'm1' }, parts: [{ type: 'text', text: 'first turn' }] },
+    );
+
+    // Turn 2 has no recall. Its transform must not consume turn 1's orphan.
+    await plugin['chat.message'](
+      { sessionID: 'sess-stale' },
+      { message: { id: 'm2' }, parts: [{ type: 'text', text: 'second turn' }] },
+    );
+    const sysOut = { system: [] };
+    await plugin['experimental.chat.system.transform']({ sessionID: 'sess-stale' }, sysOut);
+
+    assert.strictEqual(sysOut.system.length, 1, 'scratchpad remains the only system entry');
+    assert.ok(!sysOut.system[0].includes('Relevant prior notes'), 'stale recall must be discarded');
+    assert.ok(!sysOut.system[0].includes('first-turn-only note'), 'prior-turn memory must not leak');
+
+    console.log('✅ new chat.message invalidates orphaned recall from an aborted turn');
+  }
+
   // --- experimental.chat.system.transform without prior chat.message: no recall, just scratchpad ---
 
   {

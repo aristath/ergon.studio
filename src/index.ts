@@ -409,9 +409,9 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
         if (event.type === "session.deleted") {
           // pendingRecall is populated by chat.message and consumed by
           // experimental.chat.system.transform on the same turn. If a turn
-          // is aborted/errored before transform runs, the entry is orphaned.
-          // Purge on session.deleted so the maps can't grow unbounded across
-          // a long-lived opencode process. Same goes for the dedup memo.
+          // is aborted/errored before transform runs, the next chat.message
+          // invalidates it. Purge here too for sessions that never receive
+          // another message. Same goes for the dedup memo.
           const { sessionID } = (event as any).properties ?? {}
           if (typeof sessionID === "string" && sessionID.length > 0) {
             pendingRecall.delete(sessionID)
@@ -434,6 +434,11 @@ export function createErgonPlugin(deps: ErgonPluginDeps = {}): Plugin {
       // On timeout we log and skip recall — losing one turn's memory is
       // strictly better than blocking the user indefinitely.
       "chat.message": async (input, output) => {
+        // A prior turn may have stopped after stashing recall but before
+        // system.transform consumed it. Never let that orphaned context cross
+        // into this user message, including when the current recall exits early.
+        pendingRecall.delete(input.sessionID)
+
         const userText = extractText(output.parts as any[])
         if (!userText) return
 

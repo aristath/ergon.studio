@@ -16,6 +16,7 @@ function createFakeChild({
   stderr = "",
   closeCode = 0,
   autoClose = true,
+  processError,
   onKill,
 } = {}) {
   const child = new EventEmitter();
@@ -26,7 +27,9 @@ function createFakeChild({
     return true;
   };
 
-  if (autoClose) {
+  if (processError) {
+    process.nextTick(() => child.emit("error", new Error(processError)));
+  } else if (autoClose) {
     process.nextTick(() => {
       for (const line of stdoutLines) {
         child.stdout.write(`${JSON.stringify(line)}\n`);
@@ -44,6 +47,18 @@ function createFakeChild({
 function argValue(args, name) {
   const index = args.indexOf(name);
   return index === -1 ? undefined : args[index + 1];
+}
+
+function executeReviewer(harness, signal) {
+  return harness.tools
+    .get("task")
+    .execute(
+      "tool-1",
+      { agent: "reviewer", brief: "Review the implementation" },
+      signal,
+      undefined,
+      harness.ctx,
+    );
 }
 
 function makeHarness({
@@ -465,6 +480,86 @@ test("run_parallel honors explicit agent models over the parent model", async ()
     assert.equal(argValue(calls[1].args, "--model"), "local/planner");
     assert.equal(argValue(calls[0].args, "--thinking"), "high");
     assert.equal(argValue(calls[1].args, "--thinking"), "high");
+  } finally {
+    setSpawnProcessForTest();
+  }
+});
+
+test("reports synchronous and emitted child process errors", async () => {
+  const harness = makeHarness();
+  let invocation = 0;
+
+  setSpawnProcessForTest(() => {
+    invocation++;
+    if (invocation === 1) throw new Error("spawn failed");
+    return createFakeChild({ processError: "pi executable missing" });
+  });
+
+  try {
+    const thrown = await executeReviewer(harness);
+    const emitted = await executeReviewer(harness);
+
+    assert.equal(thrown.isError, true);
+    assert.match(thrown.content[0].text, /spawn failed/);
+    assert.equal(emitted.isError, true);
+    assert.match(emitted.content[0].text, /pi executable missing/);
+  } finally {
+    setSpawnProcessForTest();
+  }
+});
+
+test("treats signal termination and empty assistant output as failures", async () => {
+  const harness = makeHarness();
+  let invocation = 0;
+
+  setSpawnProcessForTest(() => {
+    invocation++;
+    return invocation === 1
+      ? createFakeChild({ closeCode: null })
+      : createFakeChild();
+  });
+
+  try {
+    const terminated = await executeReviewer(harness);
+    const empty = await executeReviewer(harness);
+
+    assert.equal(terminated.isError, true);
+    assert.match(terminated.content[0].text, /exit code 1/);
+    assert.equal(empty.isError, true);
+    assert.match(empty.content[0].text, /no assistant text/);
+  } finally {
+    setSpawnProcessForTest();
+  }
+});
+
+test("removes the abort listener after child completion", async () => {
+  const harness = makeHarness();
+  const controller = new AbortController();
+  const signals = [];
+
+  setSpawnProcessForTest(() =>
+    createFakeChild({
+      stdoutLines: [
+        {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Complete." }],
+          },
+        },
+      ],
+      onKill(signal) {
+        signals.push(signal);
+      },
+    }),
+  );
+
+  try {
+    const result = await executeReviewer(harness, controller.signal);
+    controller.abort();
+
+    assert.equal(result.isError, false);
+    assert.deepEqual(signals, []);
   } finally {
     setSpawnProcessForTest();
   }

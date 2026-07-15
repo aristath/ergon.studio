@@ -366,16 +366,14 @@ async function runBundledAgent(
   let output = "";
   let stderr = "";
   let buffer = "";
+  let processError: string | undefined;
   let wasAborted = false;
 
   try {
     const exitCode = await new Promise<number>((resolve) => {
-      const child = spawnProcess(invocation.command, invocation.args, {
-        cwd: runtime.cwd,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let closed = false;
+      let child: ChildProcess | undefined;
+      let settled = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
 
       const processLine = (line: string) => {
         if (!line.trim()) return;
@@ -388,6 +386,36 @@ async function runBundledAgent(
         }
       };
 
+      const finish = (code: number) => {
+        if (settled) return;
+        settled = true;
+        if (killTimer) clearTimeout(killTimer);
+        runtime.signal?.removeEventListener("abort", abort);
+        if (buffer.trim()) processLine(buffer);
+        resolve(code);
+      };
+
+      const abort = () => {
+        if (settled || !child) return;
+        wasAborted = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!settled) child?.kill("SIGKILL");
+        }, childKillGraceMs);
+      };
+
+      try {
+        child = spawnProcess(invocation.command, invocation.args, {
+          cwd: runtime.cwd,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        processError = error instanceof Error ? error.message : String(error);
+        finish(1);
+        return;
+      }
+
       child.stdout?.on("data", (chunk) => {
         buffer += chunk.toString();
         const lines = buffer.split("\n");
@@ -399,25 +427,22 @@ async function runBundledAgent(
         stderr += chunk.toString();
       });
 
-      child.on("close", (code) => {
-        closed = true;
-        if (buffer.trim()) processLine(buffer);
-        resolve(code ?? 0);
+      child.on("close", (code) => finish(code ?? 1));
+      child.on("error", (error) => {
+        processError = error instanceof Error ? error.message : String(error);
+        finish(1);
       });
-
-      child.on("error", () => resolve(1));
-
-      const abort = () => {
-        wasAborted = true;
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (!closed) child.kill("SIGKILL");
-        }, childKillGraceMs);
-      };
 
       if (runtime.signal?.aborted) abort();
       else runtime.signal?.addEventListener("abort", abort, { once: true });
     });
+
+    const error = wasAborted
+      ? "Agent task aborted."
+      : (processError ??
+        (exitCode === 0 && !output
+          ? "Pi returned no assistant text."
+          : undefined));
 
     return {
       agent: agentName,
@@ -425,7 +450,7 @@ async function runBundledAgent(
       exitCode,
       output,
       stderr,
-      error: wasAborted ? "Agent task aborted." : undefined,
+      error,
     };
   } finally {
     rmSync(dirname(promptPath), { recursive: true, force: true });

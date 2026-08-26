@@ -2,91 +2,51 @@
 
 ## Completed this session
 
-Built a complete quality loop system to ensure code quality before marking tasks complete:
+Implemented **all 14 findings** from `.ergon.studio/REVIEW-dsh-2026-08-26.md` (2 HIGH, 4 MEDIUM, 8 LOW) in `dsh/` (@ergon.studio/dsh, the DSH cordis plugin), plus one drive-by fix. Quality controller **APPROVED** (first pass, no rejections); the three actionable non-blocking nits it raised were closed in the same session.
 
-### New Files Created
+Findings → implementation (all in `dsh/`):
+- **H1** subagent turns triggered recall+save → `delegationDepth(session)` gate in both handlers (`src/plugin.ts`).
+- **H2** unbounded nesting via `debate`/`run_parallel` → both added to `BASE_DENY` (`src/roster.ts`) + explicit `maxDepth: SPAWN_MAX_DEPTH` (=3) on both spawn sites (`src/debate.ts`).
+- **M1** three profile-lifetime `Map`s → `WeakMap` + header comment corrected.
+- **M2** `agents/orchestrator.md` no longer references the nonexistent `task` tool.
+- **M3** contracts §4-documented pre-step recall fallback implemented (waterfall, user-kind only, depth-0 only, deduped) + tradeoff documented.
+- **M4** `run_parallel` hard cap of 10 tasks (`MAX_PARALLEL_TASKS`), documented in tool + param descriptions.
+- **L1** `prompts/steward.md` legacy llama.cpp block deleted.
+- **L2** `EXPECTED_ROSTER_IDS` (10) — `loadRoster` warns on extras, `generatePreset` throws (build fails).
+- **L3** exported pure `clampRecallLimit(requested, fallback)` (trunc, clamp [1,20]) used by the `memory_search` tool.
+- **L4** `preset-gen.ts` now emits the harness's `!!js` platform gates: tool-bash disabled on win32 + new tool-pwsh row (preset has 16 rows).
+- **L5** CLI `init` reports + keeps drifted skills (`kept` bucket) instead of throwing.
+- **L6** `install.ts` self-install repairs a missing `preset.yml` (new test added post-approval).
+- **L7** failed/timed-out recall clears its `lastRecalledText` marker (`forgetIfOwned`) so an identical re-queued message is retried; settled NONE/empty keeps the marker.
+- **L8** contracts §1: schemastery ≠ zod (bare `z.string()` optional).
+- **Drive-by**: `status()` no longer reports the pnpm `profiles/node_modules` artifact as a missing-plugin profile.
 
-1. **`.ergon.studio/COMPLETION.md`** — Defines what "done" means with explicit checklist:
-   - Code quality (no bugs, no TODOs, edge cases)
-   - Testing (tests written, passing, meaningful)
-   - Documentation (inline docs, README, config)
-   - Integration (no breaking changes)
+## Verification state
 
-2. **`agents/design_reviewer.md`** — New subagent for optimality review:
-   - Reviews code architecture, structure, performance, trade-offs
-   - Returns "APPROVED" or "Needs Improvement" with specific suggestions
-   - Separate from reviewer (which checks bugs) to focus on design quality
-
-3. **`agents/quality_controller.md`** — New subagent that runs the full quality loop:
-   - Phase 1: Invokes reviewer (bug check)
-   - Phase 2: Invokes design_reviewer (optimality check)
-   - Phase 3: Verifies COMPLETION.md checklist
-   - Returns "APPROVED" only if ALL phases pass
-   - Tracks iterations, warns after 3 failures
-
-### Files Modified
-
-4. **`agents/orchestrator.md`** — Added mandatory quality gates section:
-   - Must invoke quality_controller after ANY code task
-   - Cannot declare completion without "APPROVED"
-   - Must fix issues and re-invoke if "REJECTED"
-   - After 3 iterations, must ask user for direction
-
-5. **`prompts/steward.md`** — Added judge examples for quality preferences:
-   - "Always run quality controller before marking complete"
-   - "Write tests for all new functionality"
-   - "Include design reviewer in quality loop"
-   - "Update README for user-facing changes"
-   - "No TODOs in completed code"
-
-6. **`opencode.json`** — Added permissions for new agents:
-   - `design_reviewer`: edit deny, bash deny
-   - `quality_controller`: edit deny, bash deny
-
-## In progress
-
-Nothing. The quality loop system is complete and ready to test.
-
-## Decisions pending
-
-None.
+- `npm test` in `dsh/`: **102/102** (was 89; +13 new).
+- `npm run build` (tsc + preset regen) clean; `presets/ergon/agent.cordis.yml` regenerated with 16 rows, `!!js` gates at the tool-bash/tool-pwsh rows.
+- Repacked `ergon.studio-dsh-0.1.1.tgz` (gitignored — do NOT commit).
+- Deployed: web profile `node_modules` updated (remove+add — see Notes for why plain add fails); `node dist/cli.js init --force --profile web` refreshed the live preset; `diff -r` confirms `~/.dsh/.agent-presets/ergon` == generated; `status` clean (2 profiles, both installed); deployed `dist/` byte-identical to current build.
 
 ## Start here next session
 
-Test the quality loop with a real code task:
-
-1. Switch to orchestrator
-2. Give it a small but non-trivial task (e.g., "add a function to parse X")
-3. Watch whether it:
-   - Invokes quality_controller after coding
-   - quality_controller properly chains reviewer → design_reviewer → checklist
-   - The loop terminates correctly when all phases pass
-   - The orchestrator fixes issues and re-invokes when rejected
+1. **Restart the dsh `web` profile process** — the plugin code (H1/M1/M3/M4/L3/L7 behavior) only takes effect on process restart. Preset-level changes (M2 persona, L4 platform rows, H2 specialist deny lists) already apply to new sessions.
+2. **Commit the changeset** (16 modified files under `dsh/`, all tracked; working tree also has the untracked review file `.ergon.studio/REVIEW-dsh-2026-08-26.md` — decide whether to commit it too; tgz is gitignored). Suggested scope: one commit for the 14 findings, or one per letter group if preferred.
+3. Optional polish: none outstanding. QC nit #4 (keep `presetSchema`/`jsExpr` exports) was consciously accepted — see scratchpad Decisions.
 
 ## Watch out for
 
-1. **Orchestrator might skip quality_controller** — Local models ignore instructions. If it declares completion without invoking quality_controller, strengthen the prompt or add explicit "before you reply to the user" language.
+- **pnpm dedupes same-version `file:` installs by path**: re-`add`ing a repacked 0.1.1 tgz says "Already up to date" and does nothing. Deploy = remove then add.
+- The web profile is where the plugin lives; `headless` also has it installed (older dist until its next deploy — it is not the active testing target).
+- `!!js` preset lines are validated against the harness's own tag definition and its dsh-base patch, but not integration-tested against a live DSH boot — if the profile fails to start after restart, suspect preset YAML first.
+- L7 retry does NOT cover an HTTP-failed rewrite (steward `rewriteQuery` returns null for both NONE and failure; QC judged the current fail-open behavior correct).
+- The stale OpenCode-era HANDOFF content this replaced described a quality-loop system in `agents/`+`opencode.json` — that work predates this session and is unrelated to `dsh/`.
 
-2. **Quality controller might be too lenient** — Watch its first few approvals. If it approves code with obvious issues, tighten its criteria in the prompt.
+## Key files
 
-3. **Infinite loops** — If the code can't pass (fundamental design flaw), the 3-iteration limit should kick in. Verify this works.
-
-4. **Steward memory** — The new judge examples need to be exercised. After a few sessions where you correct the orchestrator about quality, check if the steward is saving those preferences.
-
-5. **COMPLETION.md is static** — The quality_controller reads it, but it's not injected into context like scratchpad. If the controller "forgets" to check it, consider plugin injection.
-
-## Architecture Notes
-
-The quality loop is:
-```
-orchestrator codes → quality_controller → [reviewer → design_reviewer → checklist] → APPROVED/REJECTED
-```
-
-If REJECTED:
-```
-orchestrator fixes → quality_controller → [repeat] → APPROVED
-```
-
-After 3 REJECTED cycles, orchestrator must ask user for direction.
-
-This is enforced by prompts, not code. Local models are unreliable at following multi-step processes, so watch for shortcuts.
+- Review: `.ergon.studio/REVIEW-dsh-2026-08-26.md`
+- Plugin: `dsh/src/plugin.ts` (recall/save/pre-step, tools, WeakMaps, depth gate, caps)
+- `dsh/src/roster.ts` (BASE_DENY, EXPECTED_ROSTER_IDS) · `dsh/src/debate.ts` (SPAWN_MAX_DEPTH) · `dsh/src/preset-gen.ts` (!!js, tool-pwsh) · `dsh/src/install.ts` (preset.yml repair) · `dsh/src/cli.ts` (skill drift, status skip) · `dsh/src/index.ts` (re-exports)
+- Tests: `dsh/tests/{plugin,roster,debate,preset}.test.mjs`
+- Docs: `dsh/README.md`, `dsh/contracts.md` (pinned harness contracts — re-verify on harness upgrade)
+- Context: `.ergon.studio/scratchpad.md` (conventions, notes, decisions from this session)

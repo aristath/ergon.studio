@@ -67,7 +67,7 @@ To install from a local checkout before publishing:
 
 ```sh
 cd ergon.studio/dsh && npm run build && npm pack
-dsh plugin --profile web add ./ergon.studio-dsh-0.1.1.tgz
+dsh plugin --profile web add ./ergon.studio-dsh-0.1.2.tgz
 ```
 
 ## Configuration

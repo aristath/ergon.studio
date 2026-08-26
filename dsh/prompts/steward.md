@@ -7,23 +7,6 @@ purpose: Loaded by src/steward.ts for root ergon client config and prompts. Serv
 url: http://127.0.0.1:18091
 model: ergon-studio-memory-steward
 temperature: 0.3
-
-# === Legacy standalone runner config (read only by scripts/run-steward.sh) ===
-# The active steward is ergon-steward.service from pi/packages/memory-steward.
-# Keep llama-steward.service disabled unless you are intentionally testing the
-# old standalone runner on this legacy port.
-port: 8081
-llama_server_bin: /home/aristath/llama.cpp/build-vulkan/bin/llama-server
-model_path: /home/aristath/models/qwen3.5/4b/UD-Q8_K_XL/Qwen3.5-4B-UD-Q8_K_XL.gguf
-device: Vulkan1
-n_gpu_layers: 99
-ctx_size: 16384
-top_k: 40
-top_p: 0.95
-# Qwen 3.5 has reasoning mode on by default. The steward's job is
-# classification, not chain-of-thought — disable thinking so it goes
-# straight to the answer. (--reasoning-format alone doesn't do this.)
-enable_thinking: false
 ---
 
 ## rewrite

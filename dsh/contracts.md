@@ -13,12 +13,18 @@ Plain ESM, **named exports** (reference: `dsh-persona/lib/index.js`):
 import z from "@deepseek-ai/schemastery";
 const name = "ergon";                    // cordis plugin name (string)
 const inject = ["systemPrompt"];         // hard dependencies (string[]), optional
-const Config = z.object({ ... });        // zod schema, optional; validated + defaulted
+const Config = z.object({ ... });        // schemastery schema (zod-compatible), optional
 function apply(ctx, config) { ... }      // ctx = plugin scope context
 export { Config, apply, inject, name };
 ```
 
-- `config` arrives only if `Config` is exported; zod defaults are applied.
+- `config` arrives only if `Config` is exported; schema defaults are applied.
+  The schema library is **`@deepseek-ai/schemastery`, not zod** — zod-compatible
+  surface, different semantics: a bare `z.string()` is *optional* (validated
+  when present), which is exactly why the bundle row with no config at all
+  validates. Do not "normalize" this to plain zod, where `z.string()` is
+  required-by-default: the no-config row would then fail validation and break
+  the install.
 - `inject`: declare **only** hard dependencies. Accessing `ctx.<svc>` without
   declaring it is rejected by the Guard. Optional deps: `ctx.get("svc")` +
   absence check.
@@ -153,7 +159,12 @@ a `complete` section is re-imposed alone).
 2. `systemPrompt.context({ name: "ergon:memory", order: 95,
    text: (c) => c.agent ? recall.get(c.agent) ?? "" : "" })`.
 3. `agent/pre-step` listener (fallback + freshness): re-trigger recall when the
-   claimed batch contains a user message not yet recalled.
+   claimed batch contains a user message not yet recalled. Deliberately
+   stricter than the inbox trigger: only explicit `source.kind === "user"`
+   messages qualify (the inbox trigger also accepts an absent source for
+   spawn-driver robustness), so synthetic step messages can never pollute a
+   query — the cost is that a user message with an absent `source.kind` that
+   also missed the inbox event goes unrecalled.
 
 Latency budget: recall visible to the model at step 1 if the 4B rewrite+search
 beats the first assembly; otherwise step 2 of the same turn. Acceptable;
@@ -311,10 +322,10 @@ inject: `["tools","subagents","systemPrompt"]`; prompt order 116.5.
 | OpenCode | DSH |
 | --- | --- |
 | 10 agent files (frontmatter) | preset: 1 persona row (orchestrator) + 9 `dsh-tool-subagent` rows |
-| `debate` tool | `debate` tool via `ctx.tools.register` + `ctx.subagents.start("spawn", ...)` × N + `settleRun` |
-| `run_parallel` tool | same seam, N parallel one-shots |
-| memory steward recall (chat.message → system.transform) | `agent/inbox/inserted` → cache → `systemPrompt.context()` snapshot |
-| memory steward save (session.idle) | `session/event` `turn/end` completed → fire-and-forget |
+| `debate` tool | `debate` tool via `ctx.tools.register` + `ctx.subagents.start("spawn", ...)` × N (explicit `maxDepth: 3`); settles via `await run.result` + `run.dispose()` (the harness `settleRun` helper is equivalent but not imported) |
+| `run_parallel` tool | same seam, ≤10 parallel one-shots (hard cap) |
+| memory steward recall (chat.message → system.transform) | `agent/inbox/inserted` → cache → `systemPrompt.context()` snapshot; `agent/pre-step` fallback re-triggers unrecalled user messages; depth-0 sessions only |
+| memory steward save (session.idle) | `session/event` `turn/end` completed → fire-and-forget; depth-0 sessions only |
 | scratchpad re-inject at compaction | `systemPrompt.context()` reading the file each assembly (snapshot diff) — no compaction hook needed |
 | openmemory MCP for main model | `memory_search` tool on the ergon plugin (profile-level via the bundle) |
 | skills (scratchpad, handoff) | SKILL.md dirs → `~/.dsh/skills/` via installer |

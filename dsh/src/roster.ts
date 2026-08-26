@@ -40,6 +40,10 @@ const BASE_DENY = [
   "interrupt_agent",
   "workflow",
   "ralph",
+  // ergon's own spawn tools — unlike the generic subagent tool they carry no
+  // harness depth cap, so specialists must never be able to nest them
+  "debate",
+  "run_parallel",
   // goal machinery
   "create_goal",
   "get_goal",
@@ -78,6 +82,16 @@ const SPECIALISTS = [
   "researcher",
   "tester",
   "quality_controller",
+];
+
+/**
+ * The 10 curated roster ids. Any other .md file in agents/ would silently
+ * become a spawnable agent (debate/run_parallel accept any roster id), so the
+ * build fails on extras (preset-gen) and loadRoster warns about them.
+ */
+export const EXPECTED_ROSTER_IDS = [
+  "orchestrator",
+  ...SPECIALISTS,
 ];
 
 /**
@@ -175,6 +189,15 @@ export function loadRoster(): RosterEntry[] {
       persona: body,
       deny: [...deny].sort(),
     });
+  }
+  // A stray .md in agents/ becomes a spawnable agent (debate/run_parallel
+  // accept any roster id). Warn at load; the build (preset-gen) fails hard.
+  for (const entry of entries) {
+    if (!EXPECTED_ROSTER_IDS.includes(entry.id)) {
+      console.warn(
+        `ergon roster: "${entry.id}" in agents/ is not part of the curated roster — it is a spawnable agent; remove the file if that was not intentional`,
+      );
+    }
   }
   rosterCache = entries;
   return rosterCache;

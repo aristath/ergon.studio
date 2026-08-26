@@ -22,7 +22,37 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
-import { loadRoster, type RosterEntry } from "./roster.js";
+import { EXPECTED_ROSTER_IDS, loadRoster, type RosterEntry } from "./roster.js";
+
+// === loader YAML dialect (the !!js tag) ===
+//
+// The preset loader (dsh-agent-presets) parses compositions with a js-yaml
+// schema extended by a `!!js` scalar tag: `disabled: !!js process.platform
+// !== 'win32'` round-trips as an expression node the loader evaluates at
+// entry activation — how the shipped standard/base presets gate the shell
+// rows by platform. We mirror that dialect so the generated preset can carry
+// the same platform gates, and so validatePresetFile can parse it.
+
+const jsExprType = new yaml.Type("tag:yaml.org,2002:js", {
+  kind: "scalar",
+  resolve: (data: unknown) => typeof data === "string",
+  construct: (data: string) => ({ __jsExpr: data }),
+  predicate: (v: unknown) => v instanceof Object && "__jsExpr" in v,
+  represent: (v: object) => (v as { __jsExpr: string }).__jsExpr,
+});
+
+/** The preset YAML dialect: plain YAML + the loader's `!!js` expression tag. */
+export const presetSchema = yaml.JSON_SCHEMA.extend(jsExprType);
+
+/** Marker for a `!!js` expression value in a generated row (platform gates). */
+export function jsExpr(expression: string): { __jsExpr: string } {
+  return { __jsExpr: expression };
+}
+
+/** Load preset YAML with the `!!js` dialect (plain yaml.load throws on the tag). */
+export function loadPresetYaml(raw: string): unknown {
+  return yaml.load(raw, { schema: presetSchema });
+}
 
 /** Plan-mode policy text (verbatim from the shipped standard/code preset). */
 const PLAN_MODE_SECTION = `You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
@@ -62,6 +92,16 @@ export function generatePreset(roster: RosterEntry[] = loadRoster()): GeneratedP
   for (const id of SPECIALIST_ORDER) {
     if (!byId.get(id)) throw new Error(`ergon preset: ${id}.md missing from roster`);
   }
+  // Fail the build on any extra agents/*.md: every roster id becomes a
+  // spawnable agent via debate/run_parallel, so a stray file is a real
+  // surface change, not a comment.
+  for (const entry of roster) {
+    if (!EXPECTED_ROSTER_IDS.includes(entry.id)) {
+      throw new Error(
+        `ergon preset: unexpected agent "${entry.id}" in agents/ — remove the file or extend the curated roster`,
+      );
+    }
+  }
 
   const rows: Array<Record<string, unknown>> = [];
 
@@ -78,7 +118,19 @@ export function generatePreset(roster: RosterEntry[] = loadRoster()): GeneratedP
   });
 
   // ── shell / fs / jobs ───────────────────────────────────────────────────
-  rows.push({ id: "tool-bash", name: "@deepseek-ai/dsh-tool-bash" });
+  // Shell rows carry the standard preset's platform gates (evaluated by the
+  // preset loader at entry activation via the !!js tag): exactly one shell
+  // stack per host — bash off on Windows, pwsh off everywhere else.
+  rows.push({
+    id: "tool-bash",
+    name: "@deepseek-ai/dsh-tool-bash",
+    disabled: jsExpr("process.platform === 'win32'"),
+  });
+  rows.push({
+    id: "tool-pwsh",
+    name: "@deepseek-ai/dsh-tool-pwsh",
+    disabled: jsExpr("process.platform !== 'win32'"),
+  });
   rows.push({ id: "tool-fs", name: "@deepseek-ai/dsh-tool-fs" });
   rows.push({
     id: "tool-fs-search",
@@ -192,7 +244,12 @@ export function generatePreset(roster: RosterEntry[] = loadRoster()): GeneratedP
     config: { fetch: false, searchTimeoutMs: 60000 },
   });
 
-  const agentCordis = yaml.dump(rows, { lineWidth: -1, noRefs: true, quotingType: "'" });
+  const agentCordis = yaml.dump(rows, {
+    lineWidth: -1,
+    noRefs: true,
+    quotingType: "'",
+    schema: presetSchema,
+  });
   const preset = yaml.dump(
     {
       name: "Ergon",
@@ -217,7 +274,9 @@ export function writePreset(outDir: string, preset: GeneratedPreset = generatePr
 /** Load + sanity-check a generated agent.cordis.yml (used by the CLI). */
 export function validatePresetFile(path: string): string[] {
   const raw = readFileSync(path, "utf8");
-  const rows = yaml.load(raw) as Array<Record<string, unknown>>;
+  // The !!js dialect: the shell rows carry platform gates the plain YAML
+  // loader rejects.
+  const rows = loadPresetYaml(raw) as Array<Record<string, unknown>>;
   const problems: string[] = [];
   if (!Array.isArray(rows) || rows.length === 0) {
     problems.push("agent.cordis.yml is not a non-empty row list");

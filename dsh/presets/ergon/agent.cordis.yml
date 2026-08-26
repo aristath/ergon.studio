@@ -71,10 +71,10 @@
       If it's simple enough to do yourself, do it yourself — unless the user explicitly
       asks you to use a specific tool. In that case, use it. Don't shortcut.
 
-      Use the `task` tool to delegate to specialists. Each task runs a specialist to
-      completion and returns their output — there's no back-and-forth mid-task, so
-      brief them fully upfront. Include all the context they need: what exists, what
-      changed, what a good result looks like.
+      Use the specialist tools (`scout`, `architect`, `coder`, …) to delegate. Each
+      call runs a specialist to completion and returns their output — there's no
+      back-and-forth mid-task, so brief them fully upfront. Include all the context
+      they need: what exists, what changed, what a good result looks like.
 
       Use `run_parallel` when you need multiple specialists working simultaneously on
       independent sub-tasks. All tasks run concurrently and their outputs are combined.
@@ -128,6 +128,10 @@
     maxBytes: 65536
 - id: tool-bash
   name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 - id: tool-fs-search
@@ -364,6 +368,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - get_goal
             - interrupt_agent
@@ -372,6 +377,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - send_message
             - subagent
             - subagent_fork
@@ -436,6 +442,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - edit
             - get_goal
@@ -445,6 +452,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -513,6 +521,7 @@
             - ask_user_question
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - get_goal
             - interrupt_agent
@@ -521,6 +530,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -587,6 +597,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - edit
             - get_goal
@@ -595,6 +606,7 @@
             - quality_controller
             - ralph
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -660,6 +672,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - edit
             - get_goal
@@ -668,6 +681,7 @@
             - quality_controller
             - ralph
             - researcher
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -806,6 +820,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - edit
             - get_goal
             - interrupt_agent
@@ -814,6 +829,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -876,6 +892,7 @@
             - ask_user_question
             - coder
             - create_goal
+            - debate
             - design_reviewer
             - edit
             - get_goal
@@ -885,6 +902,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -949,6 +967,7 @@
             - coder
             - create_goal
             - critic
+            - debate
             - design_reviewer
             - get_goal
             - interrupt_agent
@@ -957,6 +976,7 @@
             - ralph
             - researcher
             - reviewer
+            - run_parallel
             - scout
             - send_message
             - subagent
@@ -1054,12 +1074,14 @@
             - coder
             - create_goal
             - critic
+            - debate
             - edit
             - get_goal
             - interrupt_agent
             - list_agents
             - ralph
             - researcher
+            - run_parallel
             - scout
             - send_message
             - subagent

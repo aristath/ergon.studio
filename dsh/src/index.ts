@@ -7,6 +7,7 @@
 export { name, inject, Config, apply } from "./plugin.js";
 
 // Re-exported for tests and advanced use.
+export { clampRecallLimit } from "./plugin.js";
 export { createStewardClient, parseStewardMd } from "./steward.js";
 export { createMemoryClient } from "./memory.js";
 export { loadRoster, getRosterEntry, denyListFor } from "./roster.js";

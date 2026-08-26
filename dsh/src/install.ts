@@ -48,6 +48,8 @@ export function ensureErgonAssets(home: string, warn: Warn): void {
   const presetDest = join(home, ".agent-presets", "ergon");
   const presetSrcFile = join(presetSrc, "agent.cordis.yml");
   const presetDestFile = join(presetDest, "agent.cordis.yml");
+  const presetSrcMeta = join(presetSrc, "preset.yml");
+  const presetDestMeta = join(presetDest, "preset.yml");
   try {
     if (!existsSync(presetSrcFile)) {
       warn(`ergon: preset not found in package at ${presetSrcFile}; skipping self-install`);
@@ -57,6 +59,12 @@ export function ensureErgonAssets(home: string, warn: Warn): void {
       mkdirSync(presetDest, { recursive: true });
       cpSync(presetSrc, presetDest, { recursive: true });
       warn(`ergon: installed agent preset at ${presetDest}`);
+    } else if (!existsSync(presetDestMeta) && existsSync(presetSrcMeta)) {
+      // Half-written install: the composition survived but the preset
+      // metadata (name/description/order) is missing — repair just that file.
+      // Still install-only-when-missing: a user-edited preset.yml is kept.
+      cpSync(presetSrcMeta, presetDestMeta);
+      warn(`ergon: repaired missing preset metadata at ${presetDestMeta}`);
     } else if (sameFile(presetSrcFile, presetDestFile)) {
       // up to date — nothing to do
     } else {

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "js-yaml";
 
-import { generatePreset, writePreset, validatePresetFile } from "../dist/preset-gen.js";
+import { generatePreset, writePreset, validatePresetFile, loadPresetYaml } from "../dist/preset-gen.js";
 import { loadRoster, denyListFor } from "../dist/roster.js";
 
 const SPECIALISTS = [
@@ -28,9 +28,9 @@ test("generatePreset: top-level row ids", () => {
   const p = generatePreset();
   assert.ok(p["agent.cordis.yml"]);
   assert.ok(p["preset.yml"]);
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const ids = rows.map((r) => r.id);
-  for (const id of ["persona", "agent-instructions", "tool-bash", "tool-fs", "tool-fs-search",
+  for (const id of ["persona", "agent-instructions", "tool-bash", "tool-pwsh", "tool-fs", "tool-fs-search",
     "tool-jobs", "skill-filesystem", "tool-skill", "tool-goal", "planning", "compaction",
     "delegation", "tool-ask-user", "tool-todo", "tool-web"]) {
     assert.ok(ids.includes(id), `missing top-level row ${id}`);
@@ -40,9 +40,25 @@ test("generatePreset: top-level row ids", () => {
   assert.ok(!ids.includes("ergon-plugin"), "ergon-plugin must not be a preset row");
 });
 
+test("generatePreset: shell rows carry the standard preset's platform gates (!!js)", () => {
+  const p = generatePreset();
+  const raw = p["agent.cordis.yml"];
+  // The tag must survive the dump as the loader's dialect (plain yaml.load
+  // rejects it — which is exactly why loadPresetYaml exists).
+  assert.ok(raw.includes("disabled: !!js process.platform === 'win32'"), "tool-bash must be disabled on win32");
+  assert.ok(raw.includes("disabled: !!js process.platform !== 'win32'"), "tool-pwsh must be disabled off-win32");
+  const rows = loadPresetYaml(raw);
+  const bash = rows.find((r) => r.id === "tool-bash");
+  const pwsh = rows.find((r) => r.id === "tool-pwsh");
+  assert.equal(bash.name, "@deepseek-ai/dsh-tool-bash");
+  assert.equal(bash.disabled.__jsExpr, "process.platform === 'win32'");
+  assert.equal(pwsh.name, "@deepseek-ai/dsh-tool-pwsh");
+  assert.equal(pwsh.disabled.__jsExpr, "process.platform !== 'win32'");
+});
+
 test("generatePreset: persona row carries the orchestrator body", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const persona = rows.find((r) => r.id === "persona");
   assert.equal(persona.name, "@deepseek-ai/dsh-persona");
   const orch = loadRoster().find((e) => e.id === "orchestrator");
@@ -52,7 +68,7 @@ test("generatePreset: persona row carries the orchestrator body", () => {
 
 test("generatePreset: every specialist row has persona + deny toolFilter + one-shot mode", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const delegation = rows.find((r) => r.id === "delegation");
   assert.ok(delegation.group);
   const byId = new Map(delegation.config.map((r) => [r.id, r]));
@@ -72,7 +88,7 @@ test("generatePreset: every specialist row has persona + deny toolFilter + one-s
 
 test("generatePreset: generic subagent + fork rows are continuable", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const delegation = rows.find((r) => r.id === "delegation");
   const byId = new Map(delegation.config.map((r) => [r.id, r]));
   assert.equal(byId.get("tool-subagent").config.toolName, "subagent");
@@ -83,7 +99,7 @@ test("generatePreset: generic subagent + fork rows are continuable", () => {
 
 test("generatePreset: delegation group isolates workflowEngine and carries workflow/ralph rows", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const delegation = rows.find((r) => r.id === "delegation");
   assert.deepEqual(delegation.isolate, { workflowEngine: true });
   const byId = new Map(delegation.config.map((r) => [r.id, r]));
@@ -96,7 +112,7 @@ test("generatePreset: delegation group isolates workflowEngine and carries workf
 
 test("generatePreset: planning + compaction groups carry the shipped isolates", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const planning = rows.find((r) => r.id === "planning");
   assert.deepEqual(planning.isolate, { planMode: true });
   assert.ok(planning.config[0].config.section.includes("You are in plan mode."));
@@ -108,7 +124,7 @@ test("generatePreset: planning + compaction groups carry the shipped isolates", 
 
 test("generatePreset: no ergon-plugin row (the bundle owns the plugin mount)", () => {
   const p = generatePreset();
-  const rows = yaml.load(p["agent.cordis.yml"]);
+  const rows = loadPresetYaml(p["agent.cordis.yml"]);
   const flat = rows.flatMap((r) => (r.group ? r.config : [r]));
   assert.equal(flat.find((r) => r.id === "ergon-plugin"), undefined);
 });
@@ -123,6 +139,11 @@ test("generatePreset: preset.yml has name/description/order", () => {
 
 test("generatePreset: throws when orchestrator missing", () => {
   assert.throws(() => generatePreset([]), /orchestrator/);
+});
+
+test("generatePreset: throws on an unexpected agents/*.md roster entry", () => {
+  const roster = loadRoster().concat([{ id: "rogue", description: "x", persona: "p", deny: [] }]);
+  assert.throws(() => generatePreset(roster), /unexpected agent "rogue"/);
 });
 
 test("writePreset + validatePresetFile: round-trip in a temp dir", () => {

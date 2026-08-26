@@ -36,11 +36,12 @@ function sameContent(a: string, b: string): boolean {
   return readFileSync(a, "utf8") === readFileSync(b, "utf8");
 }
 
-function ensureSkills(force: boolean): { written: string[]; skipped: string[] } {
+function ensureSkills(force: boolean): { written: string[]; upToDate: string[]; kept: string[] } {
   const src = join(PACKAGE_ROOT, "skills");
   const dest = skillsDir(dshHome());
   const written: string[] = [];
-  const skipped: string[] = [];
+  const upToDate: string[] = [];
+  const kept: string[] = [];
   if (!existsSync(src)) {
     throw new Error(`skills directory not found at ${src} — incomplete package install`);
   }
@@ -50,20 +51,21 @@ function ensureSkills(force: boolean): { written: string[]; skipped: string[] } 
     const fromSkill = join(from, "SKILL.md");
     const toSkill = join(to, "SKILL.md");
     if (existsSync(toSkill) && sameContent(fromSkill, toSkill)) {
-      skipped.push(skill.name);
+      upToDate.push(skill.name);
       continue;
     }
+    // Drifted installed copy: keep the user's version (same policy as the
+    // plugin's preset self-install) and report it — never hard-fail init.
     if (existsSync(to) && !force) {
-      throw new Error(
-        `skill ${skill.name} differs from the installed version at ${to}. Re-run with --force to overwrite.`,
-      );
+      kept.push(skill.name);
+      continue;
     }
     if (existsSync(to)) rmSync(to, { recursive: true, force: true });
     mkdirSync(to, { recursive: true });
     cpSync(from, to, { recursive: true });
     written.push(skill.name);
   }
-  return { written, skipped };
+  return { written, upToDate, kept };
 }
 
 function checkProfilePlugin(profile: string): boolean {
@@ -102,9 +104,14 @@ function init(profile: string, force: boolean): number {
   }
 
   // 2. skills
-  const { written, skipped } = ensureSkills(force);
+  const { written, upToDate, kept } = ensureSkills(force);
   for (const s of written) console.log(`• skill installed: ${s}`);
-  for (const s of skipped) console.log(`• skill up to date: ${s}`);
+  for (const s of upToDate) console.log(`• skill up to date: ${s}`);
+  for (const s of kept) {
+    console.log(
+      `• skill differs from the package copy — keeping your version: ${s} (refresh with --force)`,
+    );
+  }
 
   // 3. profile plugin check
   if (checkProfilePlugin(profile)) {
@@ -137,6 +144,9 @@ function status(): number {
   const installed = existsSync(sd) ? readdirSync(sd) : [];
   console.log(`skills:    ${installed.length ? installed.join(", ") : "none"}`);
   for (const profile of existsSync(join(home, "profiles")) ? readdirSync(join(home, "profiles")) : []) {
+    // `node_modules` is a pnpm virtual-store byproduct of `dsh plugin add`,
+    // not a profile — don't report it as "plugin missing".
+    if (profile === "node_modules") continue;
     if (!statSync(join(home, "profiles", profile)).isDirectory()) continue;
     console.log(`profile ${profile}: plugin ${checkProfilePlugin(profile) ? "installed" : "missing"}`);
   }

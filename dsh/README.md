@@ -17,9 +17,9 @@ the DSH plugin system. Design notes and the pinned harness contracts live in
 | --- | --- |
 | **10-agent team** | The `ergon` agent preset: orchestrator as the session persona + 9 specialist tools (`scout`, `architect`, `coder`, `researcher`, `reviewer`, `design_reviewer`, `critic`, `tester`, `quality_controller`) via `dsh-tool-subagent` rows, each with its persona and deny-based tool filter. |
 | **`debate` tool** | Two agents alternate on a task until one agrees, blocks, or max turns. |
-| **`run_parallel` tool** | N specialists run concurrently; results are combined per agent (fail-open per task). |
-| **Memory recall** | On each user message: local 4B steward rewrites the query → openmemory search → results surfaced as a dynamic prompt context (append-only snapshot, KV-cache friendly). |
-| **Memory save** | On completed turns: the steward judges the exchange and stores distilled notes in openmemory. |
+| **`run_parallel` tool** | Up to 10 specialists run concurrently (hard cap per call); results are combined per agent (fail-open per task). |
+| **Memory recall** | On each user message in a top-level session: local 4B steward rewrites the query → openmemory search → results surfaced as a dynamic prompt context (append-only snapshot, KV-cache friendly). A pre-step fallback re-triggers recall if a user message reaches the step unrecalled; subagent turns never recall. |
+| **Memory save** | On completed top-level turns: the steward judges the exchange and stores distilled notes in openmemory. Subagent turns never save (no cost amplification, no corpus noise). |
 | **Scratchpad / handoff** | `.ergon.studio/scratchpad.md` and `HANDOFF.md` re-read on every prompt assembly (survives compaction) + the matching skills. |
 | **`memory_search` tool** | Explicit semantic search over the memory corpus. |
 
@@ -114,10 +114,11 @@ preset).
 
 ```sh
 npm run build   # tsc + regenerate presets/ergon from agents/*.md
-npm test        # build + node --test (89 tests against dist/)
+npm test        # build + node --test (102 tests against dist/)
 ```
 
-- `agents/*.md` — the 10 agent definitions (roster source of truth)
+- `agents/*.md` — the 10 agent definitions (roster source of truth); any
+  extra file fails the preset build (it would silently become a spawnable agent)
 - `src/plugin.ts` — the cordis plugin (tools, recall, save, scratchpad)
 - `src/preset-gen.ts` — preset generator (validated against the shipped
   `standard` preset)

@@ -7,6 +7,12 @@
 // (zero parent context), so each debate turn's prompt carries the task, the
 // debater's own previous response, and the peer's latest response — the
 // full picture a continuing session would have had.
+//
+// Nesting bound: the harness depth cap only guards the generic `subagent`
+// tool, so these spawn calls pass an explicit `maxDepth` (the harness's own
+// default for the generic tool). Legitimate paths never trip it — the
+// roster's BASE_DENY already denies specialists these tools — but it is the
+// hard bound if that ever changes.
 
 import type { RosterEntry } from "./roster.js";
 
@@ -129,6 +135,14 @@ export type SubagentsService = {
 };
 
 /**
+ * Absolute cap on the child's delegation depth for debate/parallel spawns.
+ * Matches the harness default for the generic `subagent` tool (maxDepth 3).
+ * Child depth is parent depth + 1, so this bounds nesting at depth 3 no
+ * matter how deep the calling session already is.
+ */
+export const SPAWN_MAX_DEPTH = 3;
+
+/**
  * Extract assistant text from a settled one-shot child's `output`
  * (AssistantOutputFold: the child's last non-empty assistant message, or its
  * accumulated assistant text). Tolerates content-block arrays and plain
@@ -198,6 +212,7 @@ export async function runDebate(params: DebateParams): Promise<DebateResult> {
         signal,
         persona: current.persona,
         toolFilter: { deny: current.deny },
+        maxDepth: SPAWN_MAX_DEPTH,
       });
 
       const result = await run.result;
@@ -259,6 +274,7 @@ export async function runParallel(params: ParallelParams): Promise<string> {
           signal,
           persona: task.agent.persona,
           toolFilter: { deny: task.agent.deny },
+          maxDepth: SPAWN_MAX_DEPTH,
         });
         const result = await run.result;
         void run.dispose();

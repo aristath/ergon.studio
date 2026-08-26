@@ -10,6 +10,7 @@ import {
   outputText,
   runDebate,
   runParallel,
+  SPAWN_MAX_DEPTH,
 } from "../dist/debate.js";
 import { getRosterEntry } from "../dist/roster.js";
 
@@ -152,6 +153,19 @@ test("runDebate: stops on AGREE at turn 2", async () => {
   assert.equal(subs.calls[1].persona, roster("reviewer").persona);
 });
 
+test("runDebate: spawns carry the absolute depth cap (no harness default applies to these)", () => {
+  assert.equal(SPAWN_MAX_DEPTH, 3, "matches the harness generic-subagent default");
+  const subs = scriptedSubagents(["x\nVerdict: CONTINUE"], ["y\nVerdict: AGREE"]);
+  void runDebate({
+    agentA: roster("coder"), agentB: roster("reviewer"),
+    task: "t", maxTurns: 6, parent: {}, signal: new AbortController().signal, subagents: subs,
+  });
+  // The first spawn is issued synchronously before the first await, so the
+  // call is already recorded here.
+  assert.ok(subs.calls.length >= 1, "debate should have started its first spawn");
+  assert.equal(subs.calls[0].maxDepth, SPAWN_MAX_DEPTH, "debate spawn must set maxDepth");
+});
+
 test("runDebate: MAX_TURNS when nobody agrees", async () => {
   const subs = scriptedSubagents(["still not right\nVerdict: CONTINUE"]);
   const { transcript } = await runDebate({
@@ -234,6 +248,8 @@ test("runParallel: joins per-agent sections with ---", async () => {
   assert.ok(out.includes("---"));
   // briefs passed through as the prompt text block
   assert.equal(subs.calls[0].prompt[0].text, "brief A");
+  assert.equal(subs.calls[0].maxDepth, SPAWN_MAX_DEPTH, "parallel spawn must set maxDepth");
+  assert.equal(subs.calls[1].maxDepth, SPAWN_MAX_DEPTH, "parallel spawn must set maxDepth");
 });
 
 test("runParallel: per-task failure is fail-open, others still reported", async () => {

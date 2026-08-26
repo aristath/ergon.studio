@@ -1,7 +1,8 @@
 // Ergon for DeepSeek Harness — the cordis plugin.
 //
-// Mounted once per session by the ergon agent preset (see presets/ergon/),
-// this plugin contributes:
+// Mounted once per profile by the ergon bundle (the package's `dsh.bundle`
+// patch — see cordis.patch.yml and contracts.md §7a; a preset row would
+// double-mount it), this plugin contributes:
 //
 //   1. `debate`        — two-agent alternating coding debate (subagent seam).
 //   2. `run_parallel`  — N specialist agents in parallel (subagent seam).
@@ -9,6 +10,11 @@
 //   4. Memory steward recall — user message queued → 4B rewrite → openmemory
 //      query → result stashed per agent → surfaced through a dynamic prompt
 //      context (append-only runtime-context snapshot, KV-cache friendly).
+//      Primary trigger: `agent/inbox/inserted`; fallback: `agent/pre-step`,
+//      which re-triggers for any claimed user message not yet recalled.
+//      Only top-level sessions (delegationDepth 0) talk to the steward —
+//      subagent turns are one-shot worker work and would otherwise pollute
+//      the long-term memory corpus with delegation noise.
 //   5. Memory steward save — turn/end (completed) → 4B judge → conditional
 //      openmemory store. Fire-and-forget, off the critical path.
 //   6. Scratchpad context — .ergon.studio/scratchpad.md (+ HANDOFF.md)
@@ -75,6 +81,36 @@ function messageText(message: UserMessageLike | undefined | null): string {
     .trim();
 }
 
+/**
+ * Delegation depth of a session (top-level = 0). dsh-subagent stamps spawned
+ * child sessions with depth ≥ 1 in the session header at spawn; absence means
+ * top-level. Only depth-0 sessions talk to the memory steward — subagent
+ * turns are one-shot worker work and must not rewrite/save memory.
+ */
+function delegationDepth(
+  sessionLike: { header?: { delegationDepth?: unknown } } | null | undefined,
+): number {
+  const depth = sessionLike?.header?.delegationDepth;
+  return typeof depth === "number" && depth > 0 ? depth : 0;
+}
+
+/** A cordis agent as far as the memory hooks care: it may carry its session. */
+type AgentLike = object & { session?: { header?: { delegationDepth?: unknown } } };
+
+/** Hard cap on `run_parallel` tasks per call (one specialist per task). */
+const MAX_PARALLEL_TASKS = 10;
+
+/**
+ * Clamp a user-supplied memory_search limit to [1, 20]. Non-numeric or
+ * non-finite input falls back to the configured default — the tool schema
+ * already rejects those, this is defense-in-depth (a NaN would otherwise
+ * serialize to `null` on the wire).
+ */
+export function clampRecallLimit(requested: unknown, fallback: number): number {
+  const value = typeof requested === "number" && Number.isFinite(requested) ? requested : fallback;
+  return Math.min(Math.max(Math.trunc(value), 1), 20);
+}
+
 /** Race a promise against a timeout. Always settles. */
 const TIMEOUT = Symbol("ergon-timeout");
 async function raceWithTimeout<T>(
@@ -120,39 +156,68 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
   });
 
   // Per-agent recall cache: agent → rendered recall block (absent = none).
-  const recallCache = new Map<object, string>();
+  // All three maps are keyed by profile-lifetime objects (agents, sessions);
+  // WeakMap lets the profile garbage-collect them — the plain Maps these
+  // used to be leaked one entry per agent/session for the whole profile.
+  const recallCache = new WeakMap<object, string>();
   // Last user text that triggered a recall per agent. Doubles as a dedup for
   // re-queued identical messages and as a staleness guard: a result whose
   // trigger text was superseded mid-flight is dropped, not installed.
-  const lastRecalledText = new Map<object, string>();
+  const lastRecalledText = new WeakMap<object, string>();
   // Save dedup: session object → last turn number processed.
-  const savedTurns = new Map<object, number>();
+  const savedTurns = new WeakMap<object, number>();
 
   // ── recall ──────────────────────────────────────────────────────────────
 
   async function recallFor(agent: object, userText: string): Promise<void> {
     if (!steward.available) return;
-    const q = await raceWithTimeout(steward.rewriteQuery(userText), config.recallTimeoutMs);
-    if (!q.ok || !q.value) return;
-    const r = await raceWithTimeout(memory.recall(q.value, config.recallLimit), config.recallTimeoutMs);
-    if (!r.ok) return;
-    const items = r.value;
-    if (items.length === 0) {
-      recallCache.delete(agent);
-      return;
-    }
-    const block =
-      "## Relevant prior notes (from memory steward)\n\n" +
-      items.map((m) => `- ${m.content}`).join("\n");
-    // Only install if this agent didn't recall something newer meanwhile.
-    if (lastRecalledText.get(agent) === userText) {
-      recallCache.set(agent, block);
+    // A recall that fails to settle (steward timeout, memory timeout, throw)
+    // forgets its trigger so an identical re-queued message can retry; a
+    // settled attempt (steward said NONE, empty result, or installed block)
+    // keeps the marker so the same text is not re-recalled forever.
+    const forgetIfOwned = () => {
+      // Only clear the marker if this attempt still owns it — a newer message
+      // may have superseded it mid-flight and claimed the slot.
+      if (lastRecalledText.get(agent) === userText) lastRecalledText.delete(agent);
+    };
+    try {
+      const q = await raceWithTimeout(steward.rewriteQuery(userText), config.recallTimeoutMs);
+      if (!q.ok) {
+        forgetIfOwned();
+        return;
+      }
+      // The steward answered with no searchable intent (or the call failed
+      // silently inside the client) — settled, nothing to do.
+      if (!q.value) return;
+      const r = await raceWithTimeout(memory.recall(q.value, config.recallLimit), config.recallTimeoutMs);
+      if (!r.ok) {
+        forgetIfOwned();
+        return;
+      }
+      const items = r.value;
+      if (items.length === 0) {
+        recallCache.delete(agent);
+        return;
+      }
+      const block =
+        "## Relevant prior notes (from memory steward)\n\n" +
+        items.map((m) => `- ${m.content}`).join("\n");
+      // Only install if this agent didn't recall something newer meanwhile.
+      if (lastRecalledText.get(agent) === userText) {
+        recallCache.set(agent, block);
+      }
+    } catch {
+      forgetIfOwned();
     }
   }
 
-  ctx.on("agent/inbox/inserted", (payload: { agent?: object; message?: UserMessageLike }) => {
+  ctx.on("agent/inbox/inserted", (payload: { agent?: AgentLike; message?: UserMessageLike }) => {
     const agent = payload.agent;
     if (!agent) return;
+    // Subagent sessions (delegationDepth ≥ 1) never recall: their turns are
+    // one-shot worker work and their "user" messages are the parent's briefs,
+    // not the end user talking.
+    if (delegationDepth(agent?.session) > 0) return;
     const text = messageText(payload.message);
     if (!text) return;
     if (payload.message?.source?.kind && payload.message.source.kind !== "user") return;
@@ -161,6 +226,32 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
     void recallFor(agent, text).catch(() => {
       /* recall is auxiliary — never surface failures */
     });
+  });
+
+  // Recall fallback (contracts.md §4): if a user message reaches the step
+  // without a prior recall (the inbox event is the primary trigger),
+  // re-trigger it here. Waterfall: call next() first, never modify the
+  // claimed batch. Stricter than the inbox trigger — only explicit
+  // user-kind messages qualify, so synthetic step messages can't pollute
+  // the query.
+  ctx.on("agent/pre-step", async (payload: { agent?: AgentLike }, next: () => Promise<any>) => {
+    const decision = await next();
+    if (decision?.kind !== "reject" && Array.isArray(decision.messages)) {
+      const agent = payload?.agent;
+      if (agent && delegationDepth(agent?.session) === 0) {
+        for (const message of decision.messages as Array<UserMessageLike>) {
+          if (message?.source?.kind !== "user") continue;
+          const text = messageText(message);
+          if (!text) continue;
+          if (lastRecalledText.get(agent) === text) continue;
+          lastRecalledText.set(agent, text);
+          void recallFor(agent, text).catch(() => {
+            /* recall is auxiliary — never surface failures */
+          });
+        }
+      }
+    }
+    return decision;
   });
 
   // Dynamic prompt context: recall block. Re-read from the cache on every
@@ -247,6 +338,9 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
   ctx.on("session/event", (session: any, event: any) => {
     if (event?.type !== "turn/end") return;
     if (event.data?.reason?.kind !== "completed") return;
+    // Subagent sessions (delegationDepth ≥ 1) never save: their turn text is
+    // delegation noise, and 4B judge calls on it are pure cost amplification.
+    if (delegationDepth(session) > 0) return;
     const turn = event.data?.turn;
     if (typeof turn !== "number") return;
     const agent = ctx.agents?.get?.(session.id);
@@ -335,7 +429,7 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
         defineTool({
           name: "run_parallel",
           description:
-            "Run multiple ergon agents in parallel and return their combined output. " +
+            "Run multiple ergon agents in parallel (at most 10 tasks per call) and return their combined output. " +
             "Each task specifies an agent name and a brief. All tasks execute concurrently. " +
             "This tool delegates to LLM agents — it is NOT a way to run shell commands or built-in tools. " +
             "Avoid using write-capable agents (e.g. coder) in parallel — they may conflict on shared files.",
@@ -343,7 +437,7 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
             tasks: {
               type: "array",
               required: true,
-              description: "List of agent+brief pairs to run in parallel (at least one)",
+              description: "List of agent+brief pairs to run in parallel (1-10 tasks)",
               items: {
                 type: "object",
                 additionalProperties: false,
@@ -383,6 +477,11 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
               .filter((t): t is { agent: RosterEntry; brief: string } => t !== null);
             if (tasks.length === 0) {
               return { output: "No valid tasks. Each task needs an agent from the ergon roster and a brief." };
+            }
+            if (tasks.length > MAX_PARALLEL_TASKS) {
+              return {
+                output: `Too many tasks: got ${tasks.length}, but at most ${MAX_PARALLEL_TASKS} may run per call. Split the work across multiple run_parallel calls.`,
+              };
             }
             const output = await runParallel({
               tasks,
@@ -452,7 +551,7 @@ export function apply(ctx: any, config: Schemastery.TypeT<typeof Config>): void 
             },
           },
           async execute(args: any) {
-            const limit = Math.min(Math.max(args.limit ?? config.recallLimit, 1), 20);
+            const limit = clampRecallLimit(args.limit, config.recallLimit);
             const results = await memory.recall(args.query, limit);
             return { count: results.length, results };
           },

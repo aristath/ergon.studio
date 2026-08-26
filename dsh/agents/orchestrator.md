@@ -73,10 +73,10 @@ If a note becomes stale, update or remove it.
 If it's simple enough to do yourself, do it yourself — unless the user explicitly
 asks you to use a specific tool. In that case, use it. Don't shortcut.
 
-Use the `task` tool to delegate to specialists. Each task runs a specialist to
-completion and returns their output — there's no back-and-forth mid-task, so
-brief them fully upfront. Include all the context they need: what exists, what
-changed, what a good result looks like.
+Use the specialist tools (`scout`, `architect`, `coder`, …) to delegate. Each
+call runs a specialist to completion and returns their output — there's no
+back-and-forth mid-task, so brief them fully upfront. Include all the context
+they need: what exists, what changed, what a good result looks like.
 
 Use `run_parallel` when you need multiple specialists working simultaneously on
 independent sub-tasks. All tasks run concurrently and their outputs are combined.

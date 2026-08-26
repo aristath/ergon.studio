@@ -2,8 +2,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync, cpSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { loadRoster, getRosterEntry, denyListFor, _resetRosterCacheForTests } from "../dist/roster.js";
+import { loadRoster, getRosterEntry, denyListFor, _resetRosterCacheForTests, EXPECTED_ROSTER_IDS } from "../dist/roster.js";
 
 const SPECIALISTS = [
   "scout", "architect", "coder", "researcher", "reviewer",
@@ -34,7 +38,8 @@ test("denyListFor: every specialist denies delegation + goal + user-facing tools
   for (const s of SPECIALISTS) {
     const deny = new Set(denyListFor(s));
     for (const t of ["subagent", "subagent_fork", "send_message", "list_agents", "interrupt_agent",
-      "workflow", "ralph", "create_goal", "get_goal", "update_goal", "ask_user_question"]) {
+      "workflow", "ralph", "debate", "run_parallel",
+      "create_goal", "get_goal", "update_goal", "ask_user_question"]) {
       assert.ok(deny.has(t), `${s} should deny ${t}`);
     }
   }
@@ -88,4 +93,38 @@ test("roster cache reset hook works", () => {
   const b = loadRoster();
   assert.notEqual(a, b, "cache should have been cleared");
   assert.deepEqual(a.map((e) => e.id), b.map((e) => e.id));
+});
+
+test("EXPECTED_ROSTER_IDS: the 10 curated ids", () => {
+  assert.equal(EXPECTED_ROSTER_IDS.length, 10);
+  assert.ok(EXPECTED_ROSTER_IDS.includes("orchestrator"));
+  for (const s of SPECIALISTS) assert.ok(EXPECTED_ROSTER_IDS.includes(s), `missing ${s}`);
+});
+
+test("loadRoster: an extra agents/*.md becomes an entry and warns", () => {
+  const realAgents = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
+  const tmp = mkdtempSync(join(tmpdir(), "ergon-agents-"));
+  const savedDir = process.env.ERGON_AGENTS_DIR;
+  let warned = "";
+  const realWarn = console.warn;
+  try {
+    cpSync(realAgents, tmp, { recursive: true });
+    writeFileSync(
+      join(tmp, "notes.md"),
+      "---\ndescription: a stray agent\n---\n\n# Notes\nBody of the stray agent, long enough to pass the persona length check used by other tests.\n",
+    );
+    process.env.ERGON_AGENTS_DIR = tmp;
+    console.warn = (m) => { warned += String(m); };
+    _resetRosterCacheForTests();
+    const roster = loadRoster();
+    assert.equal(roster.length, 11, "stray .md becomes a roster entry");
+    assert.ok(roster.find((e) => e.id === "notes"));
+    assert.ok(warned.includes("notes"), `expected a warning naming the stray, got: ${warned}`);
+  } finally {
+    console.warn = realWarn;
+    _resetRosterCacheForTests();
+    if (savedDir === undefined) delete process.env.ERGON_AGENTS_DIR;
+    else process.env.ERGON_AGENTS_DIR = savedDir;
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

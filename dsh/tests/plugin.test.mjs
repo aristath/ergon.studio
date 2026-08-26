@@ -9,6 +9,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as plugin from "../dist/index.js";
+import { clampRecallLimit } from "../dist/index.js";
 import { _resetStewardDefinitionCacheForTests } from "../dist/steward.js";
 
 const DEFINITION = {
@@ -148,6 +149,7 @@ test("plugin exports: name, inject, Config, apply", () => {
 test("apply: registers listeners, effects, and the three tools", () => {
   const ctx = mount({});
   assert.ok(ctx.listeners.has("agent/inbox/inserted"));
+  assert.ok(ctx.listeners.has("agent/pre-step"), "recall fallback (contracts.md §4) must subscribe to pre-step");
   assert.ok(ctx.listeners.has("session/event"));
   const names = [...toolsByName(ctx).keys()].sort();
   assert.deepEqual(names, ["debate", "memory_search", "run_parallel"]);
@@ -174,6 +176,17 @@ test("self-install: idempotent, and an existing user preset is never overwritten
   writeFileSync(preset, "# user-edited preset\n");
   mount({}); // second mount must keep the user copy
   assert.equal(readFileSync(preset, "utf8"), "# user-edited preset\n");
+});
+
+test("self-install: a missing preset.yml is repaired without touching agent.cordis.yml", () => {
+  mount({});
+  const dir = join(fakeHome, ".agent-presets", "ergon");
+  const composition = join(dir, "agent.cordis.yml");
+  writeFileSync(composition, "# user-edited preset\n");
+  rmSync(join(dir, "preset.yml")); // simulate a half-written install
+  mount({}); // second mount must repair only the metadata file
+  assert.ok(existsSync(join(dir, "preset.yml")), "preset.yml should be repaired");
+  assert.equal(readFileSync(composition, "utf8"), "# user-edited preset\n", "user composition must be kept");
 });
 
 test("self-install: package without preset degrades to a warning (fail-open)", () => {
@@ -308,6 +321,91 @@ test("recall: a newer message supersedes a slow older one (staleness guard)", as
   assert.ok(!block.includes("match-for-slow first question"), `stale block leaked: ${block}`);
 });
 
+test("recall: subagent sessions (delegationDepth > 0) never recall", async () => {
+  const ctx = mount({});
+  const childAgent = { session: { header: { delegationDepth: 1 } } };
+  ctx.emit("agent/inbox/inserted", {
+    agent: childAgent,
+    message: { content: [{ type: "text", text: "child brief" }], source: { kind: "user" } },
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fetchCalls.filter((c) => c.url.includes("steward.test")).length, 0, "no steward call for a subagent turn");
+  assert.equal(ctx.contexts.find((c) => c.name === "ergon:memory").text({ agent: childAgent }), "");
+});
+
+test("recall: a timed-out recall is retried for an identical re-queued message", async () => {
+  // The first rewrite call never settles → the timeout path must forget the
+  // trigger so the same text can re-recall (a settled attempt would not).
+  let rewriteCount = 0;
+  const slowFetch = async (url, init) => {
+    const u = String(url);
+    const body = init?.body ? JSON.parse(init.body) : undefined;
+    fetchCalls.push({ url: u, body });
+    if (u.endsWith("/v1/chat/completions")) {
+      rewriteCount++;
+      if (rewriteCount === 1) return new Promise(() => {}); // hang → timeout
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "the retry worked" } }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (u.endsWith("/memory/query")) {
+      return new Response(JSON.stringify({
+        matches: [{ id: "m", content: "found after retry", score: 0.9 }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("nf", { status: 404 });
+  };
+  const ctx = makeCtx();
+  ctx.subagents = {};
+  globalThis.fetch = slowFetch;
+  plugin.apply(ctx, { ...CONFIG, recallTimeoutMs: 60 });
+  const memoryCtx = ctx.contexts.find((c) => c.name === "ergon:memory");
+  const msg = { content: [{ type: "text", text: "flaky question" }], source: { kind: "user" } };
+  ctx.emit("agent/inbox/inserted", { agent: AGENT, message: msg });
+  await new Promise((r) => setTimeout(r, 150)); // first attempt times out, marker forgotten
+  assert.equal(rewriteCount, 1);
+  assert.equal(memoryCtx.text({ agent: AGENT }), "");
+  ctx.emit("agent/inbox/inserted", { agent: AGENT, message: msg });
+  const block = await waitFor(() => memoryCtx.text({ agent: AGENT }) || null);
+  assert.ok(block.includes("found after retry"));
+  assert.equal(rewriteCount, 2);
+});
+
+test("recall fallback: pre-step re-triggers recall for an unrecalled user message", async () => {
+  const ctx = mount({});
+  const memoryCtx = ctx.contexts.find((c) => c.name === "ergon:memory");
+  const listener = ctx.listeners.get("agent/pre-step")[0];
+  const decision = {
+    kind: "enter",
+    messages: [{ content: [{ type: "text", text: "fallback recall question" }], source: { kind: "user" } }],
+  };
+  const returned = await listener({ agent: AGENT }, async () => decision);
+  assert.equal(returned, decision, "pre-step decision must pass through unmodified");
+  const block = await waitFor(() => memoryCtx.text({ agent: AGENT }) || null);
+  assert.ok(block.includes("## Relevant prior notes"));
+  // The trigger was recorded, so an identical later pre-step must dedup.
+  const before = fetchCalls.length;
+  await listener({ agent: AGENT }, async () => decision);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fetchCalls.length, before, "dedup must apply to the fallback path too");
+});
+
+test("recall fallback: non-user messages and subagent sessions are ignored", async () => {
+  const ctx = mount({});
+  const childAgent = { session: { header: { delegationDepth: 1 } } };
+  const listener = ctx.listeners.get("agent/pre-step")[0];
+  await listener({ agent: AGENT }, async () => ({
+    kind: "enter",
+    messages: [{ content: [{ type: "text", text: "synthetic step message" }], source: { kind: "tool-result" } }],
+  }));
+  await listener({ agent: childAgent }, async () => ({
+    kind: "enter",
+    messages: [{ content: [{ type: "text", text: "child step message" }], source: { kind: "user" } }],
+  }));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fetchCalls.filter((c) => c.url.includes("steward.test")).length, 0);
+});
+
 // === save flow ===
 
 function makeSession(id, turns) {
@@ -374,6 +472,17 @@ test("save: session with no matching agent is ignored", async () => {
   ctx.emit("session/event", session, { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(fetchCalls.filter((c) => c.url.includes("steward.test")).length, 0);
+});
+
+test("save: subagent sessions (delegationDepth > 0) never judge or save", async () => {
+  const ctx = mount({});
+  const session = makeSession("s2", [{ turn: 1, user: "remember: the staging key is 1234", assistant: "Noted." }]);
+  session.header = { delegationDepth: 2 };
+  ctx.agents.get = (id) => (id === "s2" ? { session } : undefined);
+  ctx.emit("session/event", session, { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(fetchCalls.filter((c) => c.url.includes("steward.test")).length, 0, "no judge call for a subagent turn");
+  assert.equal(fetchCalls.filter((c) => c.url.includes("mem.test")).length, 0, "no save for a subagent turn");
 });
 
 // === scratchpad context ===
@@ -472,6 +581,17 @@ test("run_parallel tool: invalid tasks → friendly message", async () => {
   assert.ok(out.output.includes("No valid tasks"));
 });
 
+test("run_parallel tool: more than 10 tasks → rejected without spawning", async () => {
+  const subs = fakeSubagents(["x"]);
+  const ctx = mount(subs);
+  const rp = toolsByName(ctx).get("run_parallel");
+  assert.match(rp.description, /at most 10/, "the cap must be documented in the tool description");
+  const tasks = Array.from({ length: 11 }, (_, i) => ({ agent: "scout", brief: `b${i}` }));
+  const out = await rp.execute({ tasks }, { agent: {}, signal: new AbortController().signal });
+  assert.match(out.output, /at most 10/);
+  assert.equal(subs.calls.length, 0, "no spawns when over the cap");
+});
+
 test("memory_search tool: queries openmemory and counts results", async () => {
   const ctx = mount({});
   const ms = toolsByName(ctx).get("memory_search");
@@ -481,6 +601,20 @@ test("memory_search tool: queries openmemory and counts results", async () => {
   const call = fetchCalls.find((c) => c.url === "http://mem.test/memory/query");
   assert.equal(call.body.query, "steward port");
   assert.equal(call.body.k, 3);
+});
+
+test("memory_search tool: non-numeric limit falls back to the configured default", async () => {
+  // The tool schema rejects non-integers before execute, so the guard is
+  // exercised directly (defense-in-depth: a NaN would serialize to null
+  // on the wire).
+  assert.equal(clampRecallLimit("abc", CONFIG.recallLimit), CONFIG.recallLimit);
+  assert.equal(clampRecallLimit(Number.NaN, CONFIG.recallLimit), CONFIG.recallLimit);
+  assert.equal(clampRecallLimit(null, CONFIG.recallLimit), CONFIG.recallLimit);
+  assert.equal(clampRecallLimit(undefined, CONFIG.recallLimit), CONFIG.recallLimit);
+  assert.equal(clampRecallLimit(3, CONFIG.recallLimit), 3);
+  assert.equal(clampRecallLimit(0.4, CONFIG.recallLimit), 1);
+  assert.equal(clampRecallLimit(2.7, CONFIG.recallLimit), 2);
+  assert.equal(clampRecallLimit(99, CONFIG.recallLimit), 20);
 });
 
 test("tool renders: return content blocks", () => {

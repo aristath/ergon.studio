@@ -478,7 +478,7 @@ Teaches agents how to use the scratchpad. What goes in each section, what never 
 | `chat.message` hook (recall) | **`before_agent_start` event** | Pi's extension event fires before the agent processes the prompt — inject recall as a message |
 | `experimental.chat.system.transform` | **`before_agent_start` event** | Pi provides `systemPromptOptions` and `systemPrompt` modification in this event |
 | `experimental.session.compacting` | **`session_before_compact` event** | Pi has native compaction events |
-| `event(session.idle)` (save) | **`turn_end` event** | Pi fires after each turn completes |
+| `event(session.idle)` (save) | **`turn_end` event** | Filter for completed responses without tool execution |
 | `event(session.created)` | **`session_start` event** | Direct equivalent |
 | `config` hook (model validation) | **Not needed** | Pi handles model resolution natively |
 | Scratchpad injection | **`before_agent_start` + `session_before_compact`** | Combine into one extension |
@@ -497,7 +497,7 @@ Teaches agents how to use the scratchpad. What goes in each section, what never 
 **Pi events used:**
 
 - `before_agent_start` — recall path (rewrite query → search openmemory → inject into system prompt)
-- `turn_end` — save path (judge exchange → save to openmemory)
+- `turn_end` — save path (filter completed exchange → save to openmemory)
 - `session_before_compact` — scratchpad re-injection
 - `session_start` — notify session started
 
@@ -512,7 +512,7 @@ Teaches agents how to use the scratchpad. What goes in each section, what never 
 **Key differences from OpenCode:**
 
 - Pi's `before_agent_start` can inject a message AND modify the system prompt — no need for the `pendingRecall` map workaround
-- Pi's `turn_end` gives us the completed turn data directly
+- Pi's `turn_end` lets us save each completed response while skipping tool-use turns
 - Pi's `session_before_compact` lets us customize what survives compaction
 
 ---

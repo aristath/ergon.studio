@@ -275,6 +275,27 @@ function extractText(msg: { content: MessageContent }): string {
 	return parts.trim();
 }
 
+export function selectCompletedTurn(
+	event: TurnEndEvent,
+): { assistantText: string; assistantId: string } | null {
+	const message = event.message;
+	if (
+		message.role !== "assistant" ||
+		message.stopReason !== "stop" ||
+		event.toolResults.length > 0
+	) {
+		return null;
+	}
+
+	const assistantText = extractText(message);
+	if (!assistantText) return null;
+
+	return {
+		assistantText,
+		assistantId: message.responseId ?? "",
+	};
+}
+
 // ── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
@@ -293,20 +314,14 @@ export default function (pi: ExtensionAPI): void {
 	// ── turn_end: save path (fire-and-forget) ─────────────────────────────────
 
 	pi.on("turn_end", async (event: TurnEndEvent, ctx: ExtensionContext) => {
-		initializeComponents();
+		const completedTurn = selectCompletedTurn(event);
+		if (!completedTurn) return;
 
+		initializeComponents();
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		const sessionID = sessionFile ?? "default";
 
-		// event.message is the final message of the turn — typically an assistant message
-		const msg = event.message;
-		if (msg.role !== "assistant") return;
-
-		const assistantText = extractText(msg);
-		const assistantId = msg.responseId ?? "";
-		if (!assistantText) return;
-
-		// Walk session entries backwards to find the preceding user message
+		// Walk session entries backwards to find the preceding user message.
 		const entries = ctx.sessionManager.getEntries();
 		let userText = "";
 
@@ -320,7 +335,14 @@ export default function (pi: ExtensionAPI): void {
 
 		if (!userText) return;
 
-		trackSave(save(sessionID, userText, assistantText, assistantId));
+		trackSave(
+			save(
+				sessionID,
+				userText,
+				completedTurn.assistantText,
+				completedTurn.assistantId,
+			),
+		);
 	});
 
 	// ── session_start: notify ─────────────────────────────────────────────────

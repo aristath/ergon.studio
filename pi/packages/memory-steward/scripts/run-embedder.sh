@@ -62,6 +62,7 @@ if [ -z "$EMBEDDER_PORT" ]; then
 fi
 EMBEDDER_PORT="${EMBEDDER_PORT:-18092}"
 EMBEDDER_MODEL_NAME="${ERGON_EMBEDDER_MODEL:-$(parse_value 'embedder_model' || echo 'granite-embedding-311m')}"
+DEVICE="${ERGON_EMBEDDER_DEVICE:-$(parse_value 'embedder_device' || true)}"
 N_GPU_LAYERS="${ERGON_EMBEDDER_N_GPU_LAYERS:-$(parse_value 'n_gpu_layers' || echo '99')}"
 CTX_SIZE="${ERGON_EMBEDDER_CTX_SIZE:-8192}"
 DIMENSIONS="${ERGON_EMBEDDER_DIMENSIONS:-$(parse_value 'embedder_dimensions' || echo '768')}"
@@ -83,6 +84,11 @@ fi
 echo "[embedder] Starting Granite 311M embedding server on port $EMBEDDER_PORT"
 echo "[embedder] Model: $EMBEDDER_MODEL"
 
+DEVICE_ARGS=()
+if [ -n "${DEVICE:-}" ]; then
+	DEVICE_ARGS=(--device "$DEVICE")
+fi
+
 exec "$SCRIPT_DIR/llama-server-supervisor.sh" \
 	--name embedder \
 	--health embedder \
@@ -96,5 +102,6 @@ exec "$SCRIPT_DIR/llama-server-supervisor.sh" \
 	--model "$EMBEDDER_MODEL" \
 	--alias "$EMBEDDER_MODEL_NAME" \
 	--ctx-size "$CTX_SIZE" \
+	"${DEVICE_ARGS[@]}" \
 	--n-gpu-layers "$N_GPU_LAYERS" \
 	--embedding

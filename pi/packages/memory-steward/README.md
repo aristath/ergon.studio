@@ -64,10 +64,11 @@ Recall path:
 
 Save path:
 
-1. Pi emits `turn_end`.
-2. The steward judges whether the latest user/assistant exchange is durable.
-3. If worth saving, the embedder creates a vector for the memory.
-4. The memory is stored in SQLite with content-hash deduplication.
+1. Pi emits `turn_end` after each model response.
+2. The extension ignores tool-use and incomplete responses.
+3. The steward judges whether each completed user/assistant exchange is durable.
+4. If worth saving, the embedder creates a vector for the memory.
+5. The memory is stored in SQLite with content-hash deduplication.
 
 The recall path is synchronous and bounded to 5 seconds per external stage. The
 steward rewrite and embedding request each receive that full budget, so the
@@ -334,12 +335,12 @@ or probe network services from the factory. Runtime initialization happens on
 
 Hooks:
 
-| Hook                 | Behavior                                               |
-| -------------------- | ------------------------------------------------------ |
-| `session_start`      | initialize clients/store, check health, set status     |
-| `before_agent_start` | recall memories and inject a system prompt block       |
-| `turn_end`           | judge/save the latest assistant turn in the background |
-| `session_shutdown`   | drain pending saves, close DB, clear status            |
+| Hook                 | Behavior                                             |
+| -------------------- | ---------------------------------------------------- |
+| `session_start`      | initialize clients/store, check health, set status   |
+| `before_agent_start` | recall memories and inject a system prompt block     |
+| `turn_end`           | judge/save each completed response in the background |
+| `session_shutdown`   | drain pending saves, close DB, clear status          |
 
 Status values:
 

@@ -1,0 +1,59 @@
+{
+  "name": "@ergon.studio/dsh",
+  "version": "0.1.1",
+  "description": "Ergon multi-agent orchestration for DeepSeek Harness: 10-agent team preset, memory steward, debate, scratchpad",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "ergon-dsh": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "agents/",
+    "skills/",
+    "prompts/",
+    "presets/",
+    "scripts/",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && node scripts/build-preset.mjs",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test \"tests/*.test.mjs\""
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "ergon",
+    "agents",
+    "orchestration",
+    "memory"
+  ],
+  "author": "Aristeidis Stathopoulos <aristath@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "typescript": "^5.5.0"
+  }
+}

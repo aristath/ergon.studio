@@ -1,0 +1,21 @@
+# The ergon bundle patch, applied after the profile's in-box bundle layers
+# (dsh-base, dsh-web-app or dsh-headless) and before the profile's own
+# cordis.patch.yml.
+#
+# 1. Mounts the ergon plugin (memory-steward recall + save, scratchpad
+#    context, and the debate / run_parallel / memory_search tools over the
+#    10-agent roster). The plugin self-installs its agent preset and skills
+#    into the DSH home at mount, so no separate init step is required.
+#
+# 2. Makes the ergon agent preset the default for new sessions. In profiles
+#    without an agent-presets row (e.g. headless mode) this second entry is
+#    skipped with a loader warning and the profile is unaffected. The default
+#    can still be overridden per session via the preset picker, or globally
+#    in the profile's own cordis.patch.yml (applied after this layer).
+- insert:
+    - id: ergon-plugin
+      name: '@ergon.studio/dsh'
+
+- id: agent-presets
+  config:
+    default: ergon

@@ -1,6 +1,6 @@
 {
   "name": "@ergon.studio/dsh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Ergon multi-agent orchestration for DeepSeek Harness: 10-agent team preset, memory steward, debate, scratchpad",
   "type": "module",
   "main": "dist/index.js",
